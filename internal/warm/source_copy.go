@@ -3,12 +3,12 @@ package warm
 import (
 	"context"
 
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/z"
 )
 
@@ -16,16 +16,16 @@ import (
 // cache, skipping blobs the cache already has. Progress reflects bytes actually
 // moved into the cache.
 type copySource struct {
-	pushAuth authn.Authenticator
-	insecure bool
+	from config.StoreConfig
+	to   config.StoreConfig
 }
 
 func (s *copySource) pullOpts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, nil, false) // upstream: docker keychain, real TLS
+	return baseOpts(ctx, registryAuth(s.from), s.from.Insecure)
 }
 
 func (s *copySource) pushOpts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, s.pushAuth, s.insecure)
+	return baseOpts(ctx, registryAuth(s.to), s.to.Insecure)
 }
 
 func (s *copySource) Resolve(ctx context.Context, src, _ name.Reference, platforms []string) (*Plan, error) {

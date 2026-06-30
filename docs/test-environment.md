@@ -9,16 +9,16 @@ gantry를 실제 docker / containerd 데몬에 대해 검증하기 위한 devcon
 devcontainer는 두 서비스로 구성된다 ([.devcontainer/docker-compose.yaml](../.devcontainer/docker-compose.yaml)).
 
 ```
-┌──────────────────────────────────┐        ┌────────────────────────────────────┐
+┌───────────────────────────────────┐        ┌─────────────────────────────────────┐
 │ dev (uid 1000)                    │        │ docker  (image: docker:dind)        │
 │  - gantry / go test 실행          │        │  - dockerd  (tcp://0.0.0.0:2375)    │
-│  - DOCKER_HOST=tcp://docker:2375 ─┼───────▶│  - 번들 containerd                   │
+│  - DOCKER_HOST=tcp://docker:2375 ─┼──────▶│  - 번들 containerd                  │
 │                                   │        │      /run/docker/containerd/...sock │
-│  /run/docker/containerd/sock ◀━━━━┼━shared━┤      (같은 named volume)             │
-│      (named volume: containerd.run)│ volume │                                     │
-│                                   │        │  [수동 e2e 시] registry:2 → :5000   │
-│  127.0.0.1:5000 ──(local fwd)─────┼───────▶│  127.0.0.1:5000 (dind localhost)    │
-└──────────────────────────────────┘        └────────────────────────────────────┘
+│  /run/docker/containerd/sock ◀━━━┼━shared━┤      (같은 named volume)            │
+│  (named volume: containerd.run)   │ volume │                                     │
+│                                   │        │  [수동 e2e 시] registry:2 → :5000  │
+│  127.0.0.1:5000 ──(local fwd)─────┼──────▶│  127.0.0.1:5000 (dind localhost)    │
+└───────────────────────────────────┘        └─────────────────────────────────────┘
 ```
 
 - **`dev`** — 개발/테스트 컨테이너. gantry와 `go test`가 여기서 돈다. uid 1000.
@@ -27,10 +27,10 @@ devcontainer는 두 서비스로 구성된다 ([.devcontainer/docker-compose.yam
 
 ### 데몬 엔드포인트 두 개
 
-| 종류 | dev에서의 주소 | 비고 |
-|---|---|---|
-| docker | `tcp://docker:2375` (`DOCKER_HOST`) | 호스트명 `docker`가 dind 컨테이너로 resolve |
-| containerd | `/run/docker/containerd/containerd.sock` (`CONTAINERD_ADDRESS`) | 아래 §소켓 공유로 노출 |
+| 종류       | dev에서의 주소                                                  | 비고                                        |
+| ---------- | --------------------------------------------------------------- | ------------------------------------------- |
+| docker     | `tcp://docker:2375` (`DOCKER_HOST`)                             | 호스트명 `docker`가 dind 컨테이너로 resolve |
+| containerd | `/run/docker/containerd/containerd.sock` (`CONTAINERD_ADDRESS`) | 아래 §소켓 공유로 노출                      |
 
 이 둘은 gantry가 데몬에게 "pull해라"라고 **명령**하는 제어 채널일 뿐이다 — 어떤 주소든
 무방하며 아래 §insecure 제약과는 무관하다.
@@ -101,36 +101,31 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/v2/   # 200
 ```yaml
 serve:
   addr: "127.0.0.1:18080"
-  registry:
-    mode: "copy"
-    host: "127.0.0.1:5000"
-    insecure: true
-    rewrite:
-      - { "**": "{{.CacheHost}}/{{.Repo}}" }
-  warm:
-    platforms: ["linux/amd64"]
-    trigger_downstream: true
-  targets:
+  allow_unknown_stores: true   # let `from: docker.io` resolve to a bare host
+  stores:
+    - { name: "cache", kind: "registry", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
     - { name: "dind-docker", kind: "docker",     address: "tcp://docker:2375" }
     - { name: "dind-ctr",    kind: "containerd",  address: "/run/docker/containerd/containerd.sock", namespace: "moby" }
+  warm:
+    platforms: ["linux/amd64"]
 ```
 
-### 3. warm + 확인
+### 3. job + 확인
 
 ```sh
 go run . --config gantry-e2e.yaml serve &
 
-curl -s http://127.0.0.1:18080/v1/target         # 두 target ready:true
+curl -s http://127.0.0.1:18080/v1/store         # 3 stores, capabilities, ready
 
 # 사전에 어디에도 없는 이미지로(content-store 캐시 혼동 방지)
 ID=$(curl -s -X POST http://127.0.0.1:18080/v1/job \
-       -d '{"ref":"busybox:latest","platforms":["linux/amd64"]}' \
+       -d '{"ref":"busybox:latest","from":"docker.io","to":"cache","distribute":["dind-docker","dind-ctr"]}' \
      | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 
-curl -s http://127.0.0.1:18080/v1/job/$ID       # state, bytes_done, per-target
+curl -s http://127.0.0.1:18080/v1/job/$ID       # transfers[]: cache + each engine
 ```
 
-기대 결과: `state=done`, `bytes_done==bytes_total`, `dind-docker`·`dind-ctr` 모두
+기대 결과: `state=done`, cache transfer는 `bytes_done==bytes_total`, `dind-docker`·`dind-ctr` 모두
 `pulled`. registry(`curl http://127.0.0.1:5000/v2/library/busybox/tags/list`)와
 `docker images`에 적재 확인.
 

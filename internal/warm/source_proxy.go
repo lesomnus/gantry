@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/z"
 )
 
@@ -14,12 +14,11 @@ import (
 // and persists it from upstream. Every blob is read to EOF (a HEAD or partial
 // read would leave the cache cold).
 type proxySource struct {
-	auth     authn.Authenticator
-	insecure bool
+	to config.StoreConfig
 }
 
 func (s *proxySource) opts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, s.auth, s.insecure)
+	return baseOpts(ctx, registryAuth(s.to), s.to.Insecure)
 }
 
 func (s *proxySource) Resolve(ctx context.Context, _, dst name.Reference, platforms []string) (*Plan, error) {

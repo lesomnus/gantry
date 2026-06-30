@@ -2,44 +2,72 @@ package down
 
 import (
 	"context"
-	"errors"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
-	"github.com/lesomnus/gantry/internal/warm"
 )
 
-type fakeTarget struct {
-	name   string
-	pull   func() error
-	pulled string // last ref it was told to pull
+type nopSink struct{}
+
+func (nopSink) Layer(LayerUpdate) {}
+
+// recSink records the latest update per layer digest (concurrency-safe).
+type recSink struct {
+	mu     sync.Mutex
+	layers map[string]LayerUpdate
 }
 
-func (f *fakeTarget) Name() string                { return f.name }
-func (f *fakeTarget) Kind() string                { return "fake" }
-func (f *fakeTarget) Ready(context.Context) error { return nil }
-func (f *fakeTarget) Pull(_ context.Context, ref string) error {
-	f.pulled = ref
-	if f.pull == nil {
-		return nil
+// Layer mirrors the warm engineSink: it preserves a layer's total and, on
+// done/exists, sets done to that total.
+func (s *recSink) Layer(u LayerUpdate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.layers == nil {
+		s.layers = map[string]LayerUpdate{}
 	}
-	return f.pull()
-}
-func (f *fakeTarget) Close() error { return nil }
-
-type verifyingTarget struct{ fakeTarget }
-
-func (verifyingTarget) Verify(context.Context, string) error { return nil }
-
-func registryOf(targets ...Target) *Registry {
-	r := &Registry{byName: map[string]Target{}}
-	for _, t := range targets {
-		r.entries = append(r.entries, entry{cfg: config.TargetConfig{Name: t.Name(), Kind: t.Kind()}, target: t})
-		r.byName[t.Name()] = t
+	cur := s.layers[u.Digest]
+	cur.Digest = u.Digest
+	if u.Total > 0 {
+		cur.Total = u.Total
 	}
-	return r
+	switch u.State {
+	case "exists":
+		cur.Done = cur.Total
+	case "done":
+		if cur.Total > 0 {
+			cur.Done = cur.Total
+		}
+	default:
+		if u.Done > cur.Done {
+			cur.Done = u.Done
+		}
+	}
+	cur.State = u.State
+	s.layers[u.Digest] = cur
 }
+
+func (s *recSink) bytesDone() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int64
+	for _, u := range s.layers {
+		n += u.Done
+	}
+	return n
+}
+
+type fakeEngine struct{ name string }
+
+func (f *fakeEngine) Name() string                             { return f.name }
+func (f *fakeEngine) Kind() string                             { return "fake" }
+func (f *fakeEngine) Ready(context.Context) error              { return nil }
+func (f *fakeEngine) Pull(context.Context, string, Sink) error { return nil }
+func (f *fakeEngine) Close() error                             { return nil }
+
+type verifyingEngine struct{ fakeEngine }
+
+func (verifyingEngine) Verify(context.Context, string) error { return nil }
 
 func TestDockerHost(t *testing.T) {
 	cases := map[string]string{
@@ -58,125 +86,28 @@ func TestDockerHost(t *testing.T) {
 }
 
 func TestCapabilities(t *testing.T) {
-	if c := Capabilities(&fakeTarget{}); c.Pull != true || c.Verify || c.GC {
-		t.Errorf("plain target caps = %+v", c)
+	if c := Capabilities(&fakeEngine{}); !c.Pull || c.Verify || c.GC {
+		t.Errorf("plain engine caps = %+v", c)
 	}
-	if c := Capabilities(&verifyingTarget{}); !c.Verify || c.GC {
-		t.Errorf("verifying target caps = %+v", c)
-	}
-}
-
-func TestNewTargetUnknownKind(t *testing.T) {
-	if _, err := NewTarget(config.TargetConfig{Name: "x", Kind: "bogus"}); err == nil {
-		t.Error("expected error for unknown kind")
+	if c := Capabilities(&verifyingEngine{}); !c.Verify || c.GC {
+		t.Errorf("verifying engine caps = %+v", c)
 	}
 }
 
-func TestNewRegistryValidation(t *testing.T) {
-	t.Run("duplicate name", func(t *testing.T) {
-		_, err := NewRegistry([]config.TargetConfig{
-			{Name: "a", Kind: "docker", Address: "tcp://x:1"},
-			{Name: "a", Kind: "docker", Address: "tcp://y:1"},
-		})
-		if err == nil {
-			t.Error("expected duplicate-name error")
-		}
-	})
-	t.Run("missing name", func(t *testing.T) {
-		_, err := NewRegistry([]config.TargetConfig{{Kind: "docker", Address: "tcp://x:1"}})
-		if err == nil {
-			t.Error("expected missing-name error")
-		}
-	})
-}
-
-func TestDistributorFanout(t *testing.T) {
-	good := &fakeTarget{name: "good", pull: func() error { return nil }}
-	bad := &fakeTarget{name: "bad", pull: func() error { return errors.New("boom") }}
-	d := NewDistributor(registryOf(good, bad), "")
-
-	store := warm.NewMemStore()
-	job := warm.NewJob("j", "docker.io/x:1", "cache.local/x:1", nil, time.Now())
-	_ = store.Add(job)
-	d.Distribute(context.Background(), job, store)
-
-	snap, _ := store.Snapshot("j")
-	states := map[string]warm.TargetSnapshot{}
-	for _, tp := range snap.Targets {
-		states[tp.Name] = tp
+func TestNewRejectsNonEngine(t *testing.T) {
+	if _, err := New(config.StoreConfig{Name: "x", Kind: "registry"}); err == nil {
+		t.Error("registry is not an engine kind")
 	}
-	if len(states) != 2 {
-		t.Fatalf("targets = %+v", snap.Targets)
-	}
-	if states["good"].State != "pulled" {
-		t.Errorf("good = %+v", states["good"])
-	}
-	if states["bad"].State != "failed" || states["bad"].Err == "" {
-		t.Errorf("bad = %+v", states["bad"])
+	if _, err := New(config.StoreConfig{Name: "x", Kind: "bogus"}); err == nil {
+		t.Error("unknown kind should error")
 	}
 }
 
-func TestDistributorUnknownTarget(t *testing.T) {
-	d := NewDistributor(registryOf(), "")
-	store := warm.NewMemStore()
-	job := warm.NewJob("j", "docker.io/x:1", "cache.local/x:1", nil, time.Now())
-	job.SetRequestedTargets([]string{"nope"})
-	_ = store.Add(job)
-	d.Distribute(context.Background(), job, store)
-
-	snap, _ := store.Snapshot("j")
-	if len(snap.Targets) != 1 || snap.Targets[0].State != "failed" {
-		t.Fatalf("targets = %+v", snap.Targets)
+func TestDigestOf(t *testing.T) {
+	if got := digestOf("layer-sha256:abc"); got != "sha256:abc" {
+		t.Errorf("digestOf = %q", got)
 	}
-}
-
-func TestRewriteHost(t *testing.T) {
-	const dig = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-	cases := []struct{ ref, host, want string }{
-		{"192.168.0.22:5000/library/redis:7", "cache.cr.com", "cache.cr.com/library/redis:7"},
-		{"192.168.0.22:5000/team/app@" + dig, "cache.cr.com:5000", "cache.cr.com:5000/team/app@" + dig},
-	}
-	for _, c := range cases {
-		got, err := rewriteHost(c.ref, c.host)
-		if err != nil {
-			t.Fatalf("rewriteHost(%q,%q): %v", c.ref, c.host, err)
-		}
-		if got != c.want {
-			t.Errorf("rewriteHost(%q,%q) = %q, want %q", c.ref, c.host, got, c.want)
-		}
-	}
-}
-
-func TestDistributorHostOverride(t *testing.T) {
-	a := &fakeTarget{name: "a"} // no pull_host -> global default
-	b := &fakeTarget{name: "b"} // per-target pull_host wins
-	reg := &Registry{byName: map[string]Target{"a": a, "b": b}}
-	reg.entries = []entry{
-		{cfg: config.TargetConfig{Name: "a", Kind: "fake"}, target: a},
-		{cfg: config.TargetConfig{Name: "b", Kind: "fake", PullHost: "b.internal:5000"}, target: b},
-	}
-	d := NewDistributor(reg, "cache.cr.com")
-
-	store := warm.NewMemStore()
-	job := warm.NewJob("j", "docker.io/library/redis:7", "192.168.0.22:5000/library/redis:7", nil, time.Now())
-	_ = store.Add(job)
-	d.Distribute(context.Background(), job, store)
-
-	if a.pulled != "cache.cr.com/library/redis:7" {
-		t.Errorf("a pulled %q, want cache.cr.com/library/redis:7", a.pulled)
-	}
-	if b.pulled != "b.internal:5000/library/redis:7" {
-		t.Errorf("b pulled %q, want b.internal:5000/library/redis:7", b.pulled)
-	}
-	snap, _ := store.Snapshot("j")
-	refs := map[string]string{}
-	for _, tp := range snap.Targets {
-		if tp.State != "pulled" {
-			t.Errorf("target %s state = %q, want pulled", tp.Name, tp.State)
-		}
-		refs[tp.Name] = tp.Ref
-	}
-	if refs["a"] != "cache.cr.com/library/redis:7" || refs["b"] != "b.internal:5000/library/redis:7" {
-		t.Errorf("snapshot refs = %v", refs)
+	if got := digestOf("no-digest-here"); got != "" {
+		t.Errorf("digestOf = %q, want empty", got)
 	}
 }

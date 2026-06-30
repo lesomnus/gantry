@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/image"
 	"github.com/lesomnus/gantry/cmd/config"
 )
 
@@ -16,26 +17,35 @@ func dockerAddr() string {
 	return "unix:///var/run/docker.sock"
 }
 
-// TestDockerTargetLive exercises the real Docker client against a reachable
-// daemon. It skips when none is available so the suite stays hermetic by default.
-func TestDockerTargetLive(t *testing.T) {
-	tgt, err := newDockerTarget(config.TargetConfig{Name: "live", Kind: "docker", Address: dockerAddr()})
+// TestDockerEngineLive exercises the real Docker client against a reachable
+// daemon and checks that per-layer byte progress is reported. Skips when no
+// daemon is available.
+func TestDockerEngineLive(t *testing.T) {
+	eng, err := newDockerEngine(config.StoreConfig{Name: "live", Kind: "docker", Address: dockerAddr()})
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
-	defer tgt.Close()
+	defer eng.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if err := tgt.Ready(ctx); err != nil {
+	if err := eng.Ready(ctx); err != nil {
 		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
 	}
 
-	if err := tgt.Pull(ctx, "hello-world:latest"); err != nil {
+	// A distinct image from the containerd test (docker 29 shares the containerd
+	// content store), removed first so the pull actually downloads.
+	const ref = "alpine:latest"
+	_, _ = eng.cli.ImageRemove(ctx, ref, image.RemoveOptions{Force: true})
+
+	sink := &recSink{}
+	if err := eng.Pull(ctx, ref, sink); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
-	// A bad reference must surface as an error from the JSONMessage stream.
-	if err := tgt.Pull(ctx, "library/gantry-does-not-exist:nope"); err == nil {
+	if sink.bytesDone() == 0 {
+		t.Error("expected per-layer byte progress from the pull stream")
+	}
+	if err := eng.Pull(ctx, "library/gantry-does-not-exist:nope", nopSink{}); err == nil {
 		t.Error("expected error pulling a nonexistent image")
 	}
 }

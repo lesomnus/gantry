@@ -36,6 +36,14 @@ func (r *RewriteRule) UnmarshalYAML(b []byte) error {
 	return nil
 }
 
+// DefaultRewrite returns the compiled default rule ("{{.CacheHost}}/{{.Repo}}"),
+// used for registries referenced free-form (not declared as a store).
+func DefaultRewrite() []RewriteRule {
+	r := RewriteRule{Pattern: "**", Template: "{{.CacheHost}}/{{.Repo}}"}
+	_ = r.compile() // a constant template never fails to parse
+	return []RewriteRule{r}
+}
+
 // MarshalYAML implements goccy's InterfaceMarshaler so a rule is emitted in the
 // same single-key {pattern: template} form it is read from.
 func (r RewriteRule) MarshalYAML() (interface{}, error) {

@@ -1,6 +1,5 @@
-// Package server exposes the warm engine over an HTTP/1 JSON API built on the
-// stdlib ServeMux (method + path patterns). It is pure transport: decode, call
-// the core, encode.
+// Package server exposes the job engine over an HTTP/1 JSON API built on the
+// stdlib ServeMux. It is pure transport: decode, call the core, encode.
 package server
 
 import (
@@ -10,29 +9,28 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lesomnus/gantry/internal/down"
+	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/warm"
 )
 
 // Server holds the dependencies shared by the handlers.
 type Server struct {
-	warmer  *warm.Warmer
-	store   warm.Store
-	targets *down.Registry
+	warmer *warm.Warmer
+	store  warm.Store
+	stores *store.Set
 }
 
-// New builds the API handler. targets may be nil. Wrap the result with Auth for
-// authentication.
-func New(warmer *warm.Warmer, store warm.Store, targets *down.Registry) http.Handler {
-	s := &Server{warmer: warmer, store: store, targets: targets}
+// New builds the API handler. Wrap it with Auth for authentication.
+func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set) http.Handler {
+	s := &Server{warmer: warmer, store: jobStore, stores: stores}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/job", s.handleCreateWarm)
-	mux.HandleFunc("GET /v1/job", s.handleListWarms)
-	mux.HandleFunc("GET /v1/job/{id}", s.handleGetWarm)
-	mux.HandleFunc("DELETE /v1/job/{id}", s.handleDeleteWarm)
+	mux.HandleFunc("POST /v1/job", s.handleCreateJob)
+	mux.HandleFunc("GET /v1/job", s.handleListJobs)
+	mux.HandleFunc("GET /v1/job/{id}", s.handleGetJob)
+	mux.HandleFunc("DELETE /v1/job/{id}", s.handleDeleteJob)
 	mux.HandleFunc("GET /v1/job/{id}/progress", s.handleProgress)
-	mux.HandleFunc("GET /v1/target", s.handleListTargets)
-	mux.HandleFunc("POST /v1/target/{name}/pull", s.handleTargetPull)
+	mux.HandleFunc("GET /v1/store", s.handleListStores)
+	mux.HandleFunc("POST /v1/store/{name}/pull", s.handleStorePull)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return mux
 }
@@ -63,8 +61,6 @@ func writeSSE(w io.Writer, event string, v any) {
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 }
 
-// duration parses a positive duration query value, returning ok=false if absent
-// or invalid.
 func duration(s string) (time.Duration, bool) {
 	if s == "" {
 		return 0, false

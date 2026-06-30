@@ -15,14 +15,14 @@ import (
 	"github.com/lesomnus/z"
 )
 
-// dockerTarget pulls via the Docker Engine API. Credentials and insecure-registry
-// policy for the cache are the daemon's own configuration, not gantry's.
-type dockerTarget struct {
+// dockerEngine pulls via the Docker Engine API. Credentials and insecure-registry
+// policy for the source are the daemon's own configuration, not gantry's.
+type dockerEngine struct {
 	name string
 	cli  *client.Client
 }
 
-func newDockerTarget(c config.TargetConfig) (*dockerTarget, error) {
+func newDockerEngine(c config.StoreConfig) (*dockerEngine, error) {
 	cli, err := client.NewClientWithOpts(
 		client.WithHost(dockerHost(c.Address)),
 		client.WithAPIVersionNegotiation(),
@@ -30,11 +30,10 @@ func newDockerTarget(c config.TargetConfig) (*dockerTarget, error) {
 	if err != nil {
 		return nil, z.Err(err, "docker client")
 	}
-	return &dockerTarget{name: c.Name, cli: cli}, nil
+	return &dockerEngine{name: c.Name, cli: cli}, nil
 }
 
-// dockerHost normalizes a configured address into an engine host: a bare path
-// becomes a unix socket; an empty value falls back to the client default (env).
+// dockerHost normalizes a configured address into an engine host.
 func dockerHost(addr string) string {
 	switch {
 	case addr == "":
@@ -46,25 +45,25 @@ func dockerHost(addr string) string {
 	}
 }
 
-func (t *dockerTarget) Name() string { return t.name }
-func (t *dockerTarget) Kind() string { return "docker" }
+func (e *dockerEngine) Name() string { return e.name }
+func (e *dockerEngine) Kind() string { return "docker" }
 
-func (t *dockerTarget) Ready(ctx context.Context) error {
-	_, err := t.cli.Ping(ctx)
+func (e *dockerEngine) Ready(ctx context.Context) error {
+	_, err := e.cli.Ping(ctx)
 	return err
 }
 
-func (t *dockerTarget) Close() error { return t.cli.Close() }
+func (e *dockerEngine) Close() error { return e.cli.Close() }
 
-func (t *dockerTarget) Pull(ctx context.Context, ref string) error {
-	rc, err := t.cli.ImagePull(ctx, ref, image.PullOptions{})
+func (e *dockerEngine) Pull(ctx context.Context, ref string, sink Sink) error {
+	rc, err := e.cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
 		return z.Err(err, "image pull")
 	}
 	defer rc.Close()
 
-	// The pull only completes once the JSONMessage stream is fully drained;
-	// errors are reported in-band rather than as a transport error.
+	// The pull completes only once the JSONMessage stream is drained; per-layer
+	// download bytes are reported as they arrive, errors come in-band.
 	dec := json.NewDecoder(rc)
 	for {
 		var m jsonmessage.JSONMessage
@@ -77,5 +76,34 @@ func (t *dockerTarget) Pull(ctx context.Context, ref string) error {
 		if m.Error != nil {
 			return fmt.Errorf("pull: %s", m.Error.Message)
 		}
+		if u, ok := layerUpdate(m); ok {
+			sink.Layer(u)
+		}
 	}
+}
+
+// layerUpdate maps a JSONMessage to a LayerUpdate, or ok=false for lines that
+// carry no per-layer byte progress (overall status, extracting, etc.).
+func layerUpdate(m jsonmessage.JSONMessage) (LayerUpdate, bool) {
+	if m.ID == "" {
+		return LayerUpdate{}, false
+	}
+	u := LayerUpdate{Digest: m.ID}
+	switch m.Status {
+	case "Already exists":
+		u.State = "exists"
+	case "Downloading":
+		u.State = "pulling"
+		if d := m.Progress; d != nil {
+			u.Done, u.Total = d.Current, d.Total
+		}
+	case "Download complete", "Pull complete":
+		u.State = "done"
+		if d := m.Progress; d != nil && d.Total > 0 {
+			u.Done, u.Total = d.Total, d.Total
+		}
+	default:
+		return LayerUpdate{}, false
+	}
+	return u, true
 }

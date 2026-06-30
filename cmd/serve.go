@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/server"
+	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/xli"
@@ -32,25 +32,20 @@ func NewCmdServe() *xli.Command {
 			c := use_config.Must(ctx)
 			flg.VisitP(cmd, "addr", &c.Serve.Addr)
 
-			src, err := warm.NewSource(c.Serve.Registry)
+			stores, err := store.NewSet(c.Serve.Stores, c.Serve.AllowUnknownStores)
 			if err != nil {
-				return z.Err(err, "build source")
+				return z.Err(err, "build stores")
 			}
-			targets, err := down.NewRegistry(c.Serve.Targets)
-			if err != nil {
-				return z.Err(err, "build targets")
-			}
-			defer targets.Close()
+			defer stores.Close()
 
-			store := warm.NewMemStore()
-			wmr := warm.NewWarmer(src, store, c.Serve.Registry, c.Serve.Warm)
-			wmr.SetDistributor(down.NewDistributor(targets, c.Serve.Registry.DownstreamHost))
+			jobStore := warm.NewMemStore()
+			wmr := warm.NewWarmer(stores, jobStore, c.Serve.Warm)
 
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			wmr.Start(ctx)
 
-			h := server.Auth(c.Serve.Auth)(server.New(wmr, store, targets))
+			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores))
 			srv := &http.Server{
 				Addr:        c.Serve.Addr,
 				Handler:     h,
@@ -58,7 +53,7 @@ func NewCmdServe() *xli.Command {
 			}
 
 			l := log.From(ctx)
-			l.Info("serving", slog.String("addr", c.Serve.Addr), slog.String("mode", c.Serve.Registry.Mode))
+			l.Info("serving", slog.String("addr", c.Serve.Addr), slog.Int("stores", len(c.Serve.Stores)))
 
 			errc := make(chan error, 1)
 			go func() {

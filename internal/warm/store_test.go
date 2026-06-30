@@ -7,13 +7,15 @@ import (
 )
 
 func mkJob(id, ref string, platforms []string) *Job {
-	return NewJob(id, ref, "cache.local/"+ref, platforms, time.Now())
+	j := NewJob(id, ref, platforms, time.Now())
+	j.dedup = dedupKey(ref, platforms, "", "", nil)
+	return j
 }
 
 func TestStoreAddGetSnapshot(t *testing.T) {
 	s := NewMemStore()
 	j := mkJob("a", "docker.io/library/redis:7", []string{"linux/amd64"})
-	j.BytesTotal = 100
+	j.Transfers = []*Transfer{{Store: "cache", Kind: "registry", BytesTotal: 100}}
 	if err := s.Add(j); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -24,7 +26,7 @@ func TestStoreAddGetSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatal("snapshot missing")
 	}
-	if snap.Ref != "docker.io/library/redis:7" || snap.BytesTotal != 100 {
+	if snap.Ref != "docker.io/library/redis:7" || len(snap.Transfers) != 1 || snap.Transfers[0].BytesTotal != 100 {
 		t.Errorf("snapshot = %+v", snap)
 	}
 	if _, ok := s.Snapshot("nope"); ok {
@@ -35,21 +37,21 @@ func TestStoreAddGetSnapshot(t *testing.T) {
 func TestStoreUpdateAndAtomics(t *testing.T) {
 	s := NewMemStore()
 	j := mkJob("a", "img:1", nil)
-	j.Layers = []*LayerProgress{{Digest: "sha256:x", Total: 50}}
+	j.Transfers = []*Transfer{{Store: "cache", Layers: []*LayerProgress{{Digest: "sha256:x", Total: 50}}}}
 	_ = s.Add(j)
 	live, _ := s.Job("a")
-	live.BytesDone.Add(25)
-	live.Layers[0].Done.Add(25)
+	live.Transfers[0].BytesDone.Add(25)
+	live.Transfers[0].Layers[0].Done.Add(25)
 	s.Update("a", func(j *Job) {
-		j.State = JobPulling
-		j.Layers[0].State = "pulling"
+		j.State = JobRunning
+		j.Transfers[0].Layers[0].State = "pulling"
 	})
 	snap, _ := s.Snapshot("a")
-	if snap.State != JobPulling || snap.BytesDone != 25 {
+	if snap.State != JobRunning || snap.Transfers[0].BytesDone != 25 {
 		t.Errorf("snapshot = %+v", snap)
 	}
-	if snap.Layers[0].Done != 25 || snap.Layers[0].State != "pulling" {
-		t.Errorf("layer = %+v", snap.Layers[0])
+	if snap.Transfers[0].Layers[0].Done != 25 || snap.Transfers[0].Layers[0].State != "pulling" {
+		t.Errorf("layer = %+v", snap.Transfers[0].Layers[0])
 	}
 }
 
@@ -57,8 +59,7 @@ func TestStoreActiveDedup(t *testing.T) {
 	s := NewMemStore()
 	a := mkJob("a", "img:1", []string{"linux/arm64", "linux/amd64"})
 	_ = s.Add(a)
-	// Same ref, same platform set in a different order -> same key.
-	key := dedupKey("img:1", []string{"linux/amd64", "linux/arm64"})
+	key := dedupKey("img:1", []string{"linux/amd64", "linux/arm64"}, "", "", nil)
 	if _, ok := s.Active(key); !ok {
 		t.Error("active job not found by dedup key")
 	}
@@ -113,7 +114,7 @@ func TestStoreSweep(t *testing.T) {
 	fresh.EndedAt = now
 	_ = s.Add(fresh)
 	active := mkJob("active", "img:3", nil)
-	active.State = JobPulling
+	active.State = JobRunning
 	_ = s.Add(active)
 	if n := s.Sweep(now, 30*time.Minute); n != 1 {
 		t.Errorf("swept %d, want 1", n)
@@ -132,17 +133,18 @@ func TestStoreSweep(t *testing.T) {
 func TestStoreConcurrentProgress(t *testing.T) {
 	s := NewMemStore()
 	j := mkJob("a", "img:1", nil)
-	j.Layers = []*LayerProgress{{Digest: "sha256:x", Total: 1000}}
+	j.Transfers = []*Transfer{{Store: "cache", Layers: []*LayerProgress{{Digest: "sha256:x", Total: 1000}}}}
 	_ = s.Add(j)
 	live, _ := s.Job("a")
+	tr := live.Transfers[0]
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for k := 0; k < 1000; k++ {
-				live.BytesDone.Add(1)
-				live.Layers[0].Done.Add(1)
+				tr.BytesDone.Add(1)
+				tr.Layers[0].Done.Add(1)
 			}
 		}()
 	}
@@ -157,7 +159,7 @@ func TestStoreConcurrentProgress(t *testing.T) {
 	}
 	wg.Wait()
 	snap, _ := s.Snapshot("a")
-	if snap.BytesDone != 8000 || snap.Layers[0].Done != 8000 {
-		t.Errorf("bytes_done = %d / layer = %d, want 8000", snap.BytesDone, snap.Layers[0].Done)
+	if snap.Transfers[0].BytesDone != 8000 || snap.Transfers[0].Layers[0].Done != 8000 {
+		t.Errorf("bytes_done = %d / layer = %d, want 8000", snap.Transfers[0].BytesDone, snap.Transfers[0].Layers[0].Done)
 	}
 }

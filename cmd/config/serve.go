@@ -1,14 +1,17 @@
 package config
 
-// ServeConfig configures the `serve` subcommand: the HTTP API, the cache
-// registry that workers warm, and the downstream daemons that are triggered.
+// ServeConfig configures the `serve` subcommand: the HTTP API, the image stores
+// gantry can move images between, and the warm worker pool.
 type ServeConfig struct {
-	Addr          string         `yaml:"addr"`
-	ShutdownGrace Duration       `yaml:"shutdown_grace"`
-	Auth          AuthConfig     `yaml:"auth"`
-	Registry      RegistryConfig `yaml:"registry"`
-	Warm          WarmConfig     `yaml:"warm"`
-	Targets       []TargetConfig `yaml:"targets"`
+	Addr          string     `yaml:"addr"`
+	ShutdownGrace Duration   `yaml:"shutdown_grace"`
+	Auth          AuthConfig `yaml:"auth"`
+	// AllowUnknownStores permits a job to reference a registry by a bare host
+	// that is not a declared store. Engine stores (docker/containerd) must always
+	// be declared. Default false: only declared stores may be used.
+	AllowUnknownStores bool          `yaml:"allow_unknown_stores"`
+	Stores             []StoreConfig `yaml:"stores"`
+	Warm               WarmConfig    `yaml:"warm"`
 }
 
 // AuthConfig guards /v1/* (/healthz is always exempt).
@@ -22,56 +25,59 @@ type AuthConfig struct {
 	TLSKey  string `yaml:"tls_key"`
 }
 
-// RegistryConfig describes the cache registry: copy mode pushes upstream blobs
-// into it, proxy mode triggers it to self-fill via pull-through.
-type RegistryConfig struct {
-	// Mode selects the warming strategy: "copy" (default) or "proxy".
-	Mode string `yaml:"mode"`
-	// Host is the cache registry host gantry pushes to / reads from, also
-	// exposed to rewrite templates as {{.CacheHost}}.
+// StoreConfig describes one image store. kind "registry" is a container registry
+// gantry reads from and writes to; kind "docker"/"containerd" is a daemon gantry
+// triggers to pull. Fields not relevant to a kind are ignored.
+type StoreConfig struct {
+	Name string `yaml:"name"`
+	Kind string `yaml:"kind"` // registry | docker | containerd
+
+	// --- registry ---
+	// Host is the registry host, exposed to rewrite templates as {{.CacheHost}}.
 	Host string `yaml:"host"`
-	// DownstreamHost, if set, overrides the registry host in the reference that
-	// downstream targets are told to pull (e.g. push to "192.168.0.22:5000" but
-	// have daemons pull "cache.cr.com" — a name they trust and resolve to it).
-	// Per-target pull_host takes precedence.
-	DownstreamHost string `yaml:"downstream_host"`
-	// Insecure allows plain-HTTP or self-signed cache registries.
+	// Insecure allows plain-HTTP or self-signed registries.
 	Insecure bool   `yaml:"insecure"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
-	// Rewrite maps a source reference to its cache-side reference; rules are
-	// evaluated in order and the first matching pattern wins.
+	// Mode selects how gantry fills this registry when it is a copy destination:
+	// "copy" (default) pushes blobs, "proxy" reads through to self-fill.
+	Mode string `yaml:"mode"`
+	// Rewrite maps a source reference to its reference in this registry (used when
+	// this store is a copy destination). Ordered; first match wins.
 	Rewrite []RewriteRule `yaml:"rewrite"`
+	// DownstreamHost overrides the host engine stores are told to pull from when
+	// pulling out of this registry (e.g. push to an IP, have daemons pull a name).
+	DownstreamHost string `yaml:"downstream_host"`
+
+	// --- engine (docker / containerd) ---
+	Address string `yaml:"address"`
+	// Namespace is the containerd namespace (e.g. "k8s.io" for k3s, "moby" for docker's).
+	Namespace string `yaml:"namespace"`
+	// PullHost overrides the registry host this engine is told to pull from,
+	// taking precedence over the source registry's downstream_host.
+	PullHost string `yaml:"pull_host"`
 }
+
+// IsRegistry reports whether the store is a container registry.
+func (s StoreConfig) IsRegistry() bool { return s.Kind == "registry" }
+
+// IsEngine reports whether the store is a daemon gantry triggers to pull.
+func (s StoreConfig) IsEngine() bool { return s.Kind == "docker" || s.Kind == "containerd" }
 
 // WarmConfig bounds the warm worker pool.
 type WarmConfig struct {
 	// Platforms is the fallback platform set when a request omits it; empty
 	// means the host GOOS/GOARCH only.
 	Platforms []string `yaml:"platforms"`
-	// MaxConcurrentJobs caps how many warm jobs run at once (tier-1 worker pool).
+	// MaxConcurrentJobs caps how many jobs run at once (tier-1 worker pool).
 	MaxConcurrentJobs int `yaml:"max_concurrent_jobs"`
-	// MaxConcurrentLayers caps how many layers one job pulls at once (tier-2).
+	// MaxConcurrentLayers caps how many layers one transfer moves at once (tier-2).
 	MaxConcurrentLayers int `yaml:"max_concurrent_layers"`
 	// QueueSize is the buffered depth of the pending-job channel.
 	QueueSize int `yaml:"queue_size"`
-	// JobTTL is how long a completed job record is retained.
+	// JobTTL is how long a finished job record is retained.
 	JobTTL Duration `yaml:"job_ttl"`
-	// TriggerDownstream warms then fans out to targets by default.
-	TriggerDownstream bool `yaml:"trigger_downstream"`
-}
-
-// TargetConfig describes one downstream daemon to trigger after warming.
-type TargetConfig struct {
-	Name    string `yaml:"name"`
-	Kind    string `yaml:"kind"` // docker | containerd
-	Address string `yaml:"address"`
-	// Namespace is the containerd namespace (e.g. "k8s.io" for k3s).
-	Namespace string `yaml:"namespace"`
-	// PullHost overrides the registry host this target is told to pull from,
-	// taking precedence over registry.downstream_host. Empty = use the warmed
-	// cache reference as-is.
-	PullHost string `yaml:"pull_host"`
-	// Platforms optionally narrows which platforms this target is told to pull.
-	Platforms []string `yaml:"platforms"`
+	// DistributeByDefault fans out to all engine stores when a job omits the
+	// distribute list.
+	DistributeByDefault bool `yaml:"distribute_by_default"`
 }

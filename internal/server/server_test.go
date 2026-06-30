@@ -10,30 +10,36 @@ import (
 	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/warm"
 )
 
-func newTestServer(t *testing.T) (http.Handler, warm.Store, *warm.Warmer) {
+func newTestServer(t *testing.T) (http.Handler, warm.Store) {
 	t.Helper()
 	var c config.Config
-	c.Serve.Registry = config.RegistryConfig{Mode: "copy", Host: "cache.local", Insecure: true}
+	c.Serve.AllowUnknownStores = true
+	c.Serve.Stores = []config.StoreConfig{{Name: "cache", Kind: "registry", Host: "cache.local", Insecure: true, Mode: "copy"}}
 	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	src, err := warm.NewSource(c.Serve.Registry)
+	set, err := store.NewSet(c.Serve.Stores, c.Serve.AllowUnknownStores)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := warm.NewMemStore()
-	wmr := warm.NewWarmer(src, store, c.Serve.Registry, c.Serve.Warm)
-	wmr.Start(context.Background())
+	js := warm.NewMemStore()
+	wmr := warm.NewWarmer(set, js, c.Serve.Warm)
+	// Start with an already-canceled context so submitted jobs fail fast without
+	// touching the network — these tests only exercise the HTTP layer.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	wmr.Start(ctx)
 	t.Cleanup(wmr.Stop)
-	return New(wmr, store, nil), store, wmr
+	return New(wmr, js, set), js
 }
 
 func TestHealthz(t *testing.T) {
-	h, _, _ := newTestServer(t)
+	h, _ := newTestServer(t)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest("GET", "/healthz", nil))
 	if rr.Code != 200 || rr.Body.String() != "ok" {
@@ -41,8 +47,8 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestCreateWarmValidation(t *testing.T) {
-	h, _, _ := newTestServer(t)
+func TestCreateJobValidation(t *testing.T) {
+	h, _ := newTestServer(t)
 	t.Run("missing ref", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, httptest.NewRequest("POST", "/v1/job", strings.NewReader(`{}`)))
@@ -57,13 +63,20 @@ func TestCreateWarmValidation(t *testing.T) {
 			t.Errorf("code = %d, want 400", rr.Code)
 		}
 	})
+	t.Run("nothing to do", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest("POST", "/v1/job", strings.NewReader(`{"ref":"r.io/x:1","from":"r.io"}`)))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("code = %d, want 400", rr.Code)
+		}
+	})
 }
 
-func TestCreateGetDeleteWarm(t *testing.T) {
-	h, _, _ := newTestServer(t)
+func TestCreateGetDeleteJob(t *testing.T) {
+	h, _ := newTestServer(t)
 
 	rr := httptest.NewRecorder()
-	body := `{"ref":"example.com/team/app:1","platforms":["linux/amd64"]}`
+	body := `{"ref":"team/app:1","from":"example.com","to":"cache","platforms":["linux/amd64"]}`
 	h.ServeHTTP(rr, httptest.NewRequest("POST", "/v1/job", strings.NewReader(body)))
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("create code = %d, want 202 (%s)", rr.Code, rr.Body.String())
@@ -72,7 +85,7 @@ func TestCreateGetDeleteWarm(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &snap); err != nil {
 		t.Fatal(err)
 	}
-	if snap.ID == "" || snap.Ref != "example.com/team/app:1" {
+	if snap.ID == "" || snap.Ref != "team/app:1" {
 		t.Fatalf("snap = %+v", snap)
 	}
 	if loc := rr.Header().Get("Location"); loc != "/v1/job/"+snap.ID {
@@ -84,13 +97,11 @@ func TestCreateGetDeleteWarm(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("get code = %d", rr.Code)
 	}
-
 	rr = httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest("GET", "/v1/job/nope", nil))
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("get missing code = %d, want 404", rr.Code)
 	}
-
 	rr = httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest("DELETE", "/v1/job/"+snap.ID, nil))
 	if rr.Code != http.StatusNoContent {
@@ -103,12 +114,10 @@ func TestCreateGetDeleteWarm(t *testing.T) {
 	}
 }
 
-func TestListWarmsFilter(t *testing.T) {
-	h, store, _ := newTestServer(t)
-	a := warm.NewJob("a", "docker.io/redis:7", "cache.local/redis:7", nil, time.Now())
-	b := warm.NewJob("b", "ghcr.io/app:1", "cache.local/app:1", nil, time.Now())
-	_ = store.Add(a)
-	_ = store.Add(b)
+func TestListJobsFilter(t *testing.T) {
+	h, js := newTestServer(t)
+	_ = js.Add(warm.NewJob("a", "docker.io/redis:7", nil, time.Now()))
+	_ = js.Add(warm.NewJob("b", "ghcr.io/app:1", nil, time.Now()))
 
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest("GET", "/v1/job?ref=ghcr", nil))
@@ -120,5 +129,20 @@ func TestListWarmsFilter(t *testing.T) {
 	}
 	if len(resp.Items) != 1 || resp.Items[0].ID != "b" {
 		t.Errorf("filtered items = %+v", resp.Items)
+	}
+}
+
+func TestListStoresEmpty(t *testing.T) {
+	h, _ := newTestServer(t)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/v1/store", nil))
+	var resp struct {
+		Items []store.Status `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].Name != "cache" || resp.Items[0].Kind != "registry" {
+		t.Errorf("stores = %+v", resp.Items)
 	}
 }

@@ -37,23 +37,26 @@ type Source interface {
 	Commit(ctx context.Context, src, dst name.Reference, platforms []string) error
 }
 
-// NewSource builds the Source selected by registry.mode.
-func NewSource(rc config.RegistryConfig) (Source, error) {
-	switch rc.Mode {
+// NewSource builds a registry copy/proxy between two registry stores, selected
+// by the destination store's mode.
+func NewSource(from, to config.StoreConfig) (Source, error) {
+	switch to.Mode {
 	case "", "copy":
-		return &copySource{pushAuth: cacheAuth(rc), insecure: rc.Insecure}, nil
+		return &copySource{from: from, to: to}, nil
 	case "proxy":
-		return &proxySource{auth: cacheAuth(rc), insecure: rc.Insecure}, nil
+		return &proxySource{to: to}, nil
 	default:
-		return nil, fmt.Errorf("unknown registry mode %q", rc.Mode)
+		return nil, fmt.Errorf("store %q: unknown mode %q", to.Name, to.Mode)
 	}
 }
 
-func cacheAuth(rc config.RegistryConfig) authn.Authenticator {
-	if rc.Username != "" {
-		return &authn.Basic{Username: rc.Username, Password: rc.Password}
+// registryAuth returns explicit basic auth when credentials are set, or nil to
+// fall back to the docker keychain.
+func registryAuth(c config.StoreConfig) authn.Authenticator {
+	if c.Username != "" {
+		return &authn.Basic{Username: c.Username, Password: c.Password}
 	}
-	return authn.Anonymous
+	return nil
 }
 
 // baseOpts builds remote options. A nil auth falls back to the docker keychain

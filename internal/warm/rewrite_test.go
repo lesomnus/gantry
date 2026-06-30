@@ -11,14 +11,16 @@ import (
 // (RewriteRule.compile is unexported in the config package).
 func compiledRules(t *testing.T, pairs ...[2]string) []config.RewriteRule {
 	t.Helper()
-	var c config.Config
+	st := config.StoreConfig{Name: "cache", Kind: "registry", Host: "cache.local"}
 	for _, p := range pairs {
-		c.Serve.Registry.Rewrite = append(c.Serve.Registry.Rewrite, config.RewriteRule{Pattern: p[0], Template: p[1]})
+		st.Rewrite = append(st.Rewrite, config.RewriteRule{Pattern: p[0], Template: p[1]})
 	}
+	c := config.Config{}
+	c.Serve.Stores = []config.StoreConfig{st}
 	if err := c.Evaluate(); err != nil {
 		t.Fatalf("evaluate rules: %v", err)
 	}
-	return c.Serve.Registry.Rewrite
+	return c.Serve.Stores[0].Rewrite
 }
 
 func mustRef(t *testing.T, s string) name.Reference {

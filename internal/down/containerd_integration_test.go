@@ -16,14 +16,14 @@ func containerdAddr() string {
 	return "/run/docker/containerd/containerd.sock"
 }
 
-// TestContainerdTargetLive exercises the real containerd client. It skips when
-// no socket is reachable (e.g. before the dev container shares docker's bundled
-// containerd). docker's containerd keeps images in the "moby" namespace.
-func TestContainerdTargetLive(t *testing.T) {
+// TestContainerdEngineLive exercises the real containerd client. It skips when
+// no socket is reachable. docker's bundled containerd keeps images in the "moby"
+// namespace.
+func TestContainerdEngineLive(t *testing.T) {
 	if _, err := os.Stat(containerdAddr()); err != nil {
 		t.Skipf("no containerd socket at %s", containerdAddr())
 	}
-	tgt, err := newContainerdTarget(config.TargetConfig{
+	eng, err := newContainerdEngine(config.StoreConfig{
 		Name:      "live",
 		Kind:      "containerd",
 		Address:   containerdAddr(),
@@ -32,15 +32,15 @@ func TestContainerdTargetLive(t *testing.T) {
 	if err != nil {
 		t.Skipf("containerd client (%s): %v", containerdAddr(), err)
 	}
-	defer tgt.Close()
+	defer eng.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	if err := tgt.Ready(ctx); err != nil {
+	if err := eng.Ready(ctx); err != nil {
 		t.Skipf("no reachable containerd (%s): %v", containerdAddr(), err)
 	}
 
-	if err := tgt.Pull(ctx, "docker.io/library/hello-world:latest"); err != nil {
+	if err := eng.Pull(ctx, "docker.io/library/busybox:latest", &recSink{}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 }

@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/down"
+	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/otx"
 	"github.com/lesomnus/z"
 	"go.opentelemetry.io/otel/attribute"
@@ -19,8 +21,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// metrics are the otel instruments for the warm pipeline. They route to the
-// configured meter provider, or to a no-op when none is set.
+// ErrQueueFull is returned by Submit when the pending-job buffer is saturated.
+var ErrQueueFull = errors.New("warm queue is full")
+
+// metrics are the otel instruments for the job pipeline (no-op when unconfigured).
 type metrics struct {
 	bytes    metric.Int64Counter
 	duration metric.Float64Histogram
@@ -29,60 +33,68 @@ type metrics struct {
 
 func newMetrics(ctx context.Context) *metrics {
 	m := otx.Meter(ctx)
-	bytes, _ := m.Int64Counter("gantry.warm.bytes", metric.WithUnit("By"),
-		metric.WithDescription("bytes moved into the cache"))
-	duration, _ := m.Float64Histogram("gantry.warm.duration", metric.WithUnit("s"),
-		metric.WithDescription("warm job duration"))
-	active, _ := m.Int64UpDownCounter("gantry.warm.jobs.active",
-		metric.WithDescription("warm jobs in flight"))
+	bytes, _ := m.Int64Counter("gantry.bytes", metric.WithUnit("By"),
+		metric.WithDescription("bytes moved between stores"))
+	duration, _ := m.Float64Histogram("gantry.job.duration", metric.WithUnit("s"),
+		metric.WithDescription("job duration"))
+	active, _ := m.Int64UpDownCounter("gantry.jobs.active",
+		metric.WithDescription("jobs in flight"))
 	return &metrics{bytes: bytes, duration: duration, active: active}
 }
 
-// ErrQueueFull is returned by Submit when the pending-job buffer is saturated.
-var ErrQueueFull = errors.New("warm queue is full")
-
-// Distributor triggers downstream targets to pull a warmed cache reference.
-// It is wired in once the downstream seam exists; a nil Distributor skips the
-// fan-out step.
-type Distributor interface {
-	Distribute(ctx context.Context, job *Job, store Store)
-}
-
-// Request is a warm submission.
+// Request is a job submission: move Ref from store From into store To, then have
+// the Distribute engines pull it. From/To are registry stores (name or host);
+// Distribute are engine stores. To may be empty (engines pull from From directly).
 type Request struct {
-	Ref               string
-	Platforms         []string
-	Targets           []string
-	TriggerDownstream *bool // nil = config default
+	Ref        string
+	Platforms  []string
+	From       string
+	To         string
+	Distribute []string
 }
 
-// Warmer runs a two-tier worker pool: `jobs` workers each warm one image, and
-// within a job up to `concurrency` blobs are moved at once.
+// engineStep is one resolved downstream pull.
+type engineStep struct {
+	transfer int // index into Job.Transfers
+	engine   down.Engine
+	ref      string
+}
+
+// jobExec is the resolved plan for a job, computed at submit time.
+type jobExec struct {
+	from     config.StoreConfig
+	to       config.StoreConfig
+	hasCache bool
+	src      name.Reference
+	dst      name.Reference // valid only when hasCache
+	cacheIdx int            // index of the registry transfer, or -1
+	engines  []engineStep
+}
+
+// Warmer runs a two-tier worker pool: MaxConcurrentJobs jobs at once, each moving
+// up to MaxConcurrentLayers layers at once during its registry copy.
 type Warmer struct {
-	src   Source
-	store Store
-	rc    config.RegistryConfig
-	wc    config.WarmConfig
-	dist  Distributor
+	stores *store.Set
+	store  Store
+	wc     config.WarmConfig
 
 	jobs    chan *Job
 	idgen   func() string
-	srcOpts []name.Option // upstream parse options (tests inject name.Insecure)
+	srcOpts []name.Option // parse options for the source ref (tests inject name.Insecure)
 	metrics *metrics
 
 	base context.Context
 	wg   sync.WaitGroup
 }
 
-func NewWarmer(src Source, store Store, rc config.RegistryConfig, wc config.WarmConfig) *Warmer {
+func NewWarmer(stores *store.Set, jobStore Store, wc config.WarmConfig) *Warmer {
 	q := wc.QueueSize
 	if q < 1 {
 		q = 1
 	}
 	return &Warmer{
-		src:     src,
-		store:   store,
-		rc:      rc,
+		stores:  stores,
+		store:   jobStore,
 		wc:      wc,
 		jobs:    make(chan *Job, q),
 		idgen:   newID,
@@ -90,10 +102,6 @@ func NewWarmer(src Source, store Store, rc config.RegistryConfig, wc config.Warm
 	}
 }
 
-// SetDistributor wires the downstream fan-out. Call before Start.
-func (w *Warmer) SetDistributor(d Distributor) { w.dist = d }
-
-// Start launches the worker pool bound to ctx; workers stop when Stop is called.
 func (w *Warmer) Start(ctx context.Context) {
 	w.base = ctx
 	w.metrics = newMetrics(ctx)
@@ -107,41 +115,28 @@ func (w *Warmer) Start(ctx context.Context) {
 	}
 }
 
-// Stop closes the queue and waits for in-flight jobs to drain. The caller is
-// expected to cancel the base context first so blocked network calls abort.
 func (w *Warmer) Stop() {
 	close(w.jobs)
 	w.wg.Wait()
 }
 
-// Submit validates and enqueues a warm request, collapsing onto an existing
-// in-flight job with the same image+platform set.
+// Submit resolves and enqueues a job, collapsing identical in-flight moves.
 func (w *Warmer) Submit(req Request) (JobSnapshot, error) {
-	src, err := name.ParseReference(req.Ref, w.srcOpts...)
+	ex, transfers, platforms, err := w.plan(req)
 	if err != nil {
-		return JobSnapshot{}, z.Err(err, "parse ref %q", req.Ref)
+		return JobSnapshot{}, err
 	}
-	platforms := w.effectivePlatforms(req.Platforms)
 
-	key := dedupKey(src.Name(), platforms)
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name, req.Distribute)
 	if snap, ok := w.store.Active(key); ok {
 		return snap, nil
 	}
 
-	dst, err := Rewrite(w.rc.Rewrite, w.rc.Host, src, w.rc.Insecure)
-	if err != nil {
-		return JobSnapshot{}, z.Err(err, "rewrite ref")
-	}
-
 	id := w.idgen()
 	ctx, cancel := context.WithCancel(w.base)
-	job := NewJob(id, src.Name(), dst.Name(), platforms, time.Now())
-	job.ctx = ctx
-	job.cancel = cancel
-	job.src = src
-	job.dst = dst
-	job.trigger = w.shouldTrigger(req.TriggerDownstream)
-	job.reqTargets = req.Targets
+	job := NewJob(id, req.Ref, platforms, time.Now())
+	job.ctx, job.cancel, job.dedup, job.exec = ctx, cancel, key, ex
+	job.Transfers = transfers
 	if err := w.store.Add(job); err != nil {
 		cancel()
 		return JobSnapshot{}, err
@@ -152,9 +147,108 @@ func (w *Warmer) Submit(req Request) (JobSnapshot, error) {
 		snap, _ := w.store.Snapshot(id)
 		return snap, nil
 	default:
-		w.store.Delete(id) // roll back; queue is saturated
+		w.store.Delete(id)
 		return JobSnapshot{}, ErrQueueFull
 	}
+}
+
+// plan resolves the request into an execution plan and the initial transfer rows.
+func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
+	platforms := w.platforms(req.Platforms)
+
+	base, err := name.ParseReference(req.Ref, w.srcOpts...)
+	if err != nil {
+		return nil, nil, nil, z.Err(err, "parse ref %q", req.Ref)
+	}
+	repo, id := base.Context().RepositoryStr(), identifier(base)
+
+	ex := &jobExec{cacheIdx: -1}
+
+	// source (from)
+	fromKey := req.From
+	if fromKey == "" {
+		fromKey = base.Context().RegistryStr()
+	}
+	ex.from, err = w.stores.Registry(fromKey)
+	if err != nil {
+		return nil, nil, nil, z.Err(err, "from")
+	}
+	ex.src, err = name.ParseReference(ex.from.Host+"/"+repo+id, w.refOpts(ex.from)...)
+	if err != nil {
+		return nil, nil, nil, z.Err(err, "source ref")
+	}
+
+	var transfers []*Transfer
+
+	// cache fill (to)
+	if req.To != "" {
+		ex.to, err = w.stores.Registry(req.To)
+		if err != nil {
+			return nil, nil, nil, z.Err(err, "to")
+		}
+		ex.dst, err = Rewrite(ex.to.Rewrite, ex.to.Host, ex.src, ex.to.Insecure)
+		if err != nil {
+			return nil, nil, nil, z.Err(err, "rewrite into %q", ex.to.Name)
+		}
+		ex.hasCache = true
+		ex.cacheIdx = len(transfers)
+		transfers = append(transfers, &Transfer{
+			Store: ex.to.Name, Kind: "registry", From: ex.from.Name,
+			Ref: ex.dst.Name(), State: "pending",
+		})
+	}
+
+	// distribute targets (engines)
+	names := req.Distribute
+	if names == nil && w.wc.DistributeByDefault {
+		names = w.stores.EngineNames()
+	}
+	pullBase := ex.src
+	if ex.hasCache {
+		pullBase = ex.dst
+	}
+	for _, n := range names {
+		eng, err := w.stores.Engine(n)
+		if err != nil {
+			return nil, nil, nil, z.Err(err, "distribute")
+		}
+		ref, err := w.pullRef(n, pullBase, ex)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		ex.engines = append(ex.engines, engineStep{transfer: len(transfers), engine: eng, ref: ref})
+		transfers = append(transfers, &Transfer{
+			Store: n, Kind: eng.Kind(), From: transferFrom(ex), Ref: ref, State: "pending",
+		})
+	}
+
+	if len(transfers) == 0 {
+		return nil, nil, nil, fmt.Errorf("job has nothing to do: set `to` and/or `distribute`")
+	}
+	return ex, transfers, platforms, nil
+}
+
+func transferFrom(ex *jobExec) string {
+	if ex.hasCache {
+		return ex.to.Name
+	}
+	return ex.from.Name
+}
+
+// pullRef computes the reference an engine is told to pull, applying the engine's
+// pull_host or the cache store's downstream_host override.
+func (w *Warmer) pullRef(engineName string, base name.Reference, ex *jobExec) (string, error) {
+	host := ""
+	if c, ok := w.stores.Config(engineName); ok {
+		host = c.PullHost
+	}
+	if host == "" && ex.hasCache {
+		host = ex.to.DownstreamHost
+	}
+	if host == "" {
+		return base.Name(), nil
+	}
+	return rewriteHost(base, host)
 }
 
 func (w *Warmer) worker() {
@@ -165,16 +259,13 @@ func (w *Warmer) worker() {
 }
 
 func (w *Warmer) run(job *Job) {
-	ctx, span := otx.TraceStart(job.ctx, "warm.job", trace.WithAttributes(
-		attribute.String("gantry.ref", job.Ref),
-		attribute.String("gantry.cache_ref", job.CacheRef),
-	))
+	ctx, span := otx.TraceStart(job.ctx, "job", trace.WithAttributes(attribute.String("gantry.ref", job.Ref)))
 	defer span.End()
 	w.metrics.active.Add(ctx, 1)
 	defer w.metrics.active.Add(ctx, -1)
 
 	start := time.Now()
-	err := w.pipeline(ctx, job)
+	err := w.execute(ctx, job)
 	w.finish(job, err)
 
 	state := "done"
@@ -182,50 +273,58 @@ func (w *Warmer) run(job *Job) {
 		state = "failed"
 		span.RecordError(err)
 	}
-	attrs := metric.WithAttributes(attribute.String("state", state))
-	w.metrics.duration.Record(ctx, time.Since(start).Seconds(), attrs)
-	w.metrics.bytes.Add(ctx, job.BytesDone.Load())
+	w.metrics.duration.Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("state", state)))
+	w.metrics.bytes.Add(ctx, jobBytes(job))
 }
 
-// pipeline runs resolve -> warm -> commit -> distribute, returning the first error.
-func (w *Warmer) pipeline(ctx context.Context, job *Job) error {
+func (w *Warmer) execute(ctx context.Context, job *Job) error {
 	w.store.Update(job.ID, func(j *Job) {
-		j.State = JobPulling
+		j.State = JobRunning
 		j.StartedAt = time.Now()
 	})
+	ex := job.exec
 
-	plan, err := w.src.Resolve(ctx, job.src, job.dst, job.Platforms)
-	if err != nil {
-		return err
-	}
-	w.store.Update(job.ID, func(j *Job) {
-		j.BytesTotal = plan.Total
-		for _, pl := range plan.Layers {
-			j.Layers = append(j.Layers, &LayerProgress{
-				Digest:   pl.Digest,
-				Platform: pl.Platform,
-				Total:    pl.Size,
-				State:    "pending",
-			})
+	if ex.hasCache {
+		if err := w.runCopy(ctx, job, ex); err != nil {
+			return err
 		}
-	})
-
-	if err := w.warmLayers(ctx, job, plan); err != nil {
-		return err
 	}
-	if err := w.src.Commit(ctx, job.src, job.dst, job.Platforms); err != nil {
-		return z.Err(err, "commit")
-	}
-	w.store.Update(job.ID, func(j *Job) { j.State = JobWarm })
-
-	if w.dist != nil && job.trigger {
-		w.store.Update(job.ID, func(j *Job) { j.State = JobTriggering })
-		w.dist.Distribute(ctx, job, w.store)
+	if len(ex.engines) > 0 {
+		w.runDistribute(ctx, job, ex)
 	}
 	return nil
 }
 
-func (w *Warmer) warmLayers(ctx context.Context, job *Job, plan *Plan) error {
+// runCopy fills the cache store (the registry transfer). Its failure fails the job.
+func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec) error {
+	t := job.Transfers[ex.cacheIdx]
+	w.store.Update(job.ID, func(*Job) { t.State = "running" })
+
+	src, err := NewSource(ex.from, ex.to)
+	if err != nil {
+		return w.failTransfer(job, t, err)
+	}
+	plan, err := src.Resolve(ctx, ex.src, ex.dst, job.Platforms)
+	if err != nil {
+		return w.failTransfer(job, t, err)
+	}
+	w.store.Update(job.ID, func(*Job) {
+		t.BytesTotal = plan.Total
+		for _, pl := range plan.Layers {
+			t.Layers = append(t.Layers, &LayerProgress{Digest: pl.Digest, Platform: pl.Platform, Total: pl.Size, State: "pending"})
+		}
+	})
+	if err := w.copyLayers(ctx, job, t, src, plan, ex); err != nil {
+		return w.failTransfer(job, t, err)
+	}
+	if err := src.Commit(ctx, ex.src, ex.dst, job.Platforms); err != nil {
+		return w.failTransfer(job, t, z.Err(err, "commit"))
+	}
+	w.store.Update(job.ID, func(*Job) { t.State = "done" })
+	return nil
+}
+
+func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Source, plan *Plan, ex *jobExec) error {
 	c := w.wc.MaxConcurrentLayers
 	if c < 1 {
 		c = 1
@@ -235,8 +334,8 @@ func (w *Warmer) warmLayers(ctx context.Context, job *Job, plan *Plan) error {
 	var once sync.Once
 	var firstErr error
 
-	src := job.src.Context()
-	dst := job.dst.Context()
+	from := ex.src.Context()
+	to := ex.dst.Context()
 	for i := range plan.Layers {
 		select {
 		case sem <- struct{}{}:
@@ -249,22 +348,60 @@ func (w *Warmer) warmLayers(ctx context.Context, job *Job, plan *Plan) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 			w.store.Update(job.ID, func(*Job) { lp.State = "pulling" })
-			sink := &layerSink{w: w, job: job, lp: lp}
-			if err := w.src.Warm(ctx, src, dst, pl, sink); err != nil {
+			sink := &layerSink{w: w, jobID: job.ID, t: t, lp: lp}
+			if err := src.Warm(ctx, from, to, pl, sink); err != nil {
 				w.store.Update(job.ID, func(*Job) { lp.State = "failed" })
 				once.Do(func() {
 					firstErr = err
-					job.Cancel() // abort sibling blobs
+					job.Cancel()
 				})
 			}
-		}(plan.Layers[i], job.Layers[i])
+		}(plan.Layers[i], t.Layers[i])
 	}
 	wg.Wait()
 	return firstErr
 }
 
-// finish moves the job to a terminal state. A nil error means success; a
-// context cancellation maps to canceled, anything else to failed.
+// runDistribute triggers each engine to pull concurrently. An engine failure
+// marks only its transfer; the job still completes.
+func (w *Warmer) runDistribute(ctx context.Context, job *Job, ex *jobExec) {
+	var wg sync.WaitGroup
+	for _, step := range ex.engines {
+		wg.Add(1)
+		go func(step engineStep) {
+			defer wg.Done()
+			t := job.Transfers[step.transfer]
+			w.store.Update(job.ID, func(*Job) { t.State = "running" })
+			sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
+			err := step.engine.Pull(ctx, step.ref, sink)
+			w.store.Update(job.ID, func(*Job) {
+				if err != nil {
+					t.State = "failed"
+					t.Err = err.Error()
+					return
+				}
+				for _, lp := range t.Layers {
+					if lp.State != "exists" {
+						lp.State = "done"
+						lp.Done.Store(lp.Total)
+					}
+				}
+				t.BytesDone.Store(t.BytesTotal)
+				t.State = "done"
+			})
+		}(step)
+	}
+	wg.Wait()
+}
+
+func (w *Warmer) failTransfer(job *Job, t *Transfer, err error) error {
+	w.store.Update(job.ID, func(*Job) {
+		t.State = "failed"
+		t.Err = err.Error()
+	})
+	return err
+}
+
 func (w *Warmer) finish(job *Job, err error) {
 	w.store.Update(job.ID, func(j *Job) {
 		if j.State.Terminal() {
@@ -283,7 +420,7 @@ func (w *Warmer) finish(job *Job, err error) {
 	})
 }
 
-func (w *Warmer) effectivePlatforms(req []string) []string {
+func (w *Warmer) platforms(req []string) []string {
 	if len(req) > 0 {
 		return req
 	}
@@ -293,28 +430,103 @@ func (w *Warmer) effectivePlatforms(req []string) []string {
 	return []string{runtime.GOOS + "/" + runtime.GOARCH}
 }
 
-func (w *Warmer) shouldTrigger(req *bool) bool {
-	if req != nil {
-		return *req
+// refOpts returns name parse options for a registry store (insecure + test opts).
+func (w *Warmer) refOpts(c config.StoreConfig) []name.Option {
+	opts := append([]name.Option(nil), w.srcOpts...)
+	if c.Insecure {
+		opts = append(opts, name.Insecure)
 	}
-	return w.wc.TriggerDownstream
+	return opts
 }
 
-// layerSink reports one blob's progress: byte deltas are lock-free atomics,
-// state transitions go through the store lock.
+// layerSink reports a registry-copy blob's progress.
 type layerSink struct {
-	w   *Warmer
-	job *Job
-	lp  *LayerProgress
+	w     *Warmer
+	jobID string
+	t     *Transfer
+	lp    *LayerProgress
 }
 
 func (s *layerSink) Add(n int64) {
 	s.lp.Done.Add(n)
-	s.job.BytesDone.Add(n)
+	s.t.BytesDone.Add(n)
 }
 
 func (s *layerSink) SetState(state string) {
-	s.w.store.Update(s.job.ID, func(*Job) { s.lp.State = state })
+	s.w.store.Update(s.jobID, func(*Job) { s.lp.State = state })
+}
+
+// engineSink folds an engine's per-layer reports into a Transfer, upserting
+// layers by digest and recomputing the transfer totals.
+type engineSink struct {
+	w     *Warmer
+	jobID string
+	t     *Transfer
+	idx   map[string]*LayerProgress
+}
+
+func (s *engineSink) Layer(u down.LayerUpdate) {
+	s.w.store.Update(s.jobID, func(*Job) {
+		lp := s.idx[u.Digest]
+		if lp == nil {
+			lp = &LayerProgress{Digest: u.Digest, State: "pulling"}
+			s.idx[u.Digest] = lp
+			s.t.Layers = append(s.t.Layers, lp)
+		}
+		if u.Total > 0 {
+			lp.Total = u.Total
+		}
+		switch u.State {
+		case "exists":
+			lp.State = "exists"
+			lp.Done.Store(lp.Total)
+		case "done":
+			lp.State = "done"
+			if lp.Total > 0 {
+				lp.Done.Store(lp.Total)
+			}
+		default:
+			lp.State = "pulling"
+			lp.Done.Store(u.Done)
+		}
+		var tot, done int64
+		for _, l := range s.t.Layers {
+			tot += l.Total
+			done += l.Done.Load()
+		}
+		s.t.BytesTotal = tot
+		s.t.BytesDone.Store(done)
+	})
+}
+
+func identifier(ref name.Reference) string {
+	if d, ok := ref.(name.Digest); ok {
+		return "@" + d.DigestStr()
+	}
+	return ":" + ref.Identifier()
+}
+
+// rewriteHost replaces the registry host of ref, preserving repo path and tag/digest.
+func rewriteHost(ref name.Reference, host string) (string, error) {
+	repo := ref.Context().RepositoryStr()
+	var out string
+	if d, ok := ref.(name.Digest); ok {
+		out = host + "/" + repo + "@" + d.DigestStr()
+	} else {
+		out = host + "/" + repo + ":" + ref.Identifier()
+	}
+	if _, err := name.ParseReference(out); err != nil {
+		return "", z.Err(err, "invalid downstream ref %q", out)
+	}
+	return out, nil
+}
+
+func jobBytes(job *Job) int64 {
+	var n int64
+	for _, t := range job.Transfers {
+		n += t.BytesDone.Load()
+	}
+	return n
 }
 
 func newID() string {
@@ -322,5 +534,5 @@ func newID() string {
 	if _, err := rand.Read(b[:]); err != nil {
 		panic(fmt.Sprintf("warm: read random: %v", err))
 	}
-	return "wrm_" + hex.EncodeToString(b[:])
+	return "job_" + hex.EncodeToString(b[:])
 }
