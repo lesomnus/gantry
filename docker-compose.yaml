@@ -1,13 +1,13 @@
 services:
   app:
-    image: ghcr.io/lesomnus/go-app:${REVISION:-local}
+    image: ghcr.io/lesomnus/gantry:${REVISION:-local}
     command: [greet, lesomnus]
 
     network_mode: host
     privileged: true
 
     volumes:
-      - ./go-app.yaml:/go-app.yaml:ro
+      - ./gantry.yaml:/gantry.yaml:ro
 
     deploy:
       resources:

@@ -1,5 +1,5 @@
 {
-	"name": "lesomnus/go-app",
+	"name": "lesomnus/gantry",
 	"dockerComposeFile": "docker-compose.yaml",
 	"service": "dev",
 	"workspaceFolder": "/workspace",

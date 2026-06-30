@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/lesomnus/go-app/cmd/version"
+	"github.com/lesomnus/gantry/cmd/version"
 	"github.com/lesomnus/mkot"
 	"github.com/lesomnus/mkot/pretty"
 	"github.com/lesomnus/otx"
@@ -32,11 +32,11 @@ func (c *OtelConfig) Build(ctx context.Context) (context.Context, *otx.Otx, erro
 		otc.Providers = map[mkot.Id]*mkot.ProviderConfig{}
 	}
 
-	const ServiceResourceId mkot.Id = "resource/go-app"
+	const ServiceResourceId mkot.Id = "resource/gantry"
 	if _, ok := otc.Processors[ServiceResourceId]; !ok {
 		otc.Processors[ServiceResourceId] = &mkot.Resource{
 			Attributes: []mkot.Attr{
-				{Key: "service.name", Value: attribute.StringValue("go-app")},
+				{Key: "service.name", Value: attribute.StringValue("gantry")},
 				{Key: "service.version", Value: attribute.StringValue(version.Get().Version)},
 			},
 		}

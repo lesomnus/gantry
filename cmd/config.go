@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/goccy/go-yaml"
-	"github.com/lesomnus/go-app/cmd/config"
+	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/xli"
 	"github.com/lesomnus/xli/flg"

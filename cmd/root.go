@@ -11,7 +11,7 @@ import (
 
 func NewCmdRoot() *xli.Command {
 	return &xli.Command{
-		Name: "go-app",
+		Name: "gantry",
 
 		Flags: flg.Flags{
 			&flg.String{Name: "config", Brief: "path to config file"},
