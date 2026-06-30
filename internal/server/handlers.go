@@ -16,6 +16,19 @@ type createJobRequest struct {
 	Distribute []string `json:"distribute"`
 }
 
+// handleCreateJob godoc
+//
+//	@Summary	Create a job
+//	@Description	Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it. Idempotent per identical move.
+//	@Tags		jobs
+//	@Accept		json
+//	@Produce	json
+//	@Param		request	body		createJobRequest	true	"job request"
+//	@Success	202		{object}	warm.JobSnapshot
+//	@Failure	400		{object}	errorResponse
+//	@Failure	503		{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/job [post]
 func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	var req createJobRequest
 	if err := readJSON(r, &req); err != nil {
@@ -45,14 +58,34 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, snap)
 }
 
+// handleListJobs godoc
+//
+//	@Summary	List jobs
+//	@Tags		jobs
+//	@Produce	json
+//	@Param		state	query		string	false	"filter by state"
+//	@Param		ref		query		string	false	"filter by ref substring"
+//	@Success	200		{object}	jobListResponse
+//	@Security	BearerAuth
+//	@Router		/v1/job [get]
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	f := warm.Filter{
 		State: warm.JobState(r.URL.Query().Get("state")),
 		Ref:   r.URL.Query().Get("ref"),
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.store.List(f)})
+	writeJSON(w, http.StatusOK, jobListResponse{Items: s.store.List(f)})
 }
 
+// handleGetJob godoc
+//
+//	@Summary	Get a job
+//	@Tags		jobs
+//	@Produce	json
+//	@Param		id	path		string	true	"job id"
+//	@Success	200	{object}	warm.JobSnapshot
+//	@Failure	404	{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/job/{id} [get]
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	snap, ok := s.store.Snapshot(r.PathValue("id"))
 	if !ok {
@@ -62,6 +95,15 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
+// handleDeleteJob godoc
+//
+//	@Summary	Cancel or evict a job
+//	@Tags		jobs
+//	@Param		id	path	string	true	"job id"
+//	@Success	204
+//	@Failure	404	{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/job/{id} [delete]
 func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	if !s.store.Delete(r.PathValue("id")) {
 		writeErr(w, http.StatusNotFound, "job not found")
@@ -70,6 +112,19 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleProgress godoc
+//
+//	@Summary	Stream job progress
+//	@Description	Server-Sent Events stream of progress; with ?wait=<dur> it long-polls and returns one JSON snapshot once the job is terminal.
+//	@Tags		jobs
+//	@Produce	text/event-stream
+//	@Param		id		path		string	true	"job id"
+//	@Param		wait	query		string	false	"long-poll duration, e.g. 30s"
+//	@Success	200		{object}	warm.JobSnapshot
+//	@Failure	404		{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/job/{id}/progress [get]
+//
 // handleProgress streams progress as Server-Sent Events, or — when ?wait=<dur> is
 // given — long-polls and returns a single JSON snapshot once the job is terminal.
 func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {

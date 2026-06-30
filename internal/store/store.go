@@ -7,6 +7,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/down"
@@ -20,23 +21,25 @@ type Set struct {
 	allowUnknown bool
 }
 
-func NewSet(stores []config.StoreConfig, allowUnknown bool) (*Set, error) {
+func NewSet(stores map[string]config.StoreConfig, allowUnknown bool) (*Set, error) {
 	s := &Set{
 		byName:       make(map[string]config.StoreConfig, len(stores)),
 		engines:      make(map[string]down.Engine, len(stores)),
 		allowUnknown: allowUnknown,
 	}
-	for _, c := range stores {
-		s.byName[c.Name] = c
-		s.order = append(s.order, c.Name)
+	for name, c := range stores {
+		c.Name = name
+		s.byName[name] = c
+		s.order = append(s.order, name)
 		if c.IsEngine() {
 			eng, err := down.New(c)
 			if err != nil {
-				return nil, fmt.Errorf("store %q: %w", c.Name, err)
+				return nil, fmt.Errorf("store %q: %w", name, err)
 			}
-			s.engines[c.Name] = eng
+			s.engines[name] = eng
 		}
 	}
+	sort.Strings(s.order) // stable display; store order is not significant
 	return s, nil
 }
 
@@ -73,7 +76,7 @@ func (s *Set) Registry(ref string) (config.StoreConfig, error) {
 	}
 	return config.StoreConfig{
 		Name:    ref,
-		Kind:    "registry",
+		Kind:    "oci",
 		Host:    ref,
 		Mode:    "copy",
 		Rewrite: config.DefaultRewrite(),

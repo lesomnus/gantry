@@ -18,7 +18,7 @@ func newTestServer(t *testing.T) (http.Handler, warm.Store) {
 	t.Helper()
 	var c config.Config
 	c.Serve.AllowUnknownStores = true
-	c.Serve.Stores = []config.StoreConfig{{Name: "cache", Kind: "registry", Host: "cache.local", Insecure: true, Mode: "copy"}}
+	c.Serve.Stores = map[string]config.StoreConfig{"cache": {Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"}}
 	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
@@ -132,6 +132,28 @@ func TestListJobsFilter(t *testing.T) {
 	}
 }
 
+func TestOpenAPISchema(t *testing.T) {
+	h, _ := newTestServer(t)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/openapi.json", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rr.Code)
+	}
+	var spec struct {
+		OpenAPI string                 `json:"openapi"`
+		Paths   map[string]interface{} `json:"paths"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &spec); err != nil {
+		t.Fatalf("spec is not valid JSON: %v", err)
+	}
+	if !strings.HasPrefix(spec.OpenAPI, "3.1") {
+		t.Errorf("openapi = %q, want 3.1.x", spec.OpenAPI)
+	}
+	if _, ok := spec.Paths["/v1/job"]; !ok {
+		t.Errorf("spec missing /v1/job path; got %v", spec.Paths)
+	}
+}
+
 func TestListStoresEmpty(t *testing.T) {
 	h, _ := newTestServer(t)
 	rr := httptest.NewRecorder()
@@ -142,7 +164,7 @@ func TestListStoresEmpty(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].Name != "cache" || resp.Items[0].Kind != "registry" {
+	if len(resp.Items) != 1 || resp.Items[0].Name != "cache" || resp.Items[0].Kind != "oci" {
 		t.Errorf("stores = %+v", resp.Items)
 	}
 }

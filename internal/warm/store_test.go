@@ -15,7 +15,7 @@ func mkJob(id, ref string, platforms []string) *Job {
 func TestStoreAddGetSnapshot(t *testing.T) {
 	s := NewMemStore()
 	j := mkJob("a", "docker.io/library/redis:7", []string{"linux/amd64"})
-	j.Transfers = []*Transfer{{Store: "cache", Kind: "registry", BytesTotal: 100}}
+	j.Transfers = []*Transfer{{Store: "cache", Kind: "oci", BytesTotal: 100}}
 	if err := s.Add(j); err != nil {
 		t.Fatalf("add: %v", err)
 	}

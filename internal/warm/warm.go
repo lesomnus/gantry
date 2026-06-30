@@ -193,7 +193,7 @@ func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
 		ex.hasCache = true
 		ex.cacheIdx = len(transfers)
 		transfers = append(transfers, &Transfer{
-			Store: ex.to.Name, Kind: "registry", From: ex.from.Name,
+			Store: ex.to.Name, Kind: "oci", From: ex.from.Name,
 			Ref: ex.dst.Name(), State: "pending",
 		})
 	}

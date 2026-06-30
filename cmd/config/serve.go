@@ -9,9 +9,10 @@ type ServeConfig struct {
 	// AllowUnknownStores permits a job to reference a registry by a bare host
 	// that is not a declared store. Engine stores (docker/containerd) must always
 	// be declared. Default false: only declared stores may be used.
-	AllowUnknownStores bool          `yaml:"allow_unknown_stores"`
-	Stores             []StoreConfig `yaml:"stores"`
-	Warm               WarmConfig    `yaml:"warm"`
+	AllowUnknownStores bool `yaml:"allow_unknown_stores"`
+	// Stores are keyed by name; order is not significant.
+	Stores map[string]StoreConfig `yaml:"stores"`
+	Warm   WarmConfig             `yaml:"warm"`
 }
 
 // AuthConfig guards /v1/* (/healthz is always exempt).
@@ -25,14 +26,14 @@ type AuthConfig struct {
 	TLSKey  string `yaml:"tls_key"`
 }
 
-// StoreConfig describes one image store. kind "registry" is a container registry
-// gantry reads from and writes to; kind "docker"/"containerd" is a daemon gantry
-// triggers to pull. Fields not relevant to a kind are ignored.
+// StoreConfig describes one image store. kind "oci" is an OCI distribution
+// registry gantry reads from and writes to; kind "docker"/"containerd" is a
+// daemon gantry triggers to pull. Fields not relevant to a kind are ignored.
 type StoreConfig struct {
-	Name string `yaml:"name"`
-	Kind string `yaml:"kind"` // registry | docker | containerd
+	Name string `yaml:"-"`    // set from the stores map key
+	Kind string `yaml:"kind"` // oci | docker | containerd
 
-	// --- registry ---
+	// --- oci registry ---
 	// Host is the registry host, exposed to rewrite templates as {{.CacheHost}}.
 	Host string `yaml:"host"`
 	// Insecure allows plain-HTTP or self-signed registries.
@@ -58,8 +59,8 @@ type StoreConfig struct {
 	PullHost string `yaml:"pull_host"`
 }
 
-// IsRegistry reports whether the store is a container registry.
-func (s StoreConfig) IsRegistry() bool { return s.Kind == "registry" }
+// IsRegistry reports whether the store is an OCI distribution registry.
+func (s StoreConfig) IsRegistry() bool { return s.Kind == "oci" }
 
 // IsEngine reports whether the store is a daemon gantry triggers to pull.
 func (s StoreConfig) IsEngine() bool { return s.Kind == "docker" || s.Kind == "containerd" }

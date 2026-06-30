@@ -34,18 +34,17 @@ func TestStoresDecode(t *testing.T) {
 serve:
   allow_unknown_stores: true
   stores:
-    - { name: "dockerhub", kind: "registry", host: "docker.io" }
-    - name: "ghcr.io"
-      kind: "registry"
-    - name: "cache"
-      kind: "registry"
+    dockerhub: { kind: "oci", host: "docker.io" }
+    "ghcr.io": { kind: "oci" }
+    cache:
+      kind: "oci"
       host: "cache.local:5000"
       insecure: true
       downstream_host: "cache.cr.com"
       rewrite:
         - { "ghcr.io/**": "{{.CacheHost}}/{{.Repo}}" }
-    - { name: "k3s", kind: "containerd", address: "/run/containerd.sock", namespace: "k8s.io" }
-    - { name: "nomad", kind: "docker", address: "/var/run/docker.sock" }
+    k3s: { kind: "containerd", address: "/run/containerd.sock", namespace: "k8s.io" }
+    nomad: { kind: "docker", address: "/var/run/docker.sock" }
 `
 	var c Config
 	if err := yaml.Unmarshal([]byte(src), &c); err != nil {
@@ -60,23 +59,20 @@ serve:
 	if len(c.Serve.Stores) != 5 {
 		t.Fatalf("stores = %d, want 5", len(c.Serve.Stores))
 	}
-	byName := map[string]StoreConfig{}
-	for _, s := range c.Serve.Stores {
-		byName[s.Name] = s
-	}
-	if dh := byName["dockerhub"]; dh.Mode != "copy" || len(dh.Rewrite) != 1 {
+	ss := c.Serve.Stores
+	if dh := ss["dockerhub"]; dh.Name != "dockerhub" || dh.Mode != "copy" || len(dh.Rewrite) != 1 {
 		t.Errorf("dockerhub registry defaults = %+v", dh)
 	}
-	if g := byName["ghcr.io"]; g.Host != "ghcr.io" {
+	if g := ss["ghcr.io"]; g.Host != "ghcr.io" {
 		t.Errorf("host should default to store name, got %q", g.Host)
 	}
-	if cache := byName["cache"]; cache.DownstreamHost != "cache.cr.com" || cache.Rewrite[0].Pattern != "ghcr.io/**" {
+	if cache := ss["cache"]; cache.DownstreamHost != "cache.cr.com" || cache.Rewrite[0].Pattern != "ghcr.io/**" {
 		t.Errorf("cache = %+v", cache)
 	}
-	if k := byName["k3s"]; !k.IsEngine() || k.Namespace != "k8s.io" {
+	if k := ss["k3s"]; !k.IsEngine() || k.Namespace != "k8s.io" {
 		t.Errorf("k3s = %+v", k)
 	}
-	if !byName["nomad"].IsEngine() || !byName["cache"].IsRegistry() {
+	if !ss["nomad"].IsEngine() || !ss["cache"].IsRegistry() {
 		t.Error("kind predicates wrong")
 	}
 }
@@ -84,26 +80,16 @@ serve:
 func TestStoreValidation(t *testing.T) {
 	t.Run("unknown kind", func(t *testing.T) {
 		var c Config
-		c.Serve.Stores = []StoreConfig{{Name: "x", Kind: "bogus"}}
+		c.Serve.Stores = map[string]StoreConfig{"x": {Kind: "bogus"}}
 		if err := c.Evaluate(); err == nil {
 			t.Error("expected unknown-kind error")
 		}
 	})
-	t.Run("duplicate name", func(t *testing.T) {
+	t.Run("empty name key", func(t *testing.T) {
 		var c Config
-		c.Serve.Stores = []StoreConfig{
-			{Name: "a", Kind: "registry", Host: "x"},
-			{Name: "a", Kind: "docker", Address: "y"},
-		}
+		c.Serve.Stores = map[string]StoreConfig{"": {Kind: "oci"}}
 		if err := c.Evaluate(); err == nil {
-			t.Error("expected duplicate-name error")
-		}
-	})
-	t.Run("missing name", func(t *testing.T) {
-		var c Config
-		c.Serve.Stores = []StoreConfig{{Kind: "registry"}}
-		if err := c.Evaluate(); err == nil {
-			t.Error("expected missing-name error")
+			t.Error("expected empty-name error")
 		}
 	})
 }
@@ -144,8 +130,8 @@ func TestRewriteRuleDecodeRejectsMultiKey(t *testing.T) {
 	const src = `
 serve:
   stores:
-    - name: "cache"
-      kind: "registry"
+    cache:
+      kind: "oci"
       host: "cache.local"
       rewrite:
         - { "a/**": "x", "b/**": "y" }

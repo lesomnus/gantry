@@ -14,8 +14,12 @@ import (
 
 func newWarmer(t *testing.T, stores []config.StoreConfig, allowUnknown bool) (*Warmer, Store) {
 	t.Helper()
+	m := make(map[string]config.StoreConfig, len(stores))
+	for _, s := range stores {
+		m[s.Name] = s
+	}
 	var c config.Config
-	c.Serve.Stores = stores
+	c.Serve.Stores = m
 	c.Serve.AllowUnknownStores = allowUnknown
 	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 2, MaxConcurrentLayers: 2, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
@@ -51,8 +55,8 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 	pushImage(t, up+"/team/app:1", 3)
 
 	w, js := newWarmer(t, []config.StoreConfig{
-		{Name: "up", Kind: "registry", Host: up, Insecure: true},
-		{Name: "cache", Kind: "registry", Host: cache, Insecure: true, Mode: "copy"},
+		{Name: "up", Kind: "oci", Host: up, Insecure: true},
+		{Name: "cache", Kind: "oci", Host: cache, Insecure: true, Mode: "copy"},
 	}, false)
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
@@ -69,7 +73,7 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 		t.Fatalf("transfers = %d, want 1", len(done.Transfers))
 	}
 	tr := done.Transfers[0]
-	if tr.Store != "cache" || tr.From != "up" || tr.Kind != "registry" {
+	if tr.Store != "cache" || tr.From != "up" || tr.Kind != "oci" {
 		t.Errorf("transfer = %+v", tr)
 	}
 	if tr.BytesTotal == 0 || tr.BytesDone != tr.BytesTotal {
@@ -86,7 +90,7 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 
 func TestWarmerDedup(t *testing.T) {
 	w, _ := newWarmer(t, []config.StoreConfig{
-		{Name: "cache", Kind: "registry", Host: "cache.local", Insecure: true, Mode: "copy"},
+		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background() // enqueue without starting workers; jobs stay active
 	req := Request{Ref: "team/app:1", From: "docker.io", To: "cache", Platforms: []string{"linux/amd64"}}
@@ -105,7 +109,7 @@ func TestWarmerDedup(t *testing.T) {
 
 func TestWarmerQueueFull(t *testing.T) {
 	w, _ := newWarmer(t, []config.StoreConfig{
-		{Name: "cache", Kind: "registry", Host: "cache.local", Insecure: true, Mode: "copy"},
+		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background()
 	w.jobs = make(chan *Job, 1)

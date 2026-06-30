@@ -52,37 +52,33 @@ func (c *Config) Evaluate() error {
 	z.FallbackP(&c.Serve.Warm.QueueSize, 256)
 	z.FallbackP((*time.Duration)(&c.Serve.Warm.JobTTL), 30*time.Minute)
 
-	seen := map[string]bool{}
-	for i := range c.Serve.Stores {
-		s := &c.Serve.Stores[i]
-		if s.Name == "" {
-			return z.Err(nil, "store[%d] has no name", i)
+	for name, s := range c.Serve.Stores {
+		if name == "" {
+			return z.Err(nil, "a store has an empty name")
 		}
-		if seen[s.Name] {
-			return z.Err(nil, "duplicate store name %q", s.Name)
-		}
-		seen[s.Name] = true
-
+		s.Name = name
 		switch s.Kind {
-		case "registry":
-			z.FallbackP(&s.Host, s.Name) // a store named "docker.io" defaults its host
+		case "oci":
+			z.FallbackP(&s.Host, name) // a store named "docker.io" defaults its host
 			z.FallbackP(&s.Mode, "copy")
 			if s.Mode != "copy" && s.Mode != "proxy" {
-				return z.Err(nil, "store %q: unknown mode %q", s.Name, s.Mode)
+				return z.Err(nil, "store %q: unknown mode %q", name, s.Mode)
 			}
 			if len(s.Rewrite) == 0 {
-				s.Rewrite = []RewriteRule{{Pattern: "**", Template: "{{.CacheHost}}/{{.Repo}}"}}
-			}
-			for j := range s.Rewrite {
-				if err := s.Rewrite[j].compile(); err != nil {
-					return z.Err(err, "store %q rewrite[%d]", s.Name, j)
+				s.Rewrite = DefaultRewrite()
+			} else {
+				for j := range s.Rewrite {
+					if err := s.Rewrite[j].compile(); err != nil {
+						return z.Err(err, "store %q rewrite[%d]", name, j)
+					}
 				}
 			}
 		case "docker", "containerd":
 			// engine store; address is validated when the store is dialed
 		default:
-			return z.Err(nil, "store %q: unknown kind %q", s.Name, s.Kind)
+			return z.Err(nil, "store %q: unknown kind %q", name, s.Kind)
 		}
+		c.Serve.Stores[name] = s
 	}
 
 	return nil

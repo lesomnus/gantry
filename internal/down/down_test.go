@@ -95,7 +95,7 @@ func TestCapabilities(t *testing.T) {
 }
 
 func TestNewRejectsNonEngine(t *testing.T) {
-	if _, err := New(config.StoreConfig{Name: "x", Kind: "registry"}); err == nil {
+	if _, err := New(config.StoreConfig{Name: "x", Kind: "oci"}); err == nil {
 		t.Error("registry is not an engine kind")
 	}
 	if _, err := New(config.StoreConfig{Name: "x", Kind: "bogus"}); err == nil {

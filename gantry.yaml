@@ -17,17 +17,17 @@ serve:
   # Default false: only declared stores may be used.
   allow_unknown_stores: false
 
-  # Image stores a job can move images between. kind "registry" is a registry
-  # gantry reads/writes; kind "docker"/"containerd" is a daemon gantry triggers
-  # to pull. A job does: copy `from` (registry) -> `to` (registry), then have the
-  # `distribute` engines pull it.
+  # Image stores a job can move images between, keyed by name (order does not
+  # matter). kind "oci" is an OCI distribution registry gantry reads/writes;
+  # kind "docker"/"containerd" is a daemon gantry triggers to pull. A job copies
+  # `from` (oci) -> `to` (oci), then the `distribute` engines pull it.
   stores:
     # Source registry (remote). host defaults to the store name when omitted.
-    - { name: "docker.io", kind: "registry" }
+    docker.io: { kind: "oci" }
 
     # Cache registry gantry fills and engines pull from.
-    - name: "cache"
-      kind: "registry"
+    cache:
+      kind: "oci"
       host: "registry.cache.local"
       insecure: true            # plain-HTTP / self-signed
       mode: "copy"              # copy = push blobs; proxy = read-through self-fill
@@ -41,8 +41,8 @@ serve:
 
     # Engine stores (daemons triggered to pull). Optional pull_host overrides the
     # cache host in the reference this engine pulls.
-    # - { name: "nomad", kind: "docker", address: "/var/run/docker.sock" }
-    # - { name: "k3s", kind: "containerd", address: "/run/k3s/containerd/containerd.sock", namespace: "k8s.io", pull_host: "cache.cr.com" }
+    # nomad: { kind: "docker", address: "/var/run/docker.sock" }
+    # k3s: { kind: "containerd", address: "/run/k3s/containerd/containerd.sock", namespace: "k8s.io", pull_host: "cache.cr.com" }
 
   # Job worker pool.
   warm:

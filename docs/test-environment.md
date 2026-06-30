@@ -103,9 +103,9 @@ serve:
   addr: "127.0.0.1:18080"
   allow_unknown_stores: true   # let `from: docker.io` resolve to a bare host
   stores:
-    - { name: "cache", kind: "registry", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
-    - { name: "dind-docker", kind: "docker",     address: "tcp://docker:2375" }
-    - { name: "dind-ctr",    kind: "containerd",  address: "/run/docker/containerd/containerd.sock", namespace: "moby" }
+    cache:       { kind: "oci", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
+    dind-docker: { kind: "docker",     address: "tcp://docker:2375" }
+    dind-ctr:    { kind: "containerd", address: "/run/docker/containerd/containerd.sock", namespace: "moby" }
   warm:
     platforms: ["linux/amd64"]
 ```

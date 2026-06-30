@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/server/oapi"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/warm"
 )
@@ -32,9 +33,29 @@ func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set) http.Handl
 	mux.HandleFunc("GET /v1/store", s.handleListStores)
 	mux.HandleFunc("POST /v1/store/{name}/pull", s.handleStorePull)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+
+	// The OpenAPI 3.1 schema (public; exempt from auth like /healthz). The server
+	// only exposes the contract — point any viewer (Scalar, Redoc, Swagger UI, an
+	// IDE, ...) at it.
+	mux.HandleFunc("GET /openapi.json", spec("application/json", oapi.JSON))
+	mux.HandleFunc("GET /openapi.yaml", spec("application/yaml", oapi.YAML))
 	return mux
 }
 
+func spec(contentType string, body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Write(body)
+	}
+}
+
+// handleHealthz godoc
+//
+//	@Summary	Liveness probe
+//	@Tags		meta
+//	@Produce	plain
+//	@Success	200	{string}	string	"ok"
+//	@Router		/healthz [get]
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	io.WriteString(w, "ok")
@@ -47,7 +68,30 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
+	writeJSON(w, code, errorResponse{Error: msg})
+}
+
+// errorResponse is the body of every error reply.
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+// jobListResponse is the GET /v1/job body.
+type jobListResponse struct {
+	Items []warm.JobSnapshot `json:"items"`
+}
+
+// storeListResponse is the GET /v1/store body.
+type storeListResponse struct {
+	Items []store.Status `json:"items"`
+}
+
+// storePullResponse is the POST /v1/store/{name}/pull body.
+type storePullResponse struct {
+	Store string `json:"store"`
+	Kind  string `json:"kind"`
+	Ref   string `json:"ref"`
+	State string `json:"state"`
 }
 
 func readJSON(r *http.Request, v any) error {

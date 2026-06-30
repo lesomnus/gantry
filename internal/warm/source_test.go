@@ -81,7 +81,7 @@ func pushIndex(t *testing.T, ref string, platforms ...string) name.Reference {
 }
 
 func reg(name, host string) config.StoreConfig {
-	return config.StoreConfig{Name: name, Kind: "registry", Host: host, Insecure: true, Mode: "copy"}
+	return config.StoreConfig{Name: name, Kind: "oci", Host: host, Insecure: true, Mode: "copy"}
 }
 
 func TestCopySourceWarmCommitAndDedup(t *testing.T) {
@@ -180,7 +180,7 @@ func TestProxySourceReadsThrough(t *testing.T) {
 	ctx := context.Background()
 	host := startRegistry(t)
 	cache := pushImage(t, host+"/cache/app:1", 3)
-	s, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "to", Kind: "registry", Host: host, Insecure: true, Mode: "proxy"})
+	s, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "to", Kind: "oci", Host: host, Insecure: true, Mode: "proxy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestProxySourceReadsThrough(t *testing.T) {
 }
 
 func TestNewSourceUnknownMode(t *testing.T) {
-	if _, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "to", Kind: "registry", Mode: "bogus"}); err == nil {
+	if _, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "to", Kind: "oci", Mode: "bogus"}); err == nil {
 		t.Error("expected error for unknown mode")
 	}
 }

@@ -58,6 +58,7 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 | `DELETE` | `/v1/job/{id}` | Cancel an in-flight job / evict a finished one. |
 | `GET` | `/v1/store` | Configured stores with their kind, capabilities, and readiness. |
 | `POST` | `/v1/store/{name}/pull` | Trigger one engine store to pull a reference. |
+| `GET` | `/openapi.json` · `/openapi.yaml` | The OpenAPI 3.1 schema (exempt from auth). Point any viewer at it. |
 | `GET` | `/healthz` | Liveness (exempt from auth). |
 
 `/v1/*` is guarded by bearer token and/or mTLS when configured (see
@@ -68,8 +69,8 @@ trusted reverse proxy).
 
 See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
 
-- `serve.stores` — the unified store list. `kind: registry` (`host`, `mode`,
-  `insecure`, `rewrite`, `downstream_host`) or `kind: docker`/`containerd`
+- `serve.stores` — the unified store map (keyed by name). `kind: oci` (`host`,
+  `mode`, `insecure`, `rewrite`, `downstream_host`) or `kind: docker`/`containerd`
   (`address`, `namespace`, `pull_host`).
 - `serve.allow_unknown_stores` — let a job name a bare registry host not declared
   as a store (default false).
@@ -86,6 +87,7 @@ insecure-registry constraints are documented in
 
 ```sh
 go test -race ./...   # unit tests always; live docker/containerd tests self-skip without a daemon
+go generate ./...     # regenerate the OpenAPI 3.1 spec (swaggo/swag v2) from handler comments
 ```
 
 ## Status

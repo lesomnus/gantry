@@ -55,6 +55,13 @@ func TestAuthBearer(t *testing.T) {
 			t.Errorf("code = %d, want 200", rr.Code)
 		}
 	})
+	t.Run("openapi schema is exempt", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest("GET", "/openapi.json", nil))
+		if rr.Code != http.StatusOK {
+			t.Errorf("code = %d, want 200", rr.Code)
+		}
+	})
 }
 
 func TestAuthEnvExpansion(t *testing.T) {

@@ -8,6 +8,17 @@ import (
 	"github.com/lesomnus/gantry/cmd"
 )
 
+//go:generate go run github.com/swaggo/swag/v2/cmd/swag@v2.0.0-rc5 init -g main.go -d ./,internal/server,internal/warm,internal/store --parseInternal --v3.1 --ot json,yaml -o internal/server/oapi
+
+//	@title			gantry API
+//	@version		1.0
+//	@description	Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.
+//	@description	A job copies an image `from` an OCI store `to` another, then `distribute` engines pull it.
+
+//	@securityDefinitions.apikey	BearerAuth
+//	@in							header
+//	@name						Authorization
+
 func main() {
 	c := cmd.NewCmdRoot()
 	if err := c.Run(context.Background(), os.Args[1:]); err != nil {

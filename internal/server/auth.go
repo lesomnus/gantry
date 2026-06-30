@@ -25,7 +25,7 @@ func Auth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !enabled || r.URL.Path == "/healthz" || authorized(r, tokens, mtls) {
+			if !enabled || isPublic(r.URL.Path) || authorized(r, tokens, mtls) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -33,6 +33,11 @@ func Auth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "unauthorized")
 		})
 	}
+}
+
+// isPublic reports whether a path bypasses auth (liveness + the API schema).
+func isPublic(path string) bool {
+	return path == "/healthz" || path == "/openapi.json" || path == "/openapi.yaml"
 }
 
 func authorized(r *http.Request, tokens [][]byte, mtls bool) bool {
