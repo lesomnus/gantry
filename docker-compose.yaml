@@ -1,0 +1,19 @@
+services:
+  app:
+    image: ghcr.io/lesomnus/go-app:${REVISION:-local}
+    command: [greet, lesomnus]
+
+    network_mode: host
+    privileged: true
+
+    volumes:
+      - ./go-app.yaml:/go-app.yaml:ro
+
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 64M
+        reservations:
+          cpus: "2"
+          memory: 32M
