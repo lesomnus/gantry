@@ -1,12 +1,17 @@
 services:
   dev:
-    image: ghcr.io/lesomnus/dev-golang:1.26
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: sleep infinity
 
     user: "1000"
     privileged: true
     environment:
-      - SHELL=/bin/zsh
+      SHELL: /bin/zsh
+      DOCKER_HOST: tcp://docker:2375
+      # docker's bundled containerd, shared from the `docker` service below.
+      CONTAINERD_ADDRESS: /run/docker/containerd/containerd.sock
 
     volumes:
       - go.cache.mod:/home/hypnos/go/pkg/mod
@@ -15,6 +20,9 @@ services:
       - ..:/workspace
       - ${HOME}/workspaces:/workspaces
       - ${HOME}/.claude:/home/hypnos/.claude
+
+      # containerd socket shared from the `docker` (dind) service.
+      - containerd.run:/run/docker/containerd
 
     deploy:
       resources:
@@ -26,6 +34,40 @@ services:
           cpus: "2"
           memory: 4G
 
+  docker:
+    image: docker:dind
+    # Run dockerd as PID 1; a background loop keeps the bundled containerd
+    # socket reachable by the dev user (uid 1000) since it cannot chmod it itself.
+    command:
+      - sh
+      - -c
+      - |
+        ( while :; do
+            chmod 0711 /run/docker/containerd 2>/dev/null
+            chmod 0666 /run/docker/containerd/containerd.sock 2>/dev/null
+            sleep 3
+          done ) &
+        exec dockerd --host=tcp://0.0.0.0:2375
+
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+
+    volumes:
+      - docker.data:/var/lib/docker
+      - containerd.run:/run/docker/containerd
+
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 8G
+        reservations:
+          cpus: "4"
+          memory: 4G
+
 volumes:
   go.cache.mod:
   go.cache.bin:
+  docker.data:
+  containerd.run:

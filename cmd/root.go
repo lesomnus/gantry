@@ -21,6 +21,7 @@ func NewCmdRoot() *xli.Command {
 			NewCmdVersion(),
 			NewCmdConfig(),
 			NewCmdGreet(),
+			NewCmdServe(),
 		},
 
 		Handler: xli.Chain(

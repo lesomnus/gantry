@@ -45,6 +45,9 @@ COPY --from=builder /dist/ /
 
 FROM scratch AS app
 
+# CA bundle so warming from / pushing to HTTPS registries works from scratch.
+COPY --from=base /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
 ARG TARGETARCH
 COPY "${TARGETARCH}" /gantry
 
