@@ -38,7 +38,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	&& GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /dist/amd64 . \
 	&& "/dist/${TARGETARCH}" version
 
+# Fresh CA bundle pulled from the distro repo at build time, decoupled from the
+# Go toolchain image. Certs are arch-independent text, so a single-arch fetch is
+# fine even though `app` is multi-platform.
+FROM alpine:3.21 AS certs
+RUN apk add --no-cache ca-certificates
+
 FROM scratch AS build
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /
 COPY --from=builder /dist/ /
 
 
@@ -46,7 +53,8 @@ COPY --from=builder /dist/ /
 FROM scratch AS app
 
 # CA bundle so warming from / pushing to HTTPS registries works from scratch.
-COPY --from=base /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# Comes through the dist artifact, so this stage stays context-only (./dist).
+COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 ARG TARGETARCH
 COPY "${TARGETARCH}" /gantry
