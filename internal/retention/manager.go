@@ -17,10 +17,10 @@ type Schedule struct {
 
 // ApplyResult reports a GC apply outcome.
 type ApplyResult struct {
-	Deleted   []string `json:"deleted"`
-	Untagged  []string `json:"untagged"`
-	Errors    []string `json:"errors,omitempty"`
-	Evaluated int      `json:"evaluated"`
+	Deleted   []string `json:"deleted"`          // content-hash IDs whose bytes were freed
+	Untagged  []string `json:"untagged"`         // refs whose tag was removed but content may remain
+	Errors    []string `json:"errors,omitempty"` // per-ref removal failures, "<ref>: <err>"
+	Evaluated int      `json:"evaluated"`        // number of records considered (delete+keep)
 }
 
 // Manager ties the index, the engines, the usage watchers, and the adaptive GC

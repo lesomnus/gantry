@@ -20,6 +20,7 @@ import (
 //	@Failure	400		{object}	errorResponse
 //	@Failure	404		{object}	errorResponse
 //	@Failure	502		{object}	errorResponse
+//	@Security	BearerAuth
 //	@Router		/v1/store/{name}/remove [post]
 func (s *Server) handleStoreRemove(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -50,33 +51,56 @@ func (s *Server) handleStoreRemove(w http.ResponseWriter, r *http.Request) {
 
 // removeRequest is the POST /v1/store/{name}/remove body.
 type removeRequest struct {
-	Ref string `json:"ref"`
+	Ref string `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to delete from the engine store (required).
 }
 
 // gcRequest overrides the configured policy for one /gc call. Fields are
 // pointers so an explicit zero (e.g. keep_n:0 to force keep-N off, or
 // max_age:"0s" to disable age GC) is distinguishable from "not set".
 type gcRequest struct {
-	MaxAge *config.Duration `json:"max_age,omitempty" swaggertype:"string" example:"720h"`
-	KeepN  *int             `json:"keep_n,omitempty"`
-	Pins   []string         `json:"pins,omitempty"`
+	MaxAge *config.Duration `json:"max_age,omitempty" swaggertype:"string" example:"720h"` // Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.
+	KeepN  *int             `json:"keep_n,omitempty" example:"3"`                          // Override how many most-recent tags to keep per repo; 0 disables keep-N.
+	Pins   []string         `json:"pins,omitempty" example:"docker.io/library/nginx:1.27"` // Override the pinned references exempt from GC.
 }
 
-// handleStoreGC godoc
+// handleStoreGCPlan godoc
 //
-//	@Summary	Evaluate or run retention GC for a store
-//	@Description	GET is a dry-run that returns the retention decision (keep/delete). POST applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
+//	@Summary	Evaluate retention GC for a store (dry-run)
+//	@Description	Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
 //	@Tags		retention
 //	@Accept		json
 //	@Produce	json
 //	@Param		name	path		string		true	"engine store name"
 //	@Param		request	body		gcRequest	false	"policy overrides"
-//	@Success	200		{object}	retention.Decision	"GET: dry-run decision; POST: apply result (retention.ApplyResult)"
+//	@Success	200		{object}	retention.Decision	"dry-run keep/delete decision"
+//	@Failure	400		{object}	errorResponse
 //	@Failure	404		{object}	errorResponse
 //	@Failure	501		{object}	errorResponse
 //	@Failure	502		{object}	errorResponse
+//	@Security	BearerAuth
 //	@Router		/v1/store/{name}/gc [get]
+func (s *Server) handleStoreGCPlan(w http.ResponseWriter, r *http.Request) { s.handleStoreGC(w, r) }
+
+// handleStoreGCApply godoc
+//
+//	@Summary	Run retention GC for a store (apply)
+//	@Description	Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
+//	@Tags		retention
+//	@Accept		json
+//	@Produce	json
+//	@Param		name	path		string		true	"engine store name"
+//	@Param		request	body		gcRequest	false	"policy overrides"
+//	@Success	200		{object}	retention.ApplyResult	"deletions applied"
+//	@Failure	400		{object}	errorResponse
+//	@Failure	404		{object}	errorResponse
+//	@Failure	501		{object}	errorResponse
+//	@Failure	502		{object}	errorResponse
+//	@Security	BearerAuth
 //	@Router		/v1/store/{name}/gc [post]
+func (s *Server) handleStoreGCApply(w http.ResponseWriter, r *http.Request) { s.handleStoreGC(w, r) }
+
+// handleStoreGC is the shared GET(dry-run)/POST(apply) logic behind the two
+// documented wrappers above.
 func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if _, err := s.stores.Engine(name); err != nil {
@@ -122,7 +146,7 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 }
 
 type pinRequest struct {
-	Ref string `json:"ref"`
+	Ref string `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to pin or unpin (exact-match, required).
 }
 
 // pinListResponse is the GET /v1/store/{name}/pin body.
@@ -139,7 +163,9 @@ type pinListResponse struct {
 //	@Param		name	path		string	true	"engine store name"
 //	@Success	200		{object}	pinListResponse
 //	@Failure	404		{object}	errorResponse
+//	@Failure	500		{object}	errorResponse
 //	@Failure	501		{object}	errorResponse
+//	@Security	BearerAuth
 //	@Router		/v1/store/{name}/pin [get]
 func (s *Server) handleListPins(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -167,7 +193,9 @@ func (s *Server) handleListPins(w http.ResponseWriter, r *http.Request) {
 //	@Success	204
 //	@Failure	400	{object}	errorResponse
 //	@Failure	404	{object}	errorResponse
+//	@Failure	500	{object}	errorResponse
 //	@Failure	501	{object}	errorResponse
+//	@Security	BearerAuth
 //	@Router		/v1/store/{name}/pin [post]
 func (s *Server) handlePin(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -196,7 +224,9 @@ func (s *Server) handlePin(w http.ResponseWriter, r *http.Request) {
 //	@Success	204
 //	@Failure	400	{object}	errorResponse
 //	@Failure	404	{object}	errorResponse
+//	@Failure	500	{object}	errorResponse
 //	@Failure	501	{object}	errorResponse
+//	@Security	BearerAuth
 //	@Router		/v1/store/{name}/pin [delete]
 func (s *Server) handleUnpin(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")

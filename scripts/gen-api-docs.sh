@@ -32,6 +32,10 @@ npx -y widdershins@4.0.1 \
 	--omitHeader \
 	"$spec" -o "$tmp"
 
+# Drop widdershins' Slate intro boilerplate ("Scroll down ... Select a language
+# from the tabs above ...") — there are no tabs in a static single-file reference.
+perl -0pi -e 's/^> Scroll down for code samples.*?\n\n//m' "$tmp"
+
 {
 	echo "<!-- Generated from internal/server/oapi/swagger.json by scripts/gen-api-docs.sh — do not edit by hand. -->"
 	echo

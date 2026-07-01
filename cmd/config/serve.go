@@ -14,6 +14,17 @@ type ServeConfig struct {
 	Stores    map[string]StoreConfig `yaml:"stores"`
 	Warm      WarmConfig             `yaml:"warm"`
 	Retention RetentionConfig        `yaml:"retention"`
+	Health    HealthConfig           `yaml:"health"`
+}
+
+// HealthConfig governs the cached per-store health probe (GET /v1/store/{name}/health).
+type HealthConfig struct {
+	// CacheTTL is how long a store's probe result is cached before the next call
+	// re-probes. Default 5s.
+	CacheTTL Duration `yaml:"cache_ttl"`
+	// ProbeTimeout bounds a single store probe (engine ready-check or registry
+	// /v2/ ping). Default 3s.
+	ProbeTimeout Duration `yaml:"probe_timeout"`
 }
 
 // RetentionConfig governs image GC on engine stores. An empty Path disables

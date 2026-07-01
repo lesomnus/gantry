@@ -60,6 +60,7 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 | `GET` | `/v1/job/{id}/progress` | SSE progress stream, or `?wait=<dur>` long-poll. |
 | `DELETE` | `/v1/job/{id}` | Cancel an in-flight job / evict a finished one. |
 | `GET` | `/v1/store` | Configured stores with their kind, capabilities, and readiness. |
+| `GET` | `/v1/store/{name}/health` | Probe one store's reachability (engine ready-check / registry `/v2/` ping). Cached ~5s; `200` healthy, `503` unhealthy. |
 | `POST` | `/v1/store/{name}/pull` | Trigger one engine store to pull a reference. |
 | `POST` | `/v1/store/{name}/remove` | Delete one image from an engine store (syncs the retention index). |
 | `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`pins`. |
@@ -89,6 +90,8 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   as a store (default false).
 - `serve.warm` — `platforms` fallback, `max_concurrent_jobs`/`max_concurrent_layers`
   pool sizes, `distribute_by_default`.
+- `serve.health` — per-store health probe cache: `cache_ttl` (default 5s) and
+  `probe_timeout` (default 3s). Powers `GET /v1/store/{name}/health`.
 - `serve.retention` — image GC on engine stores (disabled unless `path` is set).
   gantry tracks last-used time from the engine's container events, then keeps
   in-use, `pins`, the `keep_n` most-recent tags per repo, and anything newer than

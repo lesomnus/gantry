@@ -24,7 +24,7 @@ func (s *Server) handleListStores(w http.ResponseWriter, r *http.Request) {
 }
 
 type storePullRequest struct {
-	Ref string `json:"ref"`
+	Ref string `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference the engine store should pull (required).
 }
 
 // handleStorePull godoc

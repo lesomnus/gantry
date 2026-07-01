@@ -81,6 +81,9 @@ func (c *Config) Evaluate() error {
 		c.Serve.Stores[name] = s
 	}
 
+	z.FallbackP((*time.Duration)(&c.Serve.Health.CacheTTL), 5*time.Second)
+	z.FallbackP((*time.Duration)(&c.Serve.Health.ProbeTimeout), 3*time.Second)
+
 	if c.Serve.Retention.Enabled() {
 		z.FallbackP((*time.Duration)(&c.Serve.Retention.Interval), time.Hour)
 		z.FallbackP((*time.Duration)(&c.Serve.Retention.MinInterval), time.Minute)

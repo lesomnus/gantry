@@ -4,8 +4,6 @@
 
 <h1 id="gantry-api">gantry API v1.0</h1>
 
-> Scroll down for code samples, example requests and responses. Select a language for code samples from the tabs above or the mobile navigation menu.
-
 Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.
 A job copies an image `from` an OCI store `to` another, then `distribute` engines pull it.
 
@@ -94,18 +92,18 @@ curl -X GET /v1/job \
           "bytes_total": 0,
           "error": "string",
           "from": "string",
-          "kind": "string",
+          "kind": "oci",
           "layers": [
             {
               "digest": "string",
               "done": 0,
               "platform": "string",
-              "state": "string",
+              "state": "pending",
               "total": 0
             }
           ],
           "ref": "string",
-          "state": "string",
+          "state": "pending",
           "store": "string"
         }
       ]
@@ -145,14 +143,26 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
 > Body parameter
 
 ```json
-{}
+{
+  "distribute": [
+    "node-a",
+    "node-b"
+  ],
+  "from": "dockerhub",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "ref": "docker.io/library/nginx:1.27",
+  "to": "local-cache"
+}
 ```
 
 <h3 id="create-a-job-parameters">Parameters</h3>
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
-|body|body|any|true|job request|
+|body|body|[server.createJobRequest](#schemaserver.createjobrequest)|true|job request|
 
 > Example responses
 
@@ -176,18 +186,18 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
       "bytes_total": 0,
       "error": "string",
       "from": "string",
-      "kind": "string",
+      "kind": "oci",
       "layers": [
         {
           "digest": "string",
           "done": 0,
           "platform": "string",
-          "state": "string",
+          "state": "pending",
           "total": 0
         }
       ],
       "ref": "string",
-      "state": "string",
+      "state": "pending",
       "store": "string"
     }
   ]
@@ -201,6 +211,12 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
 |202|[Accepted](https://tools.ietf.org/html/rfc7231#section-6.3.3)|Accepted|[warm.JobSnapshot](#schemawarm.jobsnapshot)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 |503|[Service Unavailable](https://tools.ietf.org/html/rfc7231#section-6.6.4)|Service Unavailable|[server.errorResponse](#schemaserver.errorresponse)|
+
+### Response Headers
+
+|Status|Header|Type|Format|Description|
+|---|---|---|---|---|
+|202|Location|string||canonical URL of the created job (/v1/job/{id})|
 
 <aside class="warning">
 To perform this operation, you must be authenticated by means of one of the following methods:
@@ -291,18 +307,18 @@ curl -X GET /v1/job/{id} \
       "bytes_total": 0,
       "error": "string",
       "from": "string",
-      "kind": "string",
+      "kind": "oci",
       "layers": [
         {
           "digest": "string",
           "done": 0,
           "platform": "string",
-          "state": "string",
+          "state": "pending",
           "total": 0
         }
       ],
       "ref": "string",
-      "state": "string",
+      "state": "pending",
       "store": "string"
     }
   ]
@@ -335,7 +351,7 @@ curl -X GET /v1/job/{id}/progress \
 
 `GET /v1/job/{id}/progress`
 
-Server-Sent Events stream of progress; with ?wait=<dur> it long-polls and returns one JSON snapshot once the job is terminal.
+Streams Server-Sent Events: repeated `event: progress` frames each carrying a JSON warm.JobSnapshot in `data:`, ending with a terminal `event: done` frame. With ?wait=<dur> it instead long-polls and returns a single JSON warm.JobSnapshot (no SSE framing) once the job is terminal or the wait elapses.
 
 <h3 id="stream-job-progress-parameters">Parameters</h3>
 
@@ -354,6 +370,7 @@ Server-Sent Events stream of progress; with ?wait=<dur> it long-polls and return
 |---|---|---|---|
 |200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[warm.JobSnapshot](#schemawarm.jobsnapshot)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
 
 <aside class="warning">
 To perform this operation, you must be authenticated by means of one of the following methods:
@@ -396,7 +413,7 @@ Configured stores with their kind, capabilities, and readiness.
       },
       "error": "string",
       "host": "string",
-      "kind": "string",
+      "kind": "oci",
       "mode": "string",
       "name": "string",
       "namespace": "string",
@@ -411,6 +428,57 @@ Configured stores with their kind, capabilities, and readiness.
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
 |200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.storeListResponse](#schemaserver.storelistresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Check a store's health
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/store/{name}/health \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/store/{name}/health`
+
+Probes one store's reachability (an engine daemon ready-check, or a registry GET /v2/ ping) and returns the result. The probe is cached for a short TTL (serve.health.cache_ttl, default 5s); a cached response sets `cached: true`. Returns 200 when healthy, 503 when unhealthy (report body either way), 404 for an unknown store.
+
+<h3 id="check-a-store's-health-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|store name|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "cached": true,
+  "checked_at": "string",
+  "error": "string",
+  "healthy": true,
+  "kind": "string",
+  "latency_ms": 0,
+  "name": "string"
+}
+```
+
+<h3 id="check-a-store's-health-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[health.Report](#schemahealth.report)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|503|[Service Unavailable](https://tools.ietf.org/html/rfc7231#section-6.6.4)|Service Unavailable|[health.Report](#schemahealth.report)|
 
 <aside class="warning">
 To perform this operation, you must be authenticated by means of one of the following methods:
@@ -437,7 +505,9 @@ Tells one engine store to pull a reference, decoupled from the job pipeline (man
 > Body parameter
 
 ```json
-{}
+{
+  "ref": "docker.io/library/nginx:1.27"
+}
 ```
 
 <h3 id="trigger-an-engine-store-to-pull-parameters">Parameters</h3>
@@ -445,7 +515,7 @@ Tells one engine store to pull a reference, decoupled from the job pipeline (man
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |name|path|string|true|engine store name|
-|body|body|any|true|reference to pull|
+|body|body|[server.storePullRequest](#schemaserver.storepullrequest)|true|reference to pull|
 
 > Example responses
 
@@ -476,34 +546,41 @@ BearerAuth
 
 <h1 id="gantry-api-retention">retention</h1>
 
-## Evaluate or run retention GC for a store
+## Evaluate retention GC for a store (dry-run)
 
 > Code samples
 
 ```shell
 # You can also use wget
-curl -X POST /v1/store/{name}/gc \
+curl -X GET /v1/store/{name}/gc \
   -H 'Content-Type: application/json' \
-  -H 'Accept: application/json'
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
 
 ```
 
-`POST /v1/store/{name}/gc`
+`GET /v1/store/{name}/gc`
 
-GET is a dry-run that returns the retention decision (keep/delete). POST applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
+Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
 
 > Body parameter
 
 ```json
-{}
+{
+  "keep_n": 3,
+  "max_age": "720h",
+  "pins": [
+    "docker.io/library/nginx:1.27"
+  ]
+}
 ```
 
-<h3 id="evaluate-or-run-retention-gc-for-a-store-parameters">Parameters</h3>
+<h3 id="evaluate-retention-gc-for-a-store-(dry-run)-parameters">Parameters</h3>
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |name|path|string|true|engine store name|
-|body|body|any|false|policy overrides|
+|body|body|[server.gcRequest](#schemaserver.gcrequest)|false|policy overrides|
 
 > Example responses
 
@@ -528,17 +605,89 @@ GET is a dry-run that returns the retention decision (keep/delete). POST applies
 }
 ```
 
-<h3 id="evaluate-or-run-retention-gc-for-a-store-responses">Responses</h3>
+<h3 id="evaluate-retention-gc-for-a-store-(dry-run)-responses">Responses</h3>
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|GET: dry-run decision; POST: apply result (retention.ApplyResult)|[retention.Decision](#schemaretention.decision)|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|dry-run keep/delete decision|[retention.Decision](#schemaretention.decision)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
 |501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
 |502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
 
-<aside class="success">
-This operation does not require authentication
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Run retention GC for a store (apply)
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/store/{name}/gc \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/store/{name}/gc`
+
+Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
+
+> Body parameter
+
+```json
+{
+  "keep_n": 3,
+  "max_age": "720h",
+  "pins": [
+    "docker.io/library/nginx:1.27"
+  ]
+}
+```
+
+<h3 id="run-retention-gc-for-a-store-(apply)-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|body|body|[server.gcRequest](#schemaserver.gcrequest)|false|policy overrides|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "deleted": [
+    "string"
+  ],
+  "errors": [
+    "string"
+  ],
+  "evaluated": 0,
+  "untagged": [
+    "string"
+  ]
+}
+```
+
+<h3 id="run-retention-gc-for-a-store-(apply)-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|deletions applied|[retention.ApplyResult](#schemaretention.applyresult)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
 </aside>
 
 ## Unpin a reference
@@ -549,7 +698,8 @@ This operation does not require authentication
 # You can also use wget
 curl -X DELETE /v1/store/{name}/pin \
   -H 'Content-Type: application/json' \
-  -H 'Accept: application/json'
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
 
 ```
 
@@ -558,7 +708,9 @@ curl -X DELETE /v1/store/{name}/pin \
 > Body parameter
 
 ```json
-{}
+{
+  "ref": "docker.io/library/nginx:1.27"
+}
 ```
 
 <h3 id="unpin-a-reference-parameters">Parameters</h3>
@@ -566,7 +718,7 @@ curl -X DELETE /v1/store/{name}/pin \
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |name|path|string|true|engine store name|
-|body|body|any|true|reference to unpin|
+|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference to unpin|
 
 > Example responses
 
@@ -585,10 +737,12 @@ curl -X DELETE /v1/store/{name}/pin \
 |204|[No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5)|No Content|None|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
 |501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
 
-<aside class="success">
-This operation does not require authentication
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
 </aside>
 
 ## List pinned references for a store
@@ -598,7 +752,8 @@ This operation does not require authentication
 ```shell
 # You can also use wget
 curl -X GET /v1/store/{name}/pin \
-  -H 'Accept: application/json'
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
 
 ```
 
@@ -630,10 +785,12 @@ Pinned references are exempt from retention GC (exact-match).
 |---|---|---|---|
 |200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.pinListResponse](#schemaserver.pinlistresponse)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
 |501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
 
-<aside class="success">
-This operation does not require authentication
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
 </aside>
 
 ## Pin a reference (exempt from GC)
@@ -644,7 +801,8 @@ This operation does not require authentication
 # You can also use wget
 curl -X POST /v1/store/{name}/pin \
   -H 'Content-Type: application/json' \
-  -H 'Accept: application/json'
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
 
 ```
 
@@ -653,7 +811,9 @@ curl -X POST /v1/store/{name}/pin \
 > Body parameter
 
 ```json
-{}
+{
+  "ref": "docker.io/library/nginx:1.27"
+}
 ```
 
 <h3 id="pin-a-reference-(exempt-from-gc)-parameters">Parameters</h3>
@@ -661,7 +821,7 @@ curl -X POST /v1/store/{name}/pin \
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |name|path|string|true|engine store name|
-|body|body|any|true|reference to pin|
+|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference to pin|
 
 > Example responses
 
@@ -680,10 +840,12 @@ curl -X POST /v1/store/{name}/pin \
 |204|[No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5)|No Content|None|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
 |501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
 
-<aside class="success">
-This operation does not require authentication
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
 </aside>
 
 ## Remove an image from an engine store
@@ -694,7 +856,8 @@ This operation does not require authentication
 # You can also use wget
 curl -X POST /v1/store/{name}/remove \
   -H 'Content-Type: application/json' \
-  -H 'Accept: application/json'
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
 
 ```
 
@@ -705,7 +868,9 @@ Manually deletes one image from an engine store and syncs the retention index.
 > Body parameter
 
 ```json
-{}
+{
+  "ref": "docker.io/library/nginx:1.27"
+}
 ```
 
 <h3 id="remove-an-image-from-an-engine-store-parameters">Parameters</h3>
@@ -713,7 +878,7 @@ Manually deletes one image from an engine store and syncs the retention index.
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |name|path|string|true|engine store name|
-|body|body|any|true|reference to remove|
+|body|body|[server.removeRequest](#schemaserver.removerequest)|true|reference to remove|
 
 > Example responses
 
@@ -739,8 +904,9 @@ Manually deletes one image from an engine store and syncs the retention index.
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
 |502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
 
-<aside class="success">
-This operation does not require authentication
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
 </aside>
 
 # Schemas
@@ -768,8 +934,72 @@ This operation does not require authentication
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|deleted|[string]|false|none|none|
-|untagged|[string]|false|none|none|
+|deleted|[string]|false|none|content IDs whose bytes were actually deleted|
+|untagged|[string]|false|none|tag refs removed; disk freed only when the last tag/content GCs|
+
+<h2 id="tocS_health.Report">health.Report</h2>
+<!-- backwards compatibility -->
+<a id="schemahealth.report"></a>
+<a id="schema_health.Report"></a>
+<a id="tocShealth.report"></a>
+<a id="tocshealth.report"></a>
+
+```json
+{
+  "cached": true,
+  "checked_at": "string",
+  "error": "string",
+  "healthy": true,
+  "kind": "string",
+  "latency_ms": 0,
+  "name": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|cached|boolean|false|none|Cached is true when this report was served from the TTL cache rather than<br>probed for this request.|
+|checked_at|string|false|none|none|
+|error|string|false|none|none|
+|healthy|boolean|false|none|none|
+|kind|string|false|none|none|
+|latency_ms|integer|false|none|none|
+|name|string|false|none|none|
+
+<h2 id="tocS_retention.ApplyResult">retention.ApplyResult</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.applyresult"></a>
+<a id="schema_retention.ApplyResult"></a>
+<a id="tocSretention.applyresult"></a>
+<a id="tocsretention.applyresult"></a>
+
+```json
+{
+  "deleted": [
+    "string"
+  ],
+  "errors": [
+    "string"
+  ],
+  "evaluated": 0,
+  "untagged": [
+    "string"
+  ]
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|deleted|[string]|false|none|content-hash IDs whose bytes were freed|
+|errors|[string]|false|none|per-ref removal failures, "<ref>: <err>"|
+|evaluated|integer|false|none|number of records considered (delete+keep)|
+|untagged|[string]|false|none|refs whose tag was removed but content may remain|
 
 <h2 id="tocS_retention.Candidate">retention.Candidate</h2>
 <!-- backwards compatibility -->
@@ -863,14 +1093,16 @@ This operation does not require authentication
 ```json
 {
   "distribute": [
-    "string"
+    "node-a",
+    "node-b"
   ],
-  "from": "string",
+  "from": "dockerhub",
   "platforms": [
-    "string"
+    "linux/amd64",
+    "linux/arm64"
   ],
-  "ref": "string",
-  "to": "string"
+  "ref": "docker.io/library/nginx:1.27",
+  "to": "local-cache"
 }
 
 ```
@@ -879,11 +1111,11 @@ This operation does not require authentication
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|distribute|[string]|false|none|none|
-|from|string|false|none|none|
-|platforms|[string]|false|none|none|
-|ref|string|false|none|none|
-|to|string|false|none|none|
+|distribute|[string]|false|none|Engine store names that should pull the image afterwards.|
+|from|string|false|none|Source registry store name or host; defaults to the ref's registry.|
+|platforms|[string]|false|none|Platforms to move; defaults to the server platform when empty.|
+|ref|string|true|none|Image reference to move (required).|
+|to|string|false|none|Destination registry store to copy into; empty means engines pull from `from` directly.|
 
 <h2 id="tocS_server.errorResponse">server.errorResponse</h2>
 <!-- backwards compatibility -->
@@ -914,10 +1146,10 @@ This operation does not require authentication
 
 ```json
 {
-  "keep_n": 0,
+  "keep_n": 3,
   "max_age": "720h",
   "pins": [
-    "string"
+    "docker.io/library/nginx:1.27"
   ]
 }
 
@@ -927,9 +1159,9 @@ This operation does not require authentication
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|keep_n|integer|false|none|none|
-|max_age|string|false|none|none|
-|pins|[string]|false|none|none|
+|keep_n|integer|false|none|Override how many most-recent tags to keep per repo; 0 disables keep-N.|
+|max_age|string|false|none|Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.|
+|pins|[string]|false|none|Override the pinned references exempt from GC.|
 
 <h2 id="tocS_server.jobListResponse">server.jobListResponse</h2>
 <!-- backwards compatibility -->
@@ -958,18 +1190,18 @@ This operation does not require authentication
           "bytes_total": 0,
           "error": "string",
           "from": "string",
-          "kind": "string",
+          "kind": "oci",
           "layers": [
             {
               "digest": "string",
               "done": 0,
               "platform": "string",
-              "state": "string",
+              "state": "pending",
               "total": 0
             }
           ],
           "ref": "string",
-          "state": "string",
+          "state": "pending",
           "store": "string"
         }
       ]
@@ -1016,7 +1248,7 @@ This operation does not require authentication
 
 ```json
 {
-  "ref": "string"
+  "ref": "docker.io/library/nginx:1.27"
 }
 
 ```
@@ -1025,7 +1257,7 @@ This operation does not require authentication
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|ref|string|false|none|none|
+|ref|string|true|none|Image reference to pin or unpin (exact-match, required).|
 
 <h2 id="tocS_server.removeRequest">server.removeRequest</h2>
 <!-- backwards compatibility -->
@@ -1036,7 +1268,7 @@ This operation does not require authentication
 
 ```json
 {
-  "ref": "string"
+  "ref": "docker.io/library/nginx:1.27"
 }
 
 ```
@@ -1045,7 +1277,7 @@ This operation does not require authentication
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|ref|string|false|none|none|
+|ref|string|true|none|Image reference to delete from the engine store (required).|
 
 <h2 id="tocS_server.storeListResponse">server.storeListResponse</h2>
 <!-- backwards compatibility -->
@@ -1068,7 +1300,7 @@ This operation does not require authentication
       },
       "error": "string",
       "host": "string",
-      "kind": "string",
+      "kind": "oci",
       "mode": "string",
       "name": "string",
       "namespace": "string",
@@ -1094,7 +1326,7 @@ This operation does not require authentication
 
 ```json
 {
-  "ref": "string"
+  "ref": "docker.io/library/nginx:1.27"
 }
 
 ```
@@ -1103,7 +1335,7 @@ This operation does not require authentication
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|ref|string|false|none|none|
+|ref|string|true|none|Image reference the engine store should pull (required).|
 
 <h2 id="tocS_server.storePullResponse">server.storePullResponse</h2>
 <!-- backwards compatibility -->
@@ -1149,15 +1381,17 @@ This operation does not require authentication
 
 ```
 
+what this store can do
+
 ### Properties
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|gc|boolean|false|none|none|
-|pull|boolean|false|none|none|
-|read|boolean|false|none|none|
-|verify|boolean|false|none|none|
-|write|boolean|false|none|none|
+|gc|boolean|false|none|engine supports image GC (phase 2)|
+|pull|boolean|false|none|engine can be triggered to pull|
+|read|boolean|false|none|registry: pull blobs|
+|verify|boolean|false|none|engine can verify signatures (phase 2)|
+|write|boolean|false|none|registry: push blobs|
 
 <h2 id="tocS_store.Status">store.Status</h2>
 <!-- backwards compatibility -->
@@ -1178,7 +1412,7 @@ This operation does not require authentication
   },
   "error": "string",
   "host": "string",
-  "kind": "string",
+  "kind": "oci",
   "mode": "string",
   "name": "string",
   "namespace": "string",
@@ -1192,14 +1426,22 @@ This operation does not require authentication
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
 |address|string|false|none|none|
-|capabilities|[store.Caps](#schemastore.caps)|false|none|none|
-|error|string|false|none|none|
+|capabilities|[store.Caps](#schemastore.caps)|false|none|what this store can do|
+|error|string|false|none|engine readiness error, if not ready|
 |host|string|false|none|none|
 |kind|string|false|none|none|
 |mode|string|false|none|none|
 |name|string|false|none|none|
 |namespace|string|false|none|none|
-|ready|boolean|false|none|none|
+|ready|boolean|false|none|registries: always true (from config); engines: live Ready() probe|
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|kind|oci|
+|kind|docker|
+|kind|containerd|
 
 <h2 id="tocS_warm.JobSnapshot">warm.JobSnapshot</h2>
 <!-- backwards compatibility -->
@@ -1226,18 +1468,18 @@ This operation does not require authentication
       "bytes_total": 0,
       "error": "string",
       "from": "string",
-      "kind": "string",
+      "kind": "oci",
       "layers": [
         {
           "digest": "string",
           "done": 0,
           "platform": "string",
-          "state": "string",
+          "state": "pending",
           "total": 0
         }
       ],
       "ref": "string",
-      "state": "string",
+      "state": "pending",
       "store": "string"
     }
   ]
@@ -1299,7 +1541,7 @@ This operation does not require authentication
   "digest": "string",
   "done": 0,
   "platform": "string",
-  "state": "string",
+  "state": "pending",
   "total": 0
 }
 
@@ -1312,8 +1554,18 @@ This operation does not require authentication
 |digest|string|false|none|none|
 |done|integer|false|none|none|
 |platform|string|false|none|none|
-|state|string|false|none|none|
+|state|string|false|none|per-layer progress state|
 |total|integer|false|none|none|
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|state|pending|
+|state|pulling|
+|state|done|
+|state|exists|
+|state|failed|
 
 <h2 id="tocS_warm.TransferSnapshot">warm.TransferSnapshot</h2>
 <!-- backwards compatibility -->
@@ -1328,18 +1580,18 @@ This operation does not require authentication
   "bytes_total": 0,
   "error": "string",
   "from": "string",
-  "kind": "string",
+  "kind": "oci",
   "layers": [
     {
       "digest": "string",
       "done": 0,
       "platform": "string",
-      "state": "string",
+      "state": "pending",
       "total": 0
     }
   ],
   "ref": "string",
-  "state": "string",
+  "state": "pending",
   "store": "string"
 }
 
@@ -1353,9 +1605,22 @@ This operation does not require authentication
 |bytes_total|integer|false|none|none|
 |error|string|false|none|none|
 |from|string|false|none|none|
-|kind|string|false|none|none|
+|kind|string|false|none|which store kind ran this step|
 |layers|[[warm.LayerSnapshot](#schemawarm.layersnapshot)]|false|none|none|
 |ref|string|false|none|none|
-|state|string|false|none|none|
+|state|string|false|none|transfer step state|
 |store|string|false|none|none|
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|kind|oci|
+|kind|docker|
+|kind|containerd|
+|state|pending|
+|state|running|
+|state|done|
+|state|exists|
+|state|failed|
 

@@ -4,6 +4,7 @@
             "down.RemoveResult": {
                 "properties": {
                     "deleted": {
+                        "description": "content IDs whose bytes were actually deleted",
                         "items": {
                             "type": "string"
                         },
@@ -11,6 +12,67 @@
                         "uniqueItems": false
                     },
                     "untagged": {
+                        "description": "tag refs removed; disk freed only when the last tag/content GCs",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "health.Report": {
+                "properties": {
+                    "cached": {
+                        "description": "Cached is true when this report was served from the TTL cache rather than\nprobed for this request.",
+                        "type": "boolean"
+                    },
+                    "checked_at": {
+                        "type": "string"
+                    },
+                    "error": {
+                        "type": "string"
+                    },
+                    "healthy": {
+                        "type": "boolean"
+                    },
+                    "kind": {
+                        "type": "string"
+                    },
+                    "latency_ms": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "retention.ApplyResult": {
+                "properties": {
+                    "deleted": {
+                        "description": "content-hash IDs whose bytes were freed",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "errors": {
+                        "description": "per-ref removal failures, \"\u003cref\u003e: \u003cerr\u003e\"",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "evaluated": {
+                        "description": "number of records considered (delete+keep)",
+                        "type": "integer"
+                    },
+                    "untagged": {
+                        "description": "refs whose tag was removed but content may remain",
                         "items": {
                             "type": "string"
                         },
@@ -72,6 +134,11 @@
             "server.createJobRequest": {
                 "properties": {
                     "distribute": {
+                        "description": "Engine store names that should pull the image afterwards.",
+                        "example": [
+                            "node-a",
+                            "node-b"
+                        ],
                         "items": {
                             "type": "string"
                         },
@@ -79,9 +146,16 @@
                         "uniqueItems": false
                     },
                     "from": {
+                        "description": "Source registry store name or host; defaults to the ref's registry.",
+                        "example": "dockerhub",
                         "type": "string"
                     },
                     "platforms": {
+                        "description": "Platforms to move; defaults to the server platform when empty.",
+                        "example": [
+                            "linux/amd64",
+                            "linux/arm64"
+                        ],
                         "items": {
                             "type": "string"
                         },
@@ -89,12 +163,19 @@
                         "uniqueItems": false
                     },
                     "ref": {
+                        "description": "Image reference to move (required).",
+                        "example": "docker.io/library/nginx:1.27",
                         "type": "string"
                     },
                     "to": {
+                        "description": "Destination registry store to copy into; empty means engines pull from `from` directly.",
+                        "example": "local-cache",
                         "type": "string"
                     }
                 },
+                "required": [
+                    "ref"
+                ],
                 "type": "object"
             },
             "server.errorResponse": {
@@ -108,13 +189,20 @@
             "server.gcRequest": {
                 "properties": {
                     "keep_n": {
+                        "description": "Override how many most-recent tags to keep per repo; 0 disables keep-N.",
+                        "example": 3,
                         "type": "integer"
                     },
                     "max_age": {
+                        "description": "Override max image age (Go duration, e.g. \"720h\"); \"0s\" disables age GC.",
                         "example": "720h",
                         "type": "string"
                     },
                     "pins": {
+                        "description": "Override the pinned references exempt from GC.",
+                        "example": [
+                            "docker.io/library/nginx:1.27"
+                        ],
                         "items": {
                             "type": "string"
                         },
@@ -151,17 +239,27 @@
             "server.pinRequest": {
                 "properties": {
                     "ref": {
+                        "description": "Image reference to pin or unpin (exact-match, required).",
+                        "example": "docker.io/library/nginx:1.27",
                         "type": "string"
                     }
                 },
+                "required": [
+                    "ref"
+                ],
                 "type": "object"
             },
             "server.removeRequest": {
                 "properties": {
                     "ref": {
+                        "description": "Image reference to delete from the engine store (required).",
+                        "example": "docker.io/library/nginx:1.27",
                         "type": "string"
                     }
                 },
+                "required": [
+                    "ref"
+                ],
                 "type": "object"
             },
             "server.storeListResponse": {
@@ -179,9 +277,14 @@
             "server.storePullRequest": {
                 "properties": {
                     "ref": {
+                        "description": "Image reference the engine store should pull (required).",
+                        "example": "docker.io/library/nginx:1.27",
                         "type": "string"
                     }
                 },
+                "required": [
+                    "ref"
+                ],
                 "type": "object"
             },
             "server.storePullResponse": {
@@ -202,20 +305,26 @@
                 "type": "object"
             },
             "store.Caps": {
+                "description": "what this store can do",
                 "properties": {
                     "gc": {
+                        "description": "engine supports image GC (phase 2)",
                         "type": "boolean"
                     },
                     "pull": {
+                        "description": "engine can be triggered to pull",
                         "type": "boolean"
                     },
                     "read": {
+                        "description": "registry: pull blobs",
                         "type": "boolean"
                     },
                     "verify": {
+                        "description": "engine can verify signatures (phase 2)",
                         "type": "boolean"
                     },
                     "write": {
+                        "description": "registry: push blobs",
                         "type": "boolean"
                     }
                 },
@@ -230,12 +339,18 @@
                         "$ref": "#/components/schemas/store.Caps"
                     },
                     "error": {
+                        "description": "engine readiness error, if not ready",
                         "type": "string"
                     },
                     "host": {
                         "type": "string"
                     },
                     "kind": {
+                        "enum": [
+                            "oci",
+                            "docker",
+                            "containerd"
+                        ],
                         "type": "string"
                     },
                     "mode": {
@@ -248,6 +363,7 @@
                         "type": "string"
                     },
                     "ready": {
+                        "description": "registries: always true (from config); engines: live Ready() probe",
                         "type": "boolean"
                     }
                 },
@@ -322,6 +438,14 @@
                         "type": "string"
                     },
                     "state": {
+                        "description": "per-layer progress state",
+                        "enum": [
+                            "pending",
+                            "pulling",
+                            "done",
+                            "exists",
+                            "failed"
+                        ],
                         "type": "string"
                     },
                     "total": {
@@ -345,6 +469,12 @@
                         "type": "string"
                     },
                     "kind": {
+                        "description": "which store kind ran this step",
+                        "enum": [
+                            "oci",
+                            "docker",
+                            "containerd"
+                        ],
                         "type": "string"
                     },
                     "layers": {
@@ -358,6 +488,14 @@
                         "type": "string"
                     },
                     "state": {
+                        "description": "transfer step state",
+                        "enum": [
+                            "pending",
+                            "running",
+                            "done",
+                            "exists",
+                            "failed"
+                        ],
                         "type": "string"
                     },
                     "store": {
@@ -453,16 +591,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "oneOf": [
-                                    {
-                                        "type": "object"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/server.createJobRequest",
-                                        "summary": "request",
-                                        "description": "job request"
-                                    }
-                                ]
+                                "$ref": "#/components/schemas/server.createJobRequest"
                             }
                         }
                     },
@@ -478,7 +607,15 @@
                                 }
                             }
                         },
-                        "description": "Accepted"
+                        "description": "Accepted",
+                        "headers": {
+                            "Location": {
+                                "description": "canonical URL of the created job (/v1/job/{id})",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
                     },
                     "400": {
                         "content": {
@@ -597,7 +734,7 @@
         },
         "/v1/job/{id}/progress": {
             "get": {
-                "description": "Server-Sent Events stream of progress; with ?wait=\u003cdur\u003e it long-polls and returns one JSON snapshot once the job is terminal.",
+                "description": "Streams Server-Sent Events: repeated `event: progress` frames each carrying a JSON warm.JobSnapshot in `data:`, ending with a terminal `event: done` frame. With ?wait=\u003cdur\u003e it instead long-polls and returns a single JSON warm.JobSnapshot (no SSE framing) once the job is terminal or the wait elapses.",
                 "parameters": [
                     {
                         "description": "job id",
@@ -637,6 +774,16 @@
                             }
                         },
                         "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "text/event-stream": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
                     }
                 },
                 "security": [
@@ -678,7 +825,7 @@
         },
         "/v1/store/{name}/gc": {
             "get": {
-                "description": "GET is a dry-run that returns the retention decision (keep/delete). POST applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.",
+                "description": "Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.",
                 "parameters": [
                     {
                         "description": "engine store name",
@@ -694,16 +841,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "oneOf": [
-                                    {
-                                        "type": "object"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/server.gcRequest",
-                                        "summary": "request",
-                                        "description": "policy overrides"
-                                    }
-                                ]
+                                "$ref": "#/components/schemas/server.gcRequest"
                             }
                         }
                     },
@@ -718,160 +856,7 @@
                                 }
                             }
                         },
-                        "description": "GET: dry-run decision; POST: apply result (retention.ApplyResult)"
-                    },
-                    "404": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.errorResponse"
-                                }
-                            }
-                        },
-                        "description": "Not Found"
-                    },
-                    "501": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.errorResponse"
-                                }
-                            }
-                        },
-                        "description": "Not Implemented"
-                    },
-                    "502": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.errorResponse"
-                                }
-                            }
-                        },
-                        "description": "Bad Gateway"
-                    }
-                },
-                "summary": "Evaluate or run retention GC for a store",
-                "tags": [
-                    "retention"
-                ]
-            },
-            "post": {
-                "description": "GET is a dry-run that returns the retention decision (keep/delete). POST applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.",
-                "parameters": [
-                    {
-                        "description": "engine store name",
-                        "in": "path",
-                        "name": "name",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "oneOf": [
-                                    {
-                                        "type": "object"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/server.gcRequest",
-                                        "summary": "request",
-                                        "description": "policy overrides"
-                                    }
-                                ]
-                            }
-                        }
-                    },
-                    "description": "policy overrides"
-                },
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/retention.Decision"
-                                }
-                            }
-                        },
-                        "description": "GET: dry-run decision; POST: apply result (retention.ApplyResult)"
-                    },
-                    "404": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.errorResponse"
-                                }
-                            }
-                        },
-                        "description": "Not Found"
-                    },
-                    "501": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.errorResponse"
-                                }
-                            }
-                        },
-                        "description": "Not Implemented"
-                    },
-                    "502": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.errorResponse"
-                                }
-                            }
-                        },
-                        "description": "Bad Gateway"
-                    }
-                },
-                "summary": "Evaluate or run retention GC for a store",
-                "tags": [
-                    "retention"
-                ]
-            }
-        },
-        "/v1/store/{name}/pin": {
-            "delete": {
-                "parameters": [
-                    {
-                        "description": "engine store name",
-                        "in": "path",
-                        "name": "name",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "oneOf": [
-                                    {
-                                        "type": "object"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/server.pinRequest",
-                                        "summary": "request",
-                                        "description": "reference to unpin"
-                                    }
-                                ]
-                            }
-                        }
-                    },
-                    "description": "reference to unpin",
-                    "required": true
-                },
-                "responses": {
-                    "204": {
-                        "description": "No Content"
+                        "description": "dry-run keep/delete decision"
                     },
                     "400": {
                         "content": {
@@ -902,8 +887,245 @@
                             }
                         },
                         "description": "Not Implemented"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Gateway"
                     }
                 },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Evaluate retention GC for a store (dry-run)",
+                "tags": [
+                    "retention"
+                ]
+            },
+            "post": {
+                "description": "Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.",
+                "parameters": [
+                    {
+                        "description": "engine store name",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/server.gcRequest"
+                            }
+                        }
+                    },
+                    "description": "policy overrides"
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/retention.ApplyResult"
+                                }
+                            }
+                        },
+                        "description": "deletions applied"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Gateway"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Run retention GC for a store (apply)",
+                "tags": [
+                    "retention"
+                ]
+            }
+        },
+        "/v1/store/{name}/health": {
+            "get": {
+                "description": "Probes one store's reachability (an engine daemon ready-check, or a registry GET /v2/ ping) and returns the result. The probe is cached for a short TTL (serve.health.cache_ttl, default 5s); a cached response sets `cached: true`. Returns 200 when healthy, 503 when unhealthy (report body either way), 404 for an unknown store.",
+                "parameters": [
+                    {
+                        "description": "store name",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/health.Report"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/health.Report"
+                                }
+                            }
+                        },
+                        "description": "Service Unavailable"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Check a store's health",
+                "tags": [
+                    "stores"
+                ]
+            }
+        },
+        "/v1/store/{name}/pin": {
+            "delete": {
+                "parameters": [
+                    {
+                        "description": "engine store name",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/server.pinRequest"
+                            }
+                        }
+                    },
+                    "description": "reference to unpin",
+                    "required": true
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "summary": "Unpin a reference",
                 "tags": [
                     "retention"
@@ -943,6 +1165,16 @@
                         },
                         "description": "Not Found"
                     },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    },
                     "501": {
                         "content": {
                             "application/json": {
@@ -954,6 +1186,11 @@
                         "description": "Not Implemented"
                     }
                 },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "summary": "List pinned references for a store",
                 "tags": [
                     "retention"
@@ -975,16 +1212,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "oneOf": [
-                                    {
-                                        "type": "object"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/server.pinRequest",
-                                        "summary": "request",
-                                        "description": "reference to pin"
-                                    }
-                                ]
+                                "$ref": "#/components/schemas/server.pinRequest"
                             }
                         }
                     },
@@ -1015,6 +1243,16 @@
                         },
                         "description": "Not Found"
                     },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    },
                     "501": {
                         "content": {
                             "application/json": {
@@ -1026,6 +1264,11 @@
                         "description": "Not Implemented"
                     }
                 },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "summary": "Pin a reference (exempt from GC)",
                 "tags": [
                     "retention"
@@ -1050,16 +1293,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "oneOf": [
-                                    {
-                                        "type": "object"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/server.storePullRequest",
-                                        "summary": "request",
-                                        "description": "reference to pull"
-                                    }
-                                ]
+                                "$ref": "#/components/schemas/server.storePullRequest"
                             }
                         }
                     },
@@ -1137,16 +1371,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "oneOf": [
-                                    {
-                                        "type": "object"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/server.removeRequest",
-                                        "summary": "request",
-                                        "description": "reference to remove"
-                                    }
-                                ]
+                                "$ref": "#/components/schemas/server.removeRequest"
                             }
                         }
                     },
@@ -1195,6 +1420,11 @@
                         "description": "Bad Gateway"
                     }
                 },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "summary": "Remove an image from an engine store",
                 "tags": [
                     "retention"

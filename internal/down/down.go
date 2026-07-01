@@ -33,8 +33,8 @@ type UsageSink func(ref string, at time.Time)
 // RemoveResult reports what an image removal did. A tag removal may only Untag
 // (disk is freed only when the last referencing tag goes / its content GCs).
 type RemoveResult struct {
-	Untagged []string `json:"untagged,omitempty"`
-	Deleted  []string `json:"deleted,omitempty"`
+	Untagged []string `json:"untagged,omitempty"` // tag refs removed; disk freed only when the last tag/content GCs
+	Deleted  []string `json:"deleted,omitempty"`  // content IDs whose bytes were actually deleted
 }
 
 // Engine is a daemon gantry triggers to pull from — and, for retention, observes

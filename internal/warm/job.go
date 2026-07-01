@@ -86,7 +86,7 @@ func dedupKey(ref string, platforms []string, from, to string, distribute []stri
 // (gantry-driven) and an engine pull (daemon-driven) share this shape.
 type Transfer struct {
 	Store string // destination store name (or host)
-	Kind  string // registry | docker | containerd
+	Kind  string // oci | docker | containerd
 	From  string // source store/host
 	Ref   string // the reference placed in the destination
 
@@ -136,10 +136,10 @@ type JobSnapshot struct {
 
 type TransferSnapshot struct {
 	Store      string          `json:"store"`
-	Kind       string          `json:"kind"`
+	Kind       string          `json:"kind" enums:"oci,docker,containerd"` // which store kind ran this step
 	From       string          `json:"from"`
 	Ref        string          `json:"ref"`
-	State      string          `json:"state"`
+	State      string          `json:"state" enums:"pending,running,done,exists,failed"` // transfer step state
 	BytesTotal int64           `json:"bytes_total"`
 	BytesDone  int64           `json:"bytes_done"`
 	Layers     []LayerSnapshot `json:"layers"`
@@ -151,7 +151,7 @@ type LayerSnapshot struct {
 	Platform string `json:"platform"`
 	Total    int64  `json:"total"`
 	Done     int64  `json:"done"`
-	State    string `json:"state"`
+	State    string `json:"state" enums:"pending,pulling,done,exists,failed"` // per-layer progress state
 }
 
 func (j *Job) snapshot() JobSnapshot {

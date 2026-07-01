@@ -59,6 +59,16 @@ serve:
     # When a job omits `distribute`, fan out to all engine stores.
     distribute_by_default: false
 
+  # Per-store health probe (GET /v1/store/{name}/health). An engine store is
+  # probed with its daemon ready-check; a registry store with a GET /v2/ ping
+  # (a 200 or a 401 auth challenge both count as reachable). Results are cached
+  # so frequent polling (load balancers, dashboards) does not hammer backends.
+  health:
+    # How long a probe result is reused before the next call re-probes.
+    cache_ttl: "5s"
+    # Deadline for a single probe (a hung backend fails at this bound).
+    probe_timeout: "3s"
+
   # Image retention / garbage collection on engine stores. Disabled unless
   # `path` is set. gantry tracks each image's last-used time from the engine's
   # own container events (plus a cold-start seed and a distribute fallback),

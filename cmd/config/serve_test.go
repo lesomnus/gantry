@@ -24,6 +24,12 @@ func TestEvaluateDefaults(t *testing.T) {
 	if got := time.Duration(c.Serve.Warm.JobTTL); got != 30*time.Minute {
 		t.Errorf("job_ttl = %v, want 30m", got)
 	}
+	if got := time.Duration(c.Serve.Health.CacheTTL); got != 5*time.Second {
+		t.Errorf("health.cache_ttl = %v, want 5s", got)
+	}
+	if got := time.Duration(c.Serve.Health.ProbeTimeout); got != 3*time.Second {
+		t.Errorf("health.probe_timeout = %v, want 3s", got)
+	}
 	if c.Serve.AllowUnknownStores {
 		t.Error("allow_unknown_stores should default to false")
 	}

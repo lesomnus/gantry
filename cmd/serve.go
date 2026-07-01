@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server"
 	"github.com/lesomnus/gantry/internal/store"
@@ -56,6 +57,11 @@ func NewCmdServe() *xli.Command {
 					})
 			}
 
+			hc := health.NewChecker(stores, health.Options{
+				CacheTTL:     time.Duration(c.Serve.Health.CacheTTL),
+				ProbeTimeout: time.Duration(c.Serve.Health.ProbeTimeout),
+			})
+
 			jobStore := warm.NewMemStore()
 			wmr := warm.NewWarmer(stores, jobStore, c.Serve.Warm)
 			if gc != nil {
@@ -70,7 +76,7 @@ func NewCmdServe() *xli.Command {
 				go gc.StartScheduler(ctx)
 			}
 
-			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc))
+			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc, hc))
 			srv := &http.Server{
 				Addr:        c.Serve.Addr,
 				Handler:     h,

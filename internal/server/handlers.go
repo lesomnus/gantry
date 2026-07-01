@@ -9,11 +9,11 @@ import (
 )
 
 type createJobRequest struct {
-	Ref        string   `json:"ref"`
-	Platforms  []string `json:"platforms"`
-	From       string   `json:"from"`
-	To         string   `json:"to"`
-	Distribute []string `json:"distribute"`
+	Ref        string   `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to move (required).
+	Platforms  []string `json:"platforms" example:"linux/amd64,linux/arm64"`                   // Platforms to move; defaults to the server platform when empty.
+	From       string   `json:"from" example:"dockerhub"`                                      // Source registry store name or host; defaults to the ref's registry.
+	To         string   `json:"to" example:"local-cache"`                                      // Destination registry store to copy into; empty means engines pull from `from` directly.
+	Distribute []string `json:"distribute" example:"node-a,node-b"`                            // Engine store names that should pull the image afterwards.
 }
 
 // handleCreateJob godoc
@@ -25,6 +25,7 @@ type createJobRequest struct {
 //	@Produce	json
 //	@Param		request	body		createJobRequest	true	"job request"
 //	@Success	202		{object}	warm.JobSnapshot
+//	@Header		202		{string}	Location	"canonical URL of the created job (/v1/job/{id})"
 //	@Failure	400		{object}	errorResponse
 //	@Failure	503		{object}	errorResponse
 //	@Security	BearerAuth
@@ -115,13 +116,14 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 // handleProgress godoc
 //
 //	@Summary	Stream job progress
-//	@Description	Server-Sent Events stream of progress; with ?wait=<dur> it long-polls and returns one JSON snapshot once the job is terminal.
+//	@Description	Streams Server-Sent Events: repeated `event: progress` frames each carrying a JSON warm.JobSnapshot in `data:`, ending with a terminal `event: done` frame. With ?wait=<dur> it instead long-polls and returns a single JSON warm.JobSnapshot (no SSE framing) once the job is terminal or the wait elapses.
 //	@Tags		jobs
 //	@Produce	text/event-stream
 //	@Param		id		path		string	true	"job id"
 //	@Param		wait	query		string	false	"long-poll duration, e.g. 30s"
 //	@Success	200		{object}	warm.JobSnapshot
 //	@Failure	404		{object}	errorResponse
+//	@Failure	500		{object}	errorResponse
 //	@Security	BearerAuth
 //	@Router		/v1/job/{id}/progress [get]
 //

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/warm"
 )
@@ -35,7 +36,8 @@ func newTestServer(t *testing.T) (http.Handler, warm.Store) {
 	cancel()
 	wmr.Start(ctx)
 	t.Cleanup(wmr.Stop)
-	return New(wmr, js, set, nil), js
+	hc := health.NewChecker(set, health.Options{})
+	return New(wmr, js, set, nil, hc), js
 }
 
 func TestHealthz(t *testing.T) {

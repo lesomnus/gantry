@@ -123,24 +123,24 @@ func (s *Set) EngineNames() []string {
 
 // Caps is the capability set reported per store.
 type Caps struct {
-	Read   bool `json:"read,omitempty"`
-	Write  bool `json:"write,omitempty"`
-	Pull   bool `json:"pull,omitempty"`
-	Verify bool `json:"verify,omitempty"`
-	GC     bool `json:"gc,omitempty"`
+	Read   bool `json:"read,omitempty"`   // registry: pull blobs
+	Write  bool `json:"write,omitempty"`  // registry: push blobs
+	Pull   bool `json:"pull,omitempty"`   // engine can be triggered to pull
+	Verify bool `json:"verify,omitempty"` // engine can verify signatures (phase 2)
+	GC     bool `json:"gc,omitempty"`     // engine supports image GC (phase 2)
 }
 
 // Status is one GET /v1/store row.
 type Status struct {
 	Name         string `json:"name"`
-	Kind         string `json:"kind"`
+	Kind         string `json:"kind" enums:"oci,docker,containerd"`
 	Host         string `json:"host,omitempty"`
 	Address      string `json:"address,omitempty"`
 	Namespace    string `json:"namespace,omitempty"`
 	Mode         string `json:"mode,omitempty"`
-	Ready        bool   `json:"ready"`
-	Error        string `json:"error,omitempty"`
-	Capabilities Caps   `json:"capabilities"`
+	Ready        bool   `json:"ready"`           // registries: always true (from config); engines: live Ready() probe
+	Error        string `json:"error,omitempty"` // engine readiness error, if not ready
+	Capabilities Caps   `json:"capabilities"`    // what this store can do
 }
 
 // Status lists every store. Engine readiness is probed; registries are reported
