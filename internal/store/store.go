@@ -101,6 +101,15 @@ func (s *Set) Config(name string) (config.StoreConfig, bool) {
 	return c, ok
 }
 
+// Engines returns the dialed engine clients keyed by store name (for retention).
+func (s *Set) Engines() map[string]down.Engine {
+	out := make(map[string]down.Engine, len(s.engines))
+	for k, v := range s.engines {
+		out[k] = v
+	}
+	return out
+}
+
 // EngineNames returns every declared engine store name, in config order.
 func (s *Set) EngineNames() []string {
 	var out []string

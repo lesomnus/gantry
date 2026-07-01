@@ -11,9 +11,36 @@ type ServeConfig struct {
 	// be declared. Default false: only declared stores may be used.
 	AllowUnknownStores bool `yaml:"allow_unknown_stores"`
 	// Stores are keyed by name; order is not significant.
-	Stores map[string]StoreConfig `yaml:"stores"`
-	Warm   WarmConfig             `yaml:"warm"`
+	Stores    map[string]StoreConfig `yaml:"stores"`
+	Warm      WarmConfig             `yaml:"warm"`
+	Retention RetentionConfig        `yaml:"retention"`
 }
+
+// RetentionConfig governs image GC on engine stores. An empty Path disables
+// retention entirely (no usage watcher, no GC capability).
+type RetentionConfig struct {
+	// Path is the bbolt file for the last-used / pin index. Empty disables GC.
+	Path string `yaml:"path"`
+	// MaxAge deletes an image whose last-used age exceeds it; zero disables age GC.
+	MaxAge Duration `yaml:"max_age"`
+	// KeepN keeps the N most-recently-used tags per repository (even if old);
+	// zero disables keep-N.
+	KeepN int `yaml:"keep_n"`
+	// Pins are exact references that are never GC'd.
+	Pins []string `yaml:"pins"`
+	// Interval is the scheduler's safety/idle cadence — the longest it waits
+	// between GC checks. The scheduler wakes earlier when a record is about to
+	// age out or a usage event arrives.
+	Interval Duration `yaml:"interval"`
+	// MinInterval rate-limits GC runs (debounce for event bursts).
+	MinInterval Duration `yaml:"min_interval"`
+	// Grace holds off age-based deletion for this long after startup, since the
+	// usage index has no history for the downtime. Defaults to MaxAge.
+	Grace Duration `yaml:"grace"`
+}
+
+// Enabled reports whether retention/GC is configured.
+func (c RetentionConfig) Enabled() bool { return c.Path != "" }
 
 // AuthConfig guards /v1/* (/healthz is always exempt).
 type AuthConfig struct {

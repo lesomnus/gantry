@@ -8,7 +8,7 @@ import (
 	"github.com/lesomnus/gantry/cmd"
 )
 
-//go:generate go run github.com/swaggo/swag/v2/cmd/swag@v2.0.0-rc5 init -g main.go -d ./,internal/server,internal/warm,internal/store --parseInternal --v3.1 --ot json,yaml -o internal/server/oapi
+//go:generate go run github.com/swaggo/swag/v2/cmd/swag@v2.0.0-rc5 init -g main.go -d ./,internal/server,internal/warm,internal/store,internal/down,internal/retention,cmd/config --parseInternal --v3.1 --ot json,yaml -o internal/server/oapi
 
 //	@title			gantry API
 //	@version		1.0

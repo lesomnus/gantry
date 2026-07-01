@@ -4,7 +4,9 @@ go 1.26.3
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/containerd/containerd/api v1.11.1
 	github.com/containerd/containerd/v2 v2.3.2
+	github.com/containerd/typeurl/v2 v2.2.3
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-containerregistry v0.21.7
@@ -13,6 +15,7 @@ require (
 	github.com/lesomnus/otx v0.0.0-20260531101103-be4e3034ac45
 	github.com/lesomnus/xli v0.0.0-20260415201908-e5f4624a24b7
 	github.com/lesomnus/z v0.0.0-20260531102454-3f1853bb4278
+	go.etcd.io/bbolt v1.5.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
@@ -24,7 +27,6 @@ require (
 	github.com/Microsoft/hcsshim v0.15.0-rc.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/cgroups/v3 v3.1.3 // indirect
-	github.com/containerd/containerd/api v1.11.1 // indirect
 	github.com/containerd/continuity v0.5.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
@@ -33,7 +35,6 @@ require (
 	github.com/containerd/platforms v1.0.0-rc.4 // indirect
 	github.com/containerd/plugin v1.1.0 // indirect
 	github.com/containerd/ttrpc v1.2.8 // indirect
-	github.com/containerd/typeurl/v2 v2.2.3 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v29.5.3+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.3 // indirect

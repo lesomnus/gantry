@@ -81,5 +81,15 @@ func (c *Config) Evaluate() error {
 		c.Serve.Stores[name] = s
 	}
 
+	if c.Serve.Retention.Enabled() {
+		z.FallbackP((*time.Duration)(&c.Serve.Retention.Interval), time.Hour)
+		z.FallbackP((*time.Duration)(&c.Serve.Retention.MinInterval), time.Minute)
+		// Grace defaults to MaxAge: protect everything for one max-age window after
+		// startup so the downtime gap can't trigger wrongful deletion.
+		if c.Serve.Retention.Grace == 0 {
+			c.Serve.Retention.Grace = c.Serve.Retention.MaxAge
+		}
+	}
+
 	return nil
 }

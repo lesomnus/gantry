@@ -23,6 +23,9 @@ GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
   self-fills instead.
 - `distribute` engines pull `to` (or `from`, when there is no `to`). Their
   per-layer progress is reported best-effort from the daemon.
+- Optionally, gantry reclaims space on the engines it feeds: it tracks each
+  image's last-used time from the daemon's container events and runs an adaptive,
+  policy-driven GC (`serve.retention`). See [Configuration](#configuration).
 
 The cache-side reference is derived from the destination store's `rewrite` rules
 (ordered `{glob: template}`, first match wins). `from`/`to` may be a declared
@@ -58,6 +61,9 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 | `DELETE` | `/v1/job/{id}` | Cancel an in-flight job / evict a finished one. |
 | `GET` | `/v1/store` | Configured stores with their kind, capabilities, and readiness. |
 | `POST` | `/v1/store/{name}/pull` | Trigger one engine store to pull a reference. |
+| `POST` | `/v1/store/{name}/remove` | Delete one image from an engine store (syncs the retention index). |
+| `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`pins`. |
+| `GET` · `POST` · `DELETE` | `/v1/store/{name}/pin` | List / add / remove pinned references (exempt from GC). |
 | `GET` | `/openapi.json` · `/openapi.yaml` | The OpenAPI 3.1 schema (exempt from auth). Point any viewer at it. |
 | `GET` | `/healthz` | Liveness (exempt from auth). |
 
@@ -76,6 +82,11 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   as a store (default false).
 - `serve.warm` — `platforms` fallback, `max_concurrent_jobs`/`max_concurrent_layers`
   pool sizes, `distribute_by_default`.
+- `serve.retention` — image GC on engine stores (disabled unless `path` is set).
+  gantry tracks last-used time from the engine's container events, then keeps
+  in-use, `pins`, the `keep_n` most-recent tags per repo, and anything newer than
+  `max_age`; the rest is reclaimed. The scheduler is adaptive — it idles up to
+  `interval` and wakes only when a record is about to age out or usage changes.
 - `serve.auth` — `tokens` (env-expanded), `client_ca`, and server `tls_cert`/`tls_key`.
 
 ## Development
@@ -94,5 +105,7 @@ go generate ./...     # regenerate the OpenAPI 3.1 spec (swaggo/swag v2) from ha
 
 Phase 1 (move images between stores + status API + engine pull seam) is
 implemented and verified end-to-end against real docker and containerd daemons.
-Planned next: image signature verification and image GC, which bolt onto the
-engine seam as optional capabilities. See [plan.md](plan.md).
+Image retention/GC (`serve.retention`: usage tracking, keep-N-per-repo, pins,
+adaptive scheduler, `/gc` · `/pin` · `/remove` APIs) is implemented and tested
+against a live docker daemon. Planned next: image signature verification, which
+bolts onto the same engine seam as an optional capability. See [plan.md](plan.md).

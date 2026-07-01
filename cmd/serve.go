@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/warm"
@@ -38,14 +39,38 @@ func NewCmdServe() *xli.Command {
 			}
 			defer stores.Close()
 
+			var gc *retention.Manager
+			if c.Serve.Retention.Enabled() {
+				ix, err := retention.Open(c.Serve.Retention.Path)
+				if err != nil {
+					return z.Err(err, "open retention index")
+				}
+				defer ix.Close()
+				rc := c.Serve.Retention
+				gc = retention.NewManager(ix, stores.Engines(),
+					retention.Policy{MaxAge: time.Duration(rc.MaxAge), KeepN: rc.KeepN, Pins: rc.Pins},
+					retention.Schedule{
+						Interval:    time.Duration(rc.Interval),
+						MinInterval: time.Duration(rc.MinInterval),
+						Grace:       time.Duration(rc.Grace),
+					})
+			}
+
 			jobStore := warm.NewMemStore()
 			wmr := warm.NewWarmer(stores, jobStore, c.Serve.Warm)
+			if gc != nil {
+				wmr.SetDistributeHook(func(engine, ref string) { gc.Distributed(engine, ref, time.Now()) })
+			}
 
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			wmr.Start(ctx)
+			if gc != nil {
+				gc.StartWatchers(ctx)
+				go gc.StartScheduler(ctx)
+			}
 
-			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores))
+			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc))
 			srv := &http.Server{
 				Addr:        c.Serve.Addr,
 				Handler:     h,

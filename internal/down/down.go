@@ -7,6 +7,7 @@ package down
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
 )
@@ -26,12 +27,34 @@ type Sink interface {
 	Layer(u LayerUpdate)
 }
 
-// Engine is a daemon gantry triggers to pull from a registry.
+// UsageSink receives "ref was used at t" reports from an engine's usage watcher.
+type UsageSink func(ref string, at time.Time)
+
+// RemoveResult reports what an image removal did. A tag removal may only Untag
+// (disk is freed only when the last referencing tag goes / its content GCs).
+type RemoveResult struct {
+	Untagged []string `json:"untagged,omitempty"`
+	Deleted  []string `json:"deleted,omitempty"`
+}
+
+// Engine is a daemon gantry triggers to pull from — and, for retention, observes
+// usage on and deletes images from.
 type Engine interface {
 	Name() string
 	Kind() string // docker | containerd
 	Ready(ctx context.Context) error
 	Pull(ctx context.Context, ref string, sink Sink) error
+
+	// InUse returns the references and image IDs currently held by live containers.
+	InUse(ctx context.Context) (map[string]bool, error)
+	// SeedUsage reports existing containers' images to bootstrap the index at startup.
+	SeedUsage(ctx context.Context, sink UsageSink) error
+	// WatchUsage streams "image used" events until ctx is done or the stream ends
+	// (the caller reconnects on a non-nil return).
+	WatchUsage(ctx context.Context, sink UsageSink) error
+	// Remove deletes one image by reference.
+	Remove(ctx context.Context, ref string) (RemoveResult, error)
+
 	Close() error
 }
 

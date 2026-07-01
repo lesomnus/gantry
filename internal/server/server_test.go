@@ -35,7 +35,7 @@ func newTestServer(t *testing.T) (http.Handler, warm.Store) {
 	cancel()
 	wmr.Start(ctx)
 	t.Cleanup(wmr.Stop)
-	return New(wmr, js, set), js
+	return New(wmr, js, set, nil), js
 }
 
 func TestHealthz(t *testing.T) {

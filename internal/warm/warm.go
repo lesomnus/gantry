@@ -78,10 +78,11 @@ type Warmer struct {
 	store  Store
 	wc     config.WarmConfig
 
-	jobs    chan *Job
-	idgen   func() string
-	srcOpts []name.Option // parse options for the source ref (tests inject name.Insecure)
-	metrics *metrics
+	jobs     chan *Job
+	idgen    func() string
+	srcOpts  []name.Option // parse options for the source ref (tests inject name.Insecure)
+	metrics  *metrics
+	distHook func(engine, ref string) // notified when an engine pull completes (retention)
 
 	base context.Context
 	wg   sync.WaitGroup
@@ -101,6 +102,10 @@ func NewWarmer(stores *store.Set, jobStore Store, wc config.WarmConfig) *Warmer 
 		metrics: newMetrics(context.Background()),
 	}
 }
+
+// SetDistributeHook registers a callback invoked (engine name, ref) after each
+// successful downstream pull — used to stamp the retention index.
+func (w *Warmer) SetDistributeHook(fn func(engine, ref string)) { w.distHook = fn }
 
 func (w *Warmer) Start(ctx context.Context) {
 	w.base = ctx
@@ -389,6 +394,9 @@ func (w *Warmer) runDistribute(ctx context.Context, job *Job, ex *jobExec) {
 				t.BytesDone.Store(t.BytesTotal)
 				t.State = "done"
 			})
+			if err == nil && w.distHook != nil {
+				w.distHook(step.engine.Name(), step.ref)
+			}
 		}(step)
 	}
 	wg.Wait()

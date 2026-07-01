@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server/oapi"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/warm"
@@ -19,11 +20,12 @@ type Server struct {
 	warmer *warm.Warmer
 	store  warm.Store
 	stores *store.Set
+	gc     *retention.Manager // nil when retention/GC is disabled
 }
 
-// New builds the API handler. Wrap it with Auth for authentication.
-func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set) http.Handler {
-	s := &Server{warmer: warmer, store: jobStore, stores: stores}
+// New builds the API handler. gc may be nil. Wrap it with Auth for authentication.
+func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retention.Manager) http.Handler {
+	s := &Server{warmer: warmer, store: jobStore, stores: stores, gc: gc}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/job", s.handleCreateJob)
 	mux.HandleFunc("GET /v1/job", s.handleListJobs)
@@ -32,6 +34,12 @@ func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set) http.Handl
 	mux.HandleFunc("GET /v1/job/{id}/progress", s.handleProgress)
 	mux.HandleFunc("GET /v1/store", s.handleListStores)
 	mux.HandleFunc("POST /v1/store/{name}/pull", s.handleStorePull)
+	mux.HandleFunc("POST /v1/store/{name}/remove", s.handleStoreRemove)
+	mux.HandleFunc("GET /v1/store/{name}/gc", s.handleStoreGC)
+	mux.HandleFunc("POST /v1/store/{name}/gc", s.handleStoreGC)
+	mux.HandleFunc("GET /v1/store/{name}/pin", s.handleListPins)
+	mux.HandleFunc("POST /v1/store/{name}/pin", s.handlePin)
+	mux.HandleFunc("DELETE /v1/store/{name}/pin", s.handleUnpin)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 
 	// The OpenAPI 3.1 schema (public; exempt from auth like /healthz). The server

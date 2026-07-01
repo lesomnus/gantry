@@ -5,8 +5,11 @@ import (
 	"strings"
 	"time"
 
+	apievents "github.com/containerd/containerd/api/events"
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/typeurl/v2"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/z"
 )
@@ -105,4 +108,82 @@ func digestOf(ref string) string {
 		return ref[i:]
 	}
 	return ""
+}
+
+func (e *containerdEngine) ns(ctx context.Context) context.Context {
+	return namespaces.WithNamespace(ctx, e.namespace)
+}
+
+func (e *containerdEngine) InUse(ctx context.Context) (map[string]bool, error) {
+	ctx = e.ns(ctx)
+	cs, err := e.cli.Containers(ctx)
+	if err != nil {
+		return nil, z.Err(err, "containers")
+	}
+	m := make(map[string]bool, len(cs))
+	for _, c := range cs {
+		if info, err := c.Info(ctx); err == nil && info.Image != "" {
+			m[info.Image] = true
+		}
+	}
+	return m, nil
+}
+
+func (e *containerdEngine) SeedUsage(ctx context.Context, sink UsageSink) error {
+	ctx = e.ns(ctx)
+	cs, err := e.cli.Containers(ctx)
+	if err != nil {
+		return z.Err(err, "containers")
+	}
+	for _, c := range cs {
+		info, err := c.Info(ctx)
+		if err != nil || info.Image == "" {
+			continue
+		}
+		t := info.CreatedAt
+		if info.UpdatedAt.After(t) {
+			t = info.UpdatedAt
+		}
+		sink(info.Image, t)
+	}
+	return nil
+}
+
+func (e *containerdEngine) WatchUsage(ctx context.Context, sink UsageSink) error {
+	nctx := e.ns(ctx)
+	envs, errc := e.cli.Subscribe(nctx, `topic=="/tasks/start"`, `topic=="/containers/create"`)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errc:
+			return err
+		case env := <-envs:
+			if env == nil {
+				continue
+			}
+			v, err := typeurl.UnmarshalAny(env.Event)
+			if err != nil {
+				continue
+			}
+			switch ev := v.(type) {
+			case *apievents.ContainerCreate:
+				if ev.Image != "" {
+					sink(ev.Image, env.Timestamp)
+				}
+			case *apievents.TaskStart:
+				if c, err := e.cli.ContainerService().Get(nctx, ev.ContainerID); err == nil && c.Image != "" {
+					sink(c.Image, env.Timestamp)
+				}
+			}
+		}
+	}
+}
+
+func (e *containerdEngine) Remove(ctx context.Context, ref string) (RemoveResult, error) {
+	ctx = e.ns(ctx)
+	if err := e.cli.ImageService().Delete(ctx, ref, images.SynchronousDelete()); err != nil {
+		return RemoveResult{}, z.Err(err, "delete image")
+	}
+	return RemoveResult{Deleted: []string{ref}}, nil
 }
