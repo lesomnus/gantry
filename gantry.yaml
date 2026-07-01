@@ -99,3 +99,36 @@ serve:
   #   # Hold off age-based deletion this long after startup (usage history is lost
   #   # during downtime). Defaults to max_age.
   #   grace: "1h"
+
+  # Source-image signature verification (Notary Project / notation). When enabled,
+  # gantry verifies the `from` image's signature at job creation; a failure rejects
+  # the job (422) and nothing is created. Disabled unless `mode` is set.
+  #
+  # Trust model (important): there is no OS/system-root fallback. You must supply
+  # the CA cert(s) you trust in `trust_store`; without it the server refuses to
+  # start (fail-fast) rather than accepting attacker signatures. With just a
+  # trust_store, gantry synthesizes a policy that trusts ANY signature chaining to
+  # those CAs (any identity) — supply your own `trust_policy` to pin scopes/identities.
+  # verify:
+  #   # off | verify-if-present (verify when signed, allow unsigned) | require
+  #   # (signature mandatory — reject unsigned AND invalid). Global default.
+  #   mode: "require"
+  #   # Directory of trusted CA certificate files (PEM: *.crt/*.pem/*.cert). Required.
+  #   trust_store: "/etc/gantry/verify/ca"
+  #   # Optional notation trust policy JSON. When omitted, gantry synthesizes one
+  #   # (registryScopes ["*"], trustedIdentities ["*"], the level below) referencing
+  #   # the CA store above. Provide this to restrict trusted identities/registries.
+  #   # trust_policy: "/etc/gantry/verify/trustpolicy.json"
+  #   # Verification level for the synthesized policy: strict (default) enforces
+  #   # cert expiry+revocation; permissive downgrades those to warnings. ("audit"
+  #   # is rejected — it disables trust-anchor enforcement, defeating the gate.)
+  #   level: "strict"
+  #   # Per-verification deadline (registry resolve + signature fetch + verify).
+  #   timeout: "15s"
+  #   # provider: "notation"   # only notation is supported
+
+  # Per-source-registry override: set verify.mode on an oci store to require
+  # signing on some registries and relax it on others, e.g.
+  #   stores:
+  #     dockerhub:    { kind: "oci", verify: { mode: "require" } }
+  #     internal-ci:  { kind: "oci", verify: { mode: "off" } }

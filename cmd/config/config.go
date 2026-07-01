@@ -78,11 +78,34 @@ func (c *Config) Evaluate() error {
 		default:
 			return z.Err(nil, "store %q: unknown kind %q", name, s.Kind)
 		}
+		if s.Verify != nil && !s.Verify.Mode.Valid() {
+			return z.Err(nil, "store %q: verify.mode %q is not one of off/verify-if-present/require", name, s.Verify.Mode)
+		}
 		c.Serve.Stores[name] = s
 	}
 
 	z.FallbackP((*time.Duration)(&c.Serve.Health.CacheTTL), 5*time.Second)
 	z.FallbackP((*time.Duration)(&c.Serve.Health.ProbeTimeout), 3*time.Second)
+
+	if !c.Serve.Verify.Mode.Valid() {
+		return z.Err(nil, "serve.verify.mode %q is not one of off/verify-if-present/require", c.Serve.Verify.Mode)
+	}
+	if c.Serve.VerifyEnabled() {
+		z.FallbackP(&c.Serve.Verify.Provider, "notation")
+		z.FallbackP(&c.Serve.Verify.Level, "strict")
+		z.FallbackP((*time.Duration)(&c.Serve.Verify.Timeout), 15*time.Second)
+		if c.Serve.Verify.Provider != "notation" {
+			return z.Err(nil, "serve.verify.provider %q is not supported (only \"notation\")", c.Serve.Verify.Provider)
+		}
+		switch c.Serve.Verify.Level {
+		case "strict", "permissive":
+		default:
+			// "audit" is intentionally rejected: it downgrades trust-anchor
+			// (authenticity) checks to log-only, so a job would be admitted even
+			// for a signature that does not chain to the trust store.
+			return z.Err(nil, "serve.verify.level %q is not one of strict/permissive", c.Serve.Verify.Level)
+		}
+	}
 
 	if c.Serve.Retention.Enabled() {
 		z.FallbackP((*time.Duration)(&c.Serve.Retention.Interval), time.Hour)

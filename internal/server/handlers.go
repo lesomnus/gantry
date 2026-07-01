@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/internal/warm"
 )
 
@@ -27,6 +28,7 @@ type createJobRequest struct {
 //	@Success	202		{object}	warm.JobSnapshot
 //	@Header		202		{string}	Location	"canonical URL of the created job (/v1/job/{id})"
 //	@Failure	400		{object}	errorResponse
+//	@Failure	422		{object}	errorResponse	"source image signature verification failed"
 //	@Failure	503		{object}	errorResponse
 //	@Security	BearerAuth
 //	@Router		/v1/job [post]
@@ -50,6 +52,9 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, warm.ErrQueueFull):
 		writeErr(w, http.StatusServiceUnavailable, "job queue is full")
+		return
+	case errors.Is(err, verify.ErrUnsigned), errors.Is(err, verify.ErrUntrusted):
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	case err != nil:
 		writeErr(w, http.StatusBadRequest, err.Error())

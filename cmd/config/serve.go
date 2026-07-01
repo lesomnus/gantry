@@ -15,6 +15,86 @@ type ServeConfig struct {
 	Warm      WarmConfig             `yaml:"warm"`
 	Retention RetentionConfig        `yaml:"retention"`
 	Health    HealthConfig           `yaml:"health"`
+	Verify    VerifyConfig           `yaml:"verify"`
+}
+
+// VerifyMode selects how source-image signatures are checked at job admission.
+type VerifyMode string
+
+const (
+	VerifyOff       VerifyMode = "off"               // no verification
+	VerifyIfPresent VerifyMode = "verify-if-present" // verify when a signature exists; allow unsigned
+	VerifyRequire   VerifyMode = "require"           // signature mandatory; reject unsigned & invalid
+)
+
+// Valid reports whether m is a recognized mode (empty is treated as off).
+func (m VerifyMode) Valid() bool {
+	switch m {
+	case "", VerifyOff, VerifyIfPresent, VerifyRequire:
+		return true
+	default:
+		return false
+	}
+}
+
+// VerifyConfig governs source-image signature verification (Notary Project /
+// notation). Verification runs synchronously at job creation; failure rejects
+// the job. Disabled unless Mode is verify-if-present or require.
+type VerifyConfig struct {
+	// Mode is the global default enforcement level: off | verify-if-present | require.
+	Mode VerifyMode `yaml:"mode"`
+	// Provider selects the signature scheme; only "notation" is supported (default).
+	Provider string `yaml:"provider"`
+	// TrustStore is a directory of trusted CA certificate files (PEM: *.crt/*.pem/*.cert).
+	// Required when verification is enabled; there is no OS/system-root fallback.
+	TrustStore string `yaml:"trust_store"`
+	// TrustPolicy is an optional notation trust policy JSON. When empty, gantry
+	// synthesizes a policy that trusts any signature chaining to TrustStore
+	// (registryScopes ["*"], trustedIdentities ["*"], the configured Level).
+	TrustPolicy string `yaml:"trust_policy"`
+	// Level is the synthesized policy's verification level: strict (default) |
+	// permissive | audit. Ignored when TrustPolicy is set.
+	Level string `yaml:"level"`
+	// Timeout bounds a single verification (registry resolve + signature fetch +
+	// verify). Default 15s.
+	Timeout Duration `yaml:"timeout"`
+}
+
+// Enabled reports whether the global default turns verification on.
+func (c VerifyConfig) Enabled() bool {
+	return c.Mode != "" && c.Mode != VerifyOff
+}
+
+// VerifyEnabled reports whether verification runs anywhere: the global default
+// is on, or any store overrides its mode to a non-off value. A per-store
+// override must build the verifier even when the global default is off.
+func (c ServeConfig) VerifyEnabled() bool {
+	if c.Verify.Enabled() {
+		return true
+	}
+	for _, s := range c.Stores {
+		if s.Verify != nil && s.Verify.Mode != "" && s.Verify.Mode != VerifyOff {
+			return true
+		}
+	}
+	return false
+}
+
+// EffectiveMode resolves the enforcement mode for a source store: a non-empty
+// per-store override wins, else the global default.
+func (c VerifyConfig) EffectiveMode(store StoreConfig) VerifyMode {
+	if store.Verify != nil && store.Verify.Mode != "" {
+		return store.Verify.Mode
+	}
+	if c.Mode == "" {
+		return VerifyOff
+	}
+	return c.Mode
+}
+
+// StoreVerify overrides the global verify mode for one source registry store.
+type StoreVerify struct {
+	Mode VerifyMode `yaml:"mode"`
 }
 
 // HealthConfig governs the cached per-store health probe (GET /v1/store/{name}/health).
@@ -87,6 +167,9 @@ type StoreConfig struct {
 	// DownstreamHost overrides the host engine stores are told to pull from when
 	// pulling out of this registry (e.g. push to an IP, have daemons pull a name).
 	DownstreamHost string `yaml:"downstream_host"`
+	// Verify overrides the global serve.verify.mode for images pulled from this
+	// source registry (nil = inherit the global default).
+	Verify *StoreVerify `yaml:"verify"`
 
 	// --- engine (docker / containerd) ---
 	Address string `yaml:"address"`

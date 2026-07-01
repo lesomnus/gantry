@@ -14,6 +14,7 @@ import (
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/store"
+	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/otx"
 	"github.com/lesomnus/z"
 	"go.opentelemetry.io/otel/attribute"
@@ -83,6 +84,7 @@ type Warmer struct {
 	srcOpts  []name.Option // parse options for the source ref (tests inject name.Insecure)
 	metrics  *metrics
 	distHook func(engine, ref string) // notified when an engine pull completes (retention)
+	verifier verify.Verifier          // source-signature verification (nil = disabled)
 
 	base context.Context
 	wg   sync.WaitGroup
@@ -106,6 +108,19 @@ func NewWarmer(stores *store.Set, jobStore Store, wc config.WarmConfig) *Warmer 
 // SetDistributeHook registers a callback invoked (engine name, ref) after each
 // successful downstream pull — used to stamp the retention index.
 func (w *Warmer) SetDistributeHook(fn func(engine, ref string)) { w.distHook = fn }
+
+// SetVerifier enables source-signature verification at job admission. Must be
+// set before Start/Submit.
+func (w *Warmer) SetVerifier(v verify.Verifier) { w.verifier = v }
+
+// rootCtx is the base context for admission-time work (verification); it uses
+// the running server context once Start has been called.
+func (w *Warmer) rootCtx() context.Context {
+	if w.base != nil {
+		return w.base
+	}
+	return context.Background()
+}
 
 func (w *Warmer) Start(ctx context.Context) {
 	w.base = ctx
@@ -201,6 +216,26 @@ func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
 			Store: ex.to.Name, Kind: "oci", From: ex.from.Name,
 			Ref: ex.dst.Name(), State: "pending",
 		})
+	}
+
+	// Verify the source signature (fail-closed) before admitting the job, and pin
+	// ex.src to the verified digest so copy/distribute move exactly what was
+	// verified. Runs after the cache (dst) ref is derived from the tag, so the
+	// cache stays tag-named; only the source pull is pinned to the digest.
+	if w.verifier != nil {
+		dg, err := w.verifier.Verify(w.rootCtx(), ex.from, ex.src)
+		if err != nil {
+			return nil, nil, nil, err // sentinel (ErrUnsigned/ErrUntrusted) preserved for the handler
+		}
+		if dg.Hex != "" {
+			// A proxy-mode cache reads through by tag and ignores the pinned source
+			// digest, so it could fill from a different (unverified) image if the tag
+			// moves after verification. Refuse rather than move unverified bytes.
+			if ex.hasCache && ex.to.Mode == "proxy" {
+				return nil, nil, nil, fmt.Errorf("signature verification requires a copy-mode destination; store %q is proxy", ex.to.Name)
+			}
+			ex.src = ex.src.Context().Digest(dg.String())
+		}
 	}
 
 	// distribute targets (engines)

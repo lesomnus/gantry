@@ -26,6 +26,9 @@ GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
 - Optionally, gantry reclaims space on the engines it feeds: it tracks each
   image's last-used time from the daemon's container events and runs an adaptive,
   policy-driven GC (`serve.retention`). See [Configuration](#configuration).
+- Optionally, gantry verifies the `from` image's signature (Notary Project /
+  notation) at job creation and rejects the job on failure — pinning the verified
+  digest so it moves exactly what was verified (`serve.verify`).
 
 The cache-side reference is derived from the destination store's `rewrite` rules
 (ordered `{glob: template}`, first match wins). `from`/`to` may be a declared
@@ -54,7 +57,7 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/v1/job` | Submit a job (`ref`, `from`, `to`, `distribute`, `platforms`). Idempotent per identical move. |
+| `POST` | `/v1/job` | Submit a job (`ref`, `from`, `to`, `distribute`, `platforms`). Idempotent per identical move. `422` if source-signature verification is enabled and fails. |
 | `GET` | `/v1/job` | List jobs; filter with `?state=` and `?ref=`. |
 | `GET` | `/v1/job/{id}` | Job status: a `transfers[]` array, each with per-layer progress. |
 | `GET` | `/v1/job/{id}/progress` | SSE progress stream, or `?wait=<dur>` long-poll. |
@@ -92,6 +95,12 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   pool sizes, `distribute_by_default`.
 - `serve.health` — per-store health probe cache: `cache_ttl` (default 5s) and
   `probe_timeout` (default 3s). Powers `GET /v1/store/{name}/health`.
+- `serve.verify` — source-image signature verification (Notary Project / notation)
+  at job creation. `mode` (`off` | `verify-if-present` | `require`), a `trust_store`
+  of CA certs (required when enabled — no OS-root fallback; missing ⇒ the server
+  refuses to start), an optional notation `trust_policy`, and `level`. A verified
+  image is pinned to its digest for the copy/pull. Per-source-registry `verify.mode`
+  overrides the global default.
 - `serve.retention` — image GC on engine stores (disabled unless `path` is set).
   gantry tracks last-used time from the engine's container events, then keeps
   in-use, `pins`, the `keep_n` most-recent tags per repo, and anything newer than
@@ -118,5 +127,7 @@ Phase 1 (move images between stores + status API + engine pull seam) is
 implemented and verified end-to-end against real docker and containerd daemons.
 Image retention/GC (`serve.retention`: usage tracking, keep-N-per-repo, pins,
 adaptive scheduler, `/gc` · `/pin` · `/remove` APIs) is implemented and tested
-against a live docker daemon. Planned next: image signature verification, which
-bolts onto the same engine seam as an optional capability. See [plan.md](plan.md).
+against a live docker daemon. Source-image signature verification
+(`serve.verify`, Notary Project / notation) is implemented — verified at job
+admission with digest pinning, and tested end-to-end with in-process notation
+signing. See [plan.md](plan.md).

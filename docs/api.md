@@ -210,6 +210,7 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
 |---|---|---|---|
 |202|[Accepted](https://tools.ietf.org/html/rfc7231#section-6.3.3)|Accepted|[warm.JobSnapshot](#schemawarm.jobsnapshot)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|422|[Unprocessable Entity](https://tools.ietf.org/html/rfc2518#section-10.3)|source image signature verification failed|[server.errorResponse](#schemaserver.errorresponse)|
 |503|[Service Unavailable](https://tools.ietf.org/html/rfc7231#section-6.6.4)|Service Unavailable|[server.errorResponse](#schemaserver.errorresponse)|
 
 ### Response Headers

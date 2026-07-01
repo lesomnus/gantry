@@ -15,14 +15,19 @@ require (
 	github.com/lesomnus/otx v0.0.0-20260531101103-be4e3034ac45
 	github.com/lesomnus/xli v0.0.0-20260415201908-e5f4624a24b7
 	github.com/lesomnus/z v0.0.0-20260531102454-3f1853bb4278
+	github.com/notaryproject/notation-core-go v1.3.0
+	github.com/notaryproject/notation-go v1.3.2
+	github.com/opencontainers/image-spec v1.1.1
 	go.etcd.io/bbolt v1.5.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
+	oras.land/oras-go/v2 v2.6.1
 )
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
+	github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358 // indirect
 	github.com/Microsoft/go-winio v0.6.3-0.20251027160822-ad3df93bed29 // indirect
 	github.com/Microsoft/hcsshim v0.15.0-rc.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -42,9 +47,13 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
+	github.com/go-asn1-ber/asn1-ber v1.5.7 // indirect
+	github.com/go-ldap/ldap/v3 v3.4.10 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
@@ -60,11 +69,14 @@ require (
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
 	github.com/morikuni/aec v1.1.0 // indirect
+	github.com/notaryproject/notation-plugin-framework-go v1.0.0 // indirect
+	github.com/notaryproject/tspclient-go v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/veraison/go-cose v1.3.0 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.18.0 // indirect
@@ -73,7 +85,9 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0 // indirect
 	go.opentelemetry.io/otel/sdk/log v0.19.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20241217172543-b2144cdd0a67 // indirect
+	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect

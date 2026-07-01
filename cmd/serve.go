@@ -14,6 +14,7 @@ import (
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server"
 	"github.com/lesomnus/gantry/internal/store"
+	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/xli"
@@ -66,6 +67,21 @@ func NewCmdServe() *xli.Command {
 			wmr := warm.NewWarmer(stores, jobStore, c.Serve.Warm)
 			if gc != nil {
 				wmr.SetDistributeHook(func(engine, ref string) { gc.Distributed(engine, ref, time.Now()) })
+			}
+			if c.Serve.VerifyEnabled() {
+				v, err := verify.New(c.Serve.Verify)
+				if err != nil {
+					return z.Err(err, "signature verification setup") // fail fast: don't serve unsafe
+				}
+				wmr.SetVerifier(v)
+				l := log.From(ctx)
+				l.Info("signature verification enabled",
+					slog.String("mode", string(c.Serve.Verify.Mode)),
+					slog.String("provider", c.Serve.Verify.Provider))
+				if c.Serve.Verify.Level != "" && c.Serve.Verify.Level != "strict" {
+					l.Warn("signature verification level is not strict: certificate expiry and revocation are not enforced",
+						slog.String("level", c.Serve.Verify.Level))
+				}
 			}
 
 			ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
