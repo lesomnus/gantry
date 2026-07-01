@@ -9,6 +9,7 @@ import (
 )
 
 //go:generate go run github.com/swaggo/swag/v2/cmd/swag@v2.0.0-rc5 init -g main.go -d ./,internal/server,internal/warm,internal/store,internal/down,internal/retention,cmd/config --parseInternal --v3.1 --ot json,yaml -o internal/server/oapi
+//go:generate bash scripts/gen-api-docs.sh
 
 //	@title			gantry API
 //	@version		1.0

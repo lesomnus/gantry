@@ -71,6 +71,13 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 `serve.auth`); with neither set, auth is disabled (intended to sit behind a
 trusted reverse proxy).
 
+A rendered, human-readable reference (every endpoint with parameters, schemas,
+and a `curl` sample) is checked in at [docs/api.md](docs/api.md). For an
+interactive view, point [Scalar](https://github.com/scalar/scalar),
+[Redoc](https://github.com/Redocly/redoc), or
+[Stoplight Elements](https://github.com/stoplightio/elements) at the live
+`/openapi.json` — the server only ships the contract, not a bundled viewer.
+
 ## Configuration
 
 See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
@@ -98,7 +105,8 @@ insecure-registry constraints are documented in
 
 ```sh
 go test -race ./...   # unit tests always; live docker/containerd tests self-skip without a daemon
-go generate ./...     # regenerate the OpenAPI 3.1 spec (swaggo/swag v2) from handler comments
+go generate ./...     # regenerate the OpenAPI 3.1 spec (swaggo/swag v2) from handler comments,
+                      # then render docs/api.md from it (widdershins via scripts/gen-api-docs.sh; needs Node)
 ```
 
 ## Status
