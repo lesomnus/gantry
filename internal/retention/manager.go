@@ -3,9 +3,11 @@ package retention
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/lesomnus/gantry/internal/down"
+	"github.com/lesomnus/otx/log"
 )
 
 // Schedule controls the adaptive GC scheduler.
@@ -81,6 +83,7 @@ func (m *Manager) watch(ctx context.Context, name string, eng down.Engine) {
 	seed := func() {
 		_ = eng.SeedUsage(ctx, func(ref string, at time.Time) { _ = m.ix.Seed(name, ref, at) })
 	}
+	log.From(ctx).Info("usage watcher started", slog.String("engine", name))
 	seed()
 	for ctx.Err() == nil {
 		_ = eng.WatchUsage(ctx, func(ref string, at time.Time) {
@@ -90,6 +93,7 @@ func (m *Manager) watch(ctx context.Context, name string, eng down.Engine) {
 		if ctx.Err() != nil {
 			return
 		}
+		log.From(ctx).Debug("usage watcher reconnecting", slog.String("engine", name))
 		select {
 		case <-ctx.Done():
 			return
@@ -143,6 +147,13 @@ func (m *Manager) apply(ctx context.Context, name string, eng down.Engine, dec D
 		res.Untagged = append(res.Untagged, rr.Untagged...)
 		_ = m.ix.Delete(name, c.Ref)
 	}
+	if len(res.Deleted)+len(res.Untagged) > 0 {
+		log.From(ctx).Info("gc collected", slog.String("store", name),
+			slog.Int("deleted", len(res.Deleted)), slog.Int("untagged", len(res.Untagged)), slog.Int("evaluated", res.Evaluated))
+	}
+	if len(res.Errors) > 0 {
+		log.From(ctx).Warn("gc removal errors", slog.String("store", name), slog.Int("count", len(res.Errors)))
+	}
 	return res
 }
 
@@ -194,6 +205,7 @@ func (m *Manager) gcAll(ctx context.Context) Decision {
 	for name, eng := range m.engines {
 		dec, err := m.plan(ctx, name, eng, m.policy)
 		if err != nil {
+			log.From(ctx).Warn("gc plan failed", slog.String("store", name), slog.String("error", err.Error()))
 			continue
 		}
 		m.apply(ctx, name, eng, dec)

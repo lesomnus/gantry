@@ -1,10 +1,12 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/otx/log"
 )
 
 // handleStoreRemove godoc
@@ -46,6 +48,9 @@ func (s *Server) handleStoreRemove(w http.ResponseWriter, r *http.Request) {
 	if s.gc != nil {
 		_ = s.gc.Index().Delete(name, req.Ref)
 	}
+	log.From(r.Context()).Info("image removed",
+		slog.String("store", name), slog.String("ref", req.Ref),
+		slog.Any("untagged", res.Untagged), slog.Any("deleted", res.Deleted))
 	writeJSON(w, http.StatusOK, res)
 }
 

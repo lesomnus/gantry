@@ -2,11 +2,13 @@ package server
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/internal/warm"
+	"github.com/lesomnus/otx/log"
 )
 
 type createJobRequest struct {
@@ -51,15 +53,21 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, warm.ErrQueueFull):
+		log.From(r.Context()).Warn("job rejected: queue full", slog.String("ref", req.Ref))
 		writeErr(w, http.StatusServiceUnavailable, "job queue is full")
 		return
 	case errors.Is(err, verify.ErrUnsigned), errors.Is(err, verify.ErrUntrusted):
+		log.From(r.Context()).Warn("job rejected: signature verification failed",
+			slog.String("ref", req.Ref), slog.String("from", req.From), slog.String("error", err.Error()))
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	case err != nil:
+		log.From(r.Context()).Warn("job rejected", slog.String("ref", req.Ref), slog.String("error", err.Error()))
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	log.From(r.Context()).Info("job accepted",
+		slog.String("job", snap.ID), slog.String("ref", req.Ref), slog.String("from", req.From), slog.String("to", req.To))
 	w.Header().Set("Location", "/v1/job/"+snap.ID)
 	writeJSON(w, http.StatusAccepted, snap)
 }

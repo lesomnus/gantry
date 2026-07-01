@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/otx"
+	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/z"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -235,6 +237,8 @@ func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
 				return nil, nil, nil, fmt.Errorf("signature verification requires a copy-mode destination; store %q is proxy", ex.to.Name)
 			}
 			ex.src = ex.src.Context().Digest(dg.String())
+			log.From(w.rootCtx()).Info("source signature verified",
+				slog.String("ref", req.Ref), slog.String("from", ex.from.Name), slog.String("digest", dg.String()))
 		}
 	}
 
@@ -301,6 +305,8 @@ func (w *Warmer) worker() {
 func (w *Warmer) run(job *Job) {
 	ctx, span := otx.TraceStart(job.ctx, "job", trace.WithAttributes(attribute.String("gantry.ref", job.Ref)))
 	defer span.End()
+	l := log.From(ctx)
+	l.Info("job started", slog.String("job", job.ID), slog.String("ref", job.Ref), slog.Int("transfers", len(job.Transfers)))
 	w.metrics.active.Add(ctx, 1)
 	defer w.metrics.active.Add(ctx, -1)
 
@@ -309,9 +315,19 @@ func (w *Warmer) run(job *Job) {
 	w.finish(job, err)
 
 	state := "done"
-	if err != nil {
+	switch {
+	case err == nil:
+		l.Info("job done", slog.String("job", job.ID), slog.String("ref", job.Ref),
+			slog.Int64("bytes", jobBytes(job)), slog.Int64("took_ms", time.Since(start).Milliseconds()))
+	case errors.Is(err, context.Canceled) || errors.Is(job.ctx.Err(), context.Canceled):
+		// Cancellation (DELETE /v1/job or shutdown) is a normal terminal state
+		// (finish() maps it to JobCanceled), not a failure — don't alert on it.
+		state = "canceled"
+		l.Info("job canceled", slog.String("job", job.ID), slog.String("ref", job.Ref))
+	default:
 		state = "failed"
 		span.RecordError(err)
+		l.Error("job failed", slog.String("job", job.ID), slog.String("ref", job.Ref), slog.String("error", err.Error()))
 	}
 	w.metrics.duration.Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("state", state)))
 	w.metrics.bytes.Add(ctx, jobBytes(job))
@@ -361,6 +377,8 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec) error {
 		return w.failTransfer(job, t, z.Err(err, "commit"))
 	}
 	w.store.Update(job.ID, func(*Job) { t.State = "done" })
+	log.From(ctx).Info("cache filled",
+		slog.String("store", ex.to.Name), slog.String("ref", ex.dst.Name()), slog.Int64("bytes", t.BytesDone.Load()))
 	return nil
 }
 
@@ -414,6 +432,13 @@ func (w *Warmer) runDistribute(ctx context.Context, job *Job, ex *jobExec) {
 			w.store.Update(job.ID, func(*Job) { t.State = "running" })
 			sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
 			err := step.engine.Pull(ctx, step.ref, sink)
+			if err != nil {
+				log.From(ctx).Warn("distribute failed",
+					slog.String("engine", step.engine.Name()), slog.String("ref", step.ref), slog.String("error", err.Error()))
+			} else {
+				log.From(ctx).Info("distributed",
+					slog.String("engine", step.engine.Name()), slog.String("ref", step.ref))
+			}
 			w.store.Update(job.ID, func(*Job) {
 				if err != nil {
 					t.State = "failed"

@@ -56,6 +56,8 @@ func NewCmdServe() *xli.Command {
 						MinInterval: time.Duration(rc.MinInterval),
 						Grace:       time.Duration(rc.Grace),
 					})
+				log.From(ctx).Info("retention enabled",
+					slog.String("path", rc.Path), slog.String("max_age", time.Duration(rc.MaxAge).String()), slog.Int("keep_n", rc.KeepN))
 			}
 
 			hc := health.NewChecker(stores, health.Options{
