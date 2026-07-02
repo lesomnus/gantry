@@ -28,7 +28,12 @@ GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
   policy-driven GC (`serve.retention`). See [Configuration](#configuration).
 - Optionally, gantry verifies the `from` image's signature (Notary Project /
   notation) at job creation and rejects the job on failure — pinning the verified
-  digest so it moves exactly what was verified (`serve.verify`).
+  digest so it moves exactly what was verified (`serve.verify`). Engines pull that
+  digest (not the tag), and the signature can travel with the image into the cache
+  (`copy_referrers`), so it still verifies there.
+- Optionally, gantry keeps a durable audit log of what it did — jobs, GC,
+  pins, manual ops — that survives restarts (`serve.events`), and exports metrics
+  and traces over OTLP (`otel`).
 
 The cache-side reference is derived from the destination store's `rewrite` rules
 (ordered `{glob: template}`, first match wins). `from`/`to` may be a declared
@@ -55,25 +60,60 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 
 ## HTTP API
 
+**Jobs**
+
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/v1/job` | Submit a job (`ref`, `from`, `to`, `distribute`, `platforms`). Idempotent per identical move. `422` if source-signature verification is enabled and fails. |
-| `GET` | `/v1/job` | List jobs; filter with `?state=` and `?ref=`. |
-| `GET` | `/v1/job/{id}` | Job status: a `transfers[]` array, each with per-layer progress. |
+| `POST` | `/v1/job` | Submit a job (`ref`, `from`, `to`, `distribute`, `platforms`, `copy_referrers`). `202` created / `200` coalesced onto an identical in-flight move; an `Idempotency-Key` header maps a retry back to the same job. `422` if signature verification is enabled and fails. |
+| `POST` | `/v1/job/plan` | Dry-run admission: the resolved store bindings, rewritten cache ref, engine pull refs, and verification outcome — without moving bytes or creating a job. |
+| `GET` | `/v1/job` | List jobs; filter with `?state=` (validated), `?ref=`, `?since=`, `?limit=`. |
+| `GET` | `/v1/job/{id}` | Job status: a `transfers[]` array (each with per-layer progress) plus the `verification` outcome. |
 | `GET` | `/v1/job/{id}/progress` | SSE progress stream, or `?wait=<dur>` long-poll. |
-| `DELETE` | `/v1/job/{id}` | Cancel an in-flight job / evict a finished one. |
+| `POST` | `/v1/job/{id}/retry` | Re-submit a terminal job's original request (fresh resolution + verification). |
+| `POST` | `/v1/job/{id}/cancel` | Cancel a running job but keep its record (the terminal state stays inspectable). |
+| `DELETE` | `/v1/job/{id}` | Evict a job record (canceling it first if still running). |
+
+**Stores**
+
+| Method | Path | Purpose |
+|---|---|---|
 | `GET` | `/v1/store` | Configured stores with their kind, capabilities, and readiness. |
 | `GET` | `/v1/store/{name}/health` | Probe one store's reachability (engine ready-check / registry `/v2/` ping). Cached ~5s; `200` healthy, `503` unhealthy. |
-| `POST` | `/v1/store/{name}/pull` | Trigger one engine store to pull a reference. |
+| `GET` | `/v1/store/{name}/inuse` | References and image IDs live containers currently hold on an engine. |
+| `POST` | `/v1/store/{name}/pull` | Trigger one engine store to pull a reference (stamps the retention index). |
 | `POST` | `/v1/store/{name}/remove` | Delete one image from an engine store (syncs the retention index). |
+
+**Retention** (require `serve.retention`)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/v1/gc` | GC scheduler status: last run, next wake, grace window, effective policy, per-engine index counts. |
 | `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`pins`. |
-| `GET` · `POST` · `DELETE` | `/v1/store/{name}/pin` | List / add / remove pinned references (exempt from GC). |
+| `GET` · `POST` · `DELETE` | `/v1/store/{name}/pin` | List / add / remove pins (an exact `ref` or a doublestar `pattern`), exempt from GC. |
+| `GET` · `DELETE` | `/v1/store/{name}/image` | List the retention inventory (filters: `?repo=`, `?ref=`, `?pinned=`); `DELETE` purges one orphan record without touching the engine. |
+| `GET` | `/v1/store/{name}/watcher` | Usage-event stream liveness (a dead stream silently degrades age GC). |
+
+**Verification** (require `serve.verify`)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/v1/verify` | Verify a reference without moving it — CI can gate a rollout on "this gantry will accept the image". `422` unsigned/untrusted, `404` not found. |
+| `GET` | `/v1/verify` | The effective trust configuration: provider, global and per-store modes, policy scopes, and each anchor's subject/fingerprint/expiry (never key material). |
+| `POST` | `/v1/verify/reload` | Re-read the CA dir and policy from disk and swap the verifier on success (CA rotation without a restart); the old verifier is retained on failure. |
+
+**Meta**
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/v1/event` | The audit log (jobs, GC, pins, manual ops); survives restart. Filters: `?type=`, `?store=`, `?ref=`, `?state=`, `?since=`, `?limit=`. Requires `serve.events`. |
+| `GET` | `/v1/version` | Build info (`version`, `git_rev`, `git_dirty`). |
 | `GET` | `/openapi.json` · `/openapi.yaml` | The OpenAPI 3.1 schema (exempt from auth). Point any viewer at it. |
 | `GET` | `/healthz` | Liveness (exempt from auth). |
+| `GET` | `/readyz` | Readiness: aggregate health over the gated stores (`serve.health.ready_stores`), `200`/`503` (exempt from auth; the per-store breakdown is authenticated-only). |
 
 `/v1/*` is guarded by bearer token and/or mTLS when configured (see
 `serve.auth`); with neither set, auth is disabled (intended to sit behind a
-trusted reverse proxy).
+trusted reverse proxy). `/healthz`, `/readyz`, and `/openapi.*` are always exempt.
 
 A rendered, human-readable reference (every endpoint with parameters, schemas,
 and a `curl` sample) is checked in at [docs/api.md](docs/api.md). For an
@@ -93,8 +133,9 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   as a store (default false).
 - `serve.warm` — `platforms` fallback, `max_concurrent_jobs`/`max_concurrent_layers`
   pool sizes, `distribute_by_default`.
-- `serve.health` — per-store health probe cache: `cache_ttl` (default 5s) and
-  `probe_timeout` (default 3s). Powers `GET /v1/store/{name}/health`.
+- `serve.health` — per-store health probe cache: `cache_ttl` (default 5s),
+  `probe_timeout` (default 3s), and `ready_stores` (which stores `GET /readyz`
+  gates on; empty = every engine store, so a flaky upstream can't flap the node).
 - `serve.verify` — source-image signature verification (Notary Project / notation)
   at job creation. `mode` (`off` | `verify-if-present` | `require`), a `trust_store`
   of CA certs (required when enabled — no OS-root fallback; missing ⇒ the server
@@ -103,10 +144,16 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   overrides the global default.
 - `serve.retention` — image GC on engine stores (disabled unless `path` is set).
   gantry tracks last-used time from the engine's container events, then keeps
-  in-use, `pins`, the `keep_n` most-recent tags per repo, and anything newer than
-  `max_age`; the rest is reclaimed. The scheduler is adaptive — it idles up to
-  `interval` and wakes only when a record is about to age out or usage changes.
+  in-use, `pins` (exact refs or doublestar patterns), the `keep_n` most-recent tags
+  per repo, and anything newer than `max_age`; the rest is reclaimed. The scheduler
+  is adaptive — it idles up to `interval` and wakes only when a record is about to
+  age out or usage changes.
+- `serve.events` — the audit log (disabled unless `path` is set): a bounded bbolt
+  ring (`cap` entries) of jobs, GC, pins, and manual ops, queryable at `/v1/event`.
 - `serve.auth` — `tokens` (env-expanded), `client_ca`, and server `tls_cert`/`tls_key`.
+- `otel` (top-level, not under `serve`) — the OpenTelemetry pipeline (mkot-style).
+  Instruments are a no-op until an exporter is wired to a provider; the `otlp`
+  exporter pushes metrics/traces/logs over OTLP/gRPC.
 
 ## Development
 
@@ -123,11 +170,21 @@ go generate ./...     # regenerate the OpenAPI 3.1 spec (swaggo/swag v2) from ha
 
 ## Status
 
-Phase 1 (move images between stores + status API + engine pull seam) is
-implemented and verified end-to-end against real docker and containerd daemons.
-Image retention/GC (`serve.retention`: usage tracking, keep-N-per-repo, pins,
-adaptive scheduler, `/gc` · `/pin` · `/remove` APIs) is implemented and tested
-against a live docker daemon. Source-image signature verification
-(`serve.verify`, Notary Project / notation) is implemented — verified at job
-admission with digest pinning, and tested end-to-end with in-process notation
-signing. See [plan.md](plan.md).
+Implemented and tested (unit + live docker/containerd integration; `go test -race`):
+
+- **Image movement** — the store/transfer model, `copy`/`proxy` fill, the engine
+  pull seam, SSE/long-poll progress. Verified end-to-end against real daemons.
+- **Retention / GC** (`serve.retention`) — usage tracking from container events,
+  keep-N-per-repo, exact and pattern pins, the adaptive scheduler, and the
+  inventory / status / watcher APIs.
+- **Signature verification** (`serve.verify`, Notary Project / notation) — verified
+  at admission with digest pinning; engine pulls are digest-anchored and signatures
+  can be copied into the cache (`copy_referrers`). Preflight, introspection, and
+  hot-reload APIs. Tested with in-process notation signing.
+- **Job lifecycle** — dry-run plan, retry, idempotency, cancel-vs-evict.
+- **Observability** — OTLP metrics/traces (`otel`), a durable audit log
+  (`serve.events`), and `/readyz`.
+
+The design docs — [plan.md](plan.md) (movement), [plan-gc.md](plan-gc.md) (retention),
+and [plan-api.md](plan-api.md) (the API expansion) — record the rationale and
+point-in-time decisions.
