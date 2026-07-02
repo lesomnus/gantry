@@ -147,13 +147,21 @@ func (ix *Index) List(engine string) ([]Record, error) {
 	return out, err
 }
 
-func (ix *Index) Delete(engine, ref string) error {
-	return ix.db.Update(func(tx *bolt.Tx) error {
-		if b := tx.Bucket(bktImg).Bucket([]byte(engine)); b != nil {
-			return b.Delete([]byte(ref))
+// Delete removes a record, reporting whether it existed.
+func (ix *Index) Delete(engine, ref string) (bool, error) {
+	existed := false
+	err := ix.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bktImg).Bucket([]byte(engine))
+		if b == nil {
+			return nil
 		}
-		return nil
+		if b.Get([]byte(ref)) == nil {
+			return nil
+		}
+		existed = true
+		return b.Delete([]byte(ref))
 	})
+	return existed, err
 }
 
 func (ix *Index) Pin(engine, ref string, pattern bool) error {

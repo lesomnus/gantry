@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/lesomnus/gantry/internal/down"
@@ -73,4 +74,42 @@ func (s *Server) handleStorePull(w http.ResponseWriter, r *http.Request) {
 		Ref:   req.Ref,
 		State: "done",
 	})
+}
+
+// inUseResponse is the GET /v1/store/{name}/inuse body.
+type inUseResponse struct {
+	// InUse mixes tag references and image IDs (sha256:...), exactly as live
+	// containers reference them.
+	InUse []string `json:"in_use"`
+}
+
+// handleStoreInUse godoc
+//
+//	@Summary	List images live containers hold on an engine
+//	@Description	The references and image IDs running containers use right now — GC's top protection tier, as ground truth (probed live, not from the index).
+//	@Tags		stores
+//	@Produce	json
+//	@Param		name	path		string	true	"engine store name"
+//	@Success	200		{object}	inUseResponse
+//	@Failure	404		{object}	errorResponse
+//	@Failure	502		{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/store/{name}/inuse [get]
+func (s *Server) handleStoreInUse(w http.ResponseWriter, r *http.Request) {
+	eng, err := s.stores.Engine(r.PathValue("name"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	m, err := eng.InUse(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	refs := make([]string, 0, len(m))
+	for ref := range m {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	writeJSON(w, http.StatusOK, inUseResponse{InUse: refs})
 }

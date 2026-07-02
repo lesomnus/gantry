@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lesomnus/gantry/cmd/version"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server/oapi"
@@ -34,16 +35,23 @@ func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retent
 	mux.HandleFunc("GET /v1/job/{id}", s.handleGetJob)
 	mux.HandleFunc("DELETE /v1/job/{id}", s.handleDeleteJob)
 	mux.HandleFunc("GET /v1/job/{id}/progress", s.handleProgress)
+	mux.HandleFunc("GET /v1/version", s.handleVersion)
+	mux.HandleFunc("GET /v1/gc", s.handleGCStatus)
 	mux.HandleFunc("GET /v1/store", s.handleListStores)
 	mux.HandleFunc("GET /v1/store/{name}/health", s.handleStoreHealth)
 	mux.HandleFunc("POST /v1/store/{name}/pull", s.handleStorePull)
 	mux.HandleFunc("POST /v1/store/{name}/remove", s.handleStoreRemove)
 	mux.HandleFunc("GET /v1/store/{name}/gc", s.handleStoreGCPlan)
 	mux.HandleFunc("POST /v1/store/{name}/gc", s.handleStoreGCApply)
+	mux.HandleFunc("GET /v1/store/{name}/inuse", s.handleStoreInUse)
+	mux.HandleFunc("GET /v1/store/{name}/watcher", s.handleStoreWatcher)
+	mux.HandleFunc("GET /v1/store/{name}/image", s.handleStoreImages)
+	mux.HandleFunc("DELETE /v1/store/{name}/image", s.handleStoreImageDelete)
 	mux.HandleFunc("GET /v1/store/{name}/pin", s.handleListPins)
 	mux.HandleFunc("POST /v1/store/{name}/pin", s.handlePin)
 	mux.HandleFunc("DELETE /v1/store/{name}/pin", s.handleUnpin)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /readyz", s.handleReadyz)
 
 	// The OpenAPI 3.1 schema (public; exempt from auth like /healthz). The server
 	// only exposes the contract — point any viewer (Scalar, Redoc, Swagger UI, an
@@ -70,6 +78,27 @@ func spec(contentType string, body []byte) http.HandlerFunc {
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	io.WriteString(w, "ok")
+}
+
+// versionResponse is the GET /v1/version body.
+type versionResponse struct {
+	Version  string `json:"version"`
+	GitRev   string `json:"git_rev"`
+	GitDirty bool   `json:"git_dirty"`
+}
+
+// handleVersion godoc
+//
+//	@Summary	Build info
+//	@Description	The running binary's version stamp, for remote fleet inventory during rolling upgrades.
+//	@Tags		meta
+//	@Produce	json
+//	@Success	200	{object}	versionResponse
+//	@Security	BearerAuth
+//	@Router		/v1/version [get]
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	b := version.Get()
+	writeJSON(w, http.StatusOK, versionResponse{Version: b.Version, GitRev: b.GitRev, GitDirty: b.GitDirty})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

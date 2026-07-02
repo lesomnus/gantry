@@ -150,6 +150,148 @@
                 },
                 "type": "object"
             },
+            "retention.PolicyStatus": {
+                "properties": {
+                    "keep_n": {
+                        "type": "integer"
+                    },
+                    "max_age": {
+                        "type": "string"
+                    },
+                    "pins": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "retention.Record": {
+                "properties": {
+                    "digest": {
+                        "description": "resolved manifest digest, if known",
+                        "type": "string"
+                    },
+                    "first_seen": {
+                        "type": "string"
+                    },
+                    "last_distributed": {
+                        "type": "string"
+                    },
+                    "last_used": {
+                        "description": "the last-USED signal; zero =\u003e never observed used",
+                        "type": "string"
+                    },
+                    "pinned": {
+                        "description": "explicit pin on this exact ref",
+                        "type": "boolean"
+                    },
+                    "ref": {
+                        "description": "full local ref incl. tag, e.g. \"cache.local/team/app:1.2\"",
+                        "type": "string"
+                    },
+                    "repo": {
+                        "description": "RepositoryStr(); the keep-N grouping key",
+                        "type": "string"
+                    },
+                    "tag": {
+                        "description": "tag portion; \"\" for digest refs",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "retention.ScheduleStatus": {
+                "properties": {
+                    "grace": {
+                        "type": "string"
+                    },
+                    "interval": {
+                        "type": "string"
+                    },
+                    "min_interval": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "retention.Status": {
+                "properties": {
+                    "enabled": {
+                        "description": "scheduler running (interval \u003e 0)",
+                        "type": "boolean"
+                    },
+                    "grace_until": {
+                        "description": "age deletion held off until then",
+                        "type": "string"
+                    },
+                    "last_run": {
+                        "type": "string"
+                    },
+                    "next_wake": {
+                        "type": "string"
+                    },
+                    "policy": {
+                        "$ref": "#/components/schemas/retention.PolicyStatus"
+                    },
+                    "running": {
+                        "description": "a GC pass is executing right now",
+                        "type": "boolean"
+                    },
+                    "schedule": {
+                        "$ref": "#/components/schemas/retention.ScheduleStatus"
+                    },
+                    "started": {
+                        "type": "string"
+                    },
+                    "stores": {
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/retention.StoreCounts"
+                        },
+                        "description": "per-engine index sizes",
+                        "type": "object"
+                    }
+                },
+                "type": "object"
+            },
+            "retention.StoreCounts": {
+                "properties": {
+                    "pins": {
+                        "type": "integer"
+                    },
+                    "records": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "retention.WatcherStatus": {
+                "properties": {
+                    "connected": {
+                        "type": "boolean"
+                    },
+                    "last_error": {
+                        "type": "string"
+                    },
+                    "last_event_at": {
+                        "description": "receipt time of the last usage event",
+                        "type": "string"
+                    },
+                    "last_seed_at": {
+                        "type": "string"
+                    },
+                    "reconnects": {
+                        "description": "times the event stream ended and was re-established",
+                        "type": "integer"
+                    },
+                    "watching_since": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.createJobRequest": {
                 "properties": {
                     "copy_referrers": {
@@ -235,6 +377,31 @@
                 },
                 "type": "object"
             },
+            "server.imageListResponse": {
+                "properties": {
+                    "items": {
+                        "items": {
+                            "$ref": "#/components/schemas/retention.Record"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "server.inUseResponse": {
+                "properties": {
+                    "in_use": {
+                        "description": "InUse mixes tag references and image IDs (sha256:...), exactly as live\ncontainers reference them.",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
             "server.jobListResponse": {
                 "properties": {
                     "items": {
@@ -270,6 +437,21 @@
                         "description": "Exact image reference to pin or unpin.",
                         "example": "docker.io/library/nginx:1.27",
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.readyzResponse": {
+                "properties": {
+                    "ready": {
+                        "type": "boolean"
+                    },
+                    "stores": {
+                        "items": {
+                            "$ref": "#/components/schemas/health.Report"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     }
                 },
                 "type": "object"
@@ -324,6 +506,20 @@
                         "type": "string"
                     },
                     "store": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.versionResponse": {
+                "properties": {
+                    "git_dirty": {
+                        "type": "boolean"
+                    },
+                    "git_rev": {
+                        "type": "string"
+                    },
+                    "version": {
                         "type": "string"
                     }
                 },
@@ -569,6 +765,73 @@
                 "summary": "Liveness probe",
                 "tags": [
                     "meta"
+                ]
+            }
+        },
+        "/readyz": {
+            "get": {
+                "description": "Aggregate readiness over the gated stores (serve.health.ready_stores; defaults to every engine store, so a flaky remote upstream cannot flap the node). 200 when all gated stores are healthy, 503 otherwise. Unauthenticated like /healthz, but the per-store breakdown is included only for authenticated callers.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.readyzResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.readyzResponse"
+                                }
+                            }
+                        },
+                        "description": "Service Unavailable"
+                    }
+                },
+                "summary": "Readiness probe",
+                "tags": [
+                    "meta"
+                ]
+            }
+        },
+        "/v1/gc": {
+            "get": {
+                "description": "Scheduler observability: when GC last ran and will next wake, whether the post-startup grace window is holding age deletion off, the effective default policy, and per-engine index sizes. Never probes live daemons.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/retention.Status"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "GC scheduler status",
+                "tags": [
+                    "retention"
                 ]
             }
         },
@@ -1091,6 +1354,243 @@
                 ]
             }
         },
+        "/v1/store/{name}/image": {
+            "delete": {
+                "description": "Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next distribute. To delete the image itself use /remove.",
+                "parameters": [
+                    {
+                        "description": "engine store name",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/server.removeRequest"
+                            }
+                        }
+                    },
+                    "description": "reference whose record to purge",
+                    "required": true
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Delete a retention index record",
+                "tags": [
+                    "retention"
+                ]
+            },
+            "get": {
+                "description": "The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned).",
+                "parameters": [
+                    {
+                        "description": "engine store name",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "filter by exact repository",
+                        "in": "query",
+                        "name": "repo",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "return only this exact reference",
+                        "in": "query",
+                        "name": "ref",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "filter by pinned state",
+                        "in": "query",
+                        "name": "pinned",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.imageListResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "List a store's image inventory",
+                "tags": [
+                    "retention"
+                ]
+            }
+        },
+        "/v1/store/{name}/inuse": {
+            "get": {
+                "description": "The references and image IDs running containers use right now — GC's top protection tier, as ground truth (probed live, not from the index).",
+                "parameters": [
+                    {
+                        "description": "engine store name",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.inUseResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Gateway"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "List images live containers hold on an engine",
+                "tags": [
+                    "stores"
+                ]
+            }
+        },
         "/v1/store/{name}/pin": {
             "delete": {
                 "parameters": [
@@ -1468,6 +1968,89 @@
                 "summary": "Remove an image from an engine store",
                 "tags": [
                     "retention"
+                ]
+            }
+        },
+        "/v1/store/{name}/watcher": {
+            "get": {
+                "description": "Liveness of the engine's usage-event stream. A dead stream freezes last-used times and silently degrades age GC — alert on connected=false or a stale last_event_at.",
+                "parameters": [
+                    {
+                        "description": "engine store name",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/retention.WatcherStatus"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Usage-watcher status for a store",
+                "tags": [
+                    "retention"
+                ]
+            }
+        },
+        "/v1/version": {
+            "get": {
+                "description": "The running binary's version stamp, for remote fleet inventory during rolling upgrades.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.versionResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Build info",
+                "tags": [
+                    "meta"
                 ]
             }
         }

@@ -43,6 +43,9 @@ type Report struct {
 type Options struct {
 	CacheTTL     time.Duration // how long a probe result is reused; <=0 -> 5s
 	ProbeTimeout time.Duration // per-probe deadline; <=0 -> 3s
+	// ReadyStores are the store names /readyz gates on; empty means every
+	// engine store (a remote upstream must not flap the node's readiness).
+	ReadyStores []string
 }
 
 // Checker probes and caches store health.
@@ -50,6 +53,7 @@ type Checker struct {
 	stores *store.Set
 	ttl    time.Duration
 	probeT time.Duration
+	ready  []string
 
 	// insecureRT is a single TLS-skipping transport reused across all insecure
 	// registry probes. Sharing it (rather than cloning one per probe) lets the
@@ -84,6 +88,7 @@ func NewChecker(stores *store.Set, opts Options) *Checker {
 		stores:     stores,
 		ttl:        opts.CacheTTL,
 		probeT:     opts.ProbeTimeout,
+		ready:      opts.ReadyStores,
 		insecureRT: insecureTransport(),
 		now:        time.Now,
 		entries:    make(map[string]*entry),
@@ -97,6 +102,10 @@ func NewChecker(stores *store.Set, opts Options) *Checker {
 	ck.probe = ck.probeStore
 	return ck
 }
+
+// ReadyStores returns the configured readiness gate; empty means the caller
+// should fall back to the engine stores.
+func (ck *Checker) ReadyStores() []string { return ck.ready }
 
 // Check returns the store's health, probing it unless a cached result is still
 // fresh. A probe failure is reported in Report.Healthy/Error, not as an error;

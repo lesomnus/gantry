@@ -45,6 +45,699 @@ curl -X GET /healthz \
 This operation does not require authentication
 </aside>
 
+## Readiness probe
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /readyz \
+  -H 'Accept: application/json'
+
+```
+
+`GET /readyz`
+
+Aggregate readiness over the gated stores (serve.health.ready_stores; defaults to every engine store, so a flaky remote upstream cannot flap the node). 200 when all gated stores are healthy, 503 otherwise. Unauthenticated like /healthz, but the per-store breakdown is included only for authenticated callers.
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "ready": true,
+  "stores": [
+    {
+      "cached": true,
+      "checked_at": "string",
+      "error": "string",
+      "healthy": true,
+      "kind": "string",
+      "latency_ms": 0,
+      "name": "string"
+    }
+  ]
+}
+```
+
+<h3 id="readiness-probe-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.readyzResponse](#schemaserver.readyzresponse)|
+|503|[Service Unavailable](https://tools.ietf.org/html/rfc7231#section-6.6.4)|Service Unavailable|[server.readyzResponse](#schemaserver.readyzresponse)|
+
+<aside class="success">
+This operation does not require authentication
+</aside>
+
+## Build info
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/version \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/version`
+
+The running binary's version stamp, for remote fleet inventory during rolling upgrades.
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "git_dirty": true,
+  "git_rev": "string",
+  "version": "string"
+}
+```
+
+<h3 id="build-info-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.versionResponse](#schemaserver.versionresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+<h1 id="gantry-api-retention">retention</h1>
+
+## GC scheduler status
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/gc \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/gc`
+
+Scheduler observability: when GC last ran and will next wake, whether the post-startup grace window is holding age deletion off, the effective default policy, and per-engine index sizes. Never probes live daemons.
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "enabled": true,
+  "grace_until": "string",
+  "last_run": "string",
+  "next_wake": "string",
+  "policy": {
+    "keep_n": 0,
+    "max_age": "string",
+    "pins": [
+      "string"
+    ]
+  },
+  "running": true,
+  "schedule": {
+    "grace": "string",
+    "interval": "string",
+    "min_interval": "string"
+  },
+  "started": "string",
+  "stores": {
+    "property1": {
+      "pins": 0,
+      "records": 0
+    },
+    "property2": {
+      "pins": 0,
+      "records": 0
+    }
+  }
+}
+```
+
+<h3 id="gc-scheduler-status-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[retention.Status](#schemaretention.status)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Evaluate retention GC for a store (dry-run)
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/store/{name}/gc \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/store/{name}/gc`
+
+Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
+
+> Body parameter
+
+```json
+{
+  "keep_n": 3,
+  "max_age": "720h",
+  "pins": [
+    "docker.io/library/nginx:1.27"
+  ]
+}
+```
+
+<h3 id="evaluate-retention-gc-for-a-store-(dry-run)-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|body|body|[server.gcRequest](#schemaserver.gcrequest)|false|policy overrides|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "delete": [
+    {
+      "digest": "string",
+      "last_used": "string",
+      "reason": "string",
+      "ref": "string"
+    }
+  ],
+  "keep": [
+    {
+      "reason": "string",
+      "ref": "string"
+    }
+  ],
+  "next_age_out": "string"
+}
+```
+
+<h3 id="evaluate-retention-gc-for-a-store-(dry-run)-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|dry-run keep/delete decision|[retention.Decision](#schemaretention.decision)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Run retention GC for a store (apply)
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/store/{name}/gc \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/store/{name}/gc`
+
+Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
+
+> Body parameter
+
+```json
+{
+  "keep_n": 3,
+  "max_age": "720h",
+  "pins": [
+    "docker.io/library/nginx:1.27"
+  ]
+}
+```
+
+<h3 id="run-retention-gc-for-a-store-(apply)-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|body|body|[server.gcRequest](#schemaserver.gcrequest)|false|policy overrides|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "deleted": [
+    "string"
+  ],
+  "errors": [
+    "string"
+  ],
+  "evaluated": 0,
+  "untagged": [
+    "string"
+  ]
+}
+```
+
+<h3 id="run-retention-gc-for-a-store-(apply)-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|deletions applied|[retention.ApplyResult](#schemaretention.applyresult)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Delete a retention index record
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X DELETE /v1/store/{name}/image \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`DELETE /v1/store/{name}/image`
+
+Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next distribute. To delete the image itself use /remove.
+
+> Body parameter
+
+```json
+{
+  "ref": "docker.io/library/nginx:1.27"
+}
+```
+
+<h3 id="delete-a-retention-index-record-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|body|body|[server.removeRequest](#schemaserver.removerequest)|true|reference whose record to purge|
+
+> Example responses
+
+> 400 Response
+
+```json
+{
+  "error": "string"
+}
+```
+
+<h3 id="delete-a-retention-index-record-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|204|[No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5)|No Content|None|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## List a store's image inventory
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/store/{name}/image \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/store/{name}/image`
+
+The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned).
+
+<h3 id="list-a-store's-image-inventory-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|repo|query|string|false|filter by exact repository|
+|ref|query|string|false|return only this exact reference|
+|pinned|query|boolean|false|filter by pinned state|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "items": [
+    {
+      "digest": "string",
+      "first_seen": "string",
+      "last_distributed": "string",
+      "last_used": "string",
+      "pinned": true,
+      "ref": "string",
+      "repo": "string",
+      "tag": "string"
+    }
+  ]
+}
+```
+
+<h3 id="list-a-store's-image-inventory-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.imageListResponse](#schemaserver.imagelistresponse)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Unpin a reference or pattern
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X DELETE /v1/store/{name}/pin \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`DELETE /v1/store/{name}/pin`
+
+> Body parameter
+
+```json
+{
+  "pattern": "*:stable",
+  "ref": "docker.io/library/nginx:1.27"
+}
+```
+
+<h3 id="unpin-a-reference-or-pattern-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference or pattern to unpin|
+
+> Example responses
+
+> 400 Response
+
+```json
+{
+  "error": "string"
+}
+```
+
+<h3 id="unpin-a-reference-or-pattern-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|204|[No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5)|No Content|None|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## List pinned references for a store
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/store/{name}/pin \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/store/{name}/pin`
+
+Pins are exempt from retention GC: exact references, or doublestar patterns matched against the full ref, its name:tag short form, and the bare tag.
+
+<h3 id="list-pinned-references-for-a-store-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "pins": [
+    {
+      "pattern": true,
+      "pinned_at": "string",
+      "value": "string"
+    }
+  ]
+}
+```
+
+<h3 id="list-pinned-references-for-a-store-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.pinListResponse](#schemaserver.pinlistresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Pin a reference or pattern (exempt from GC)
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/store/{name}/pin \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/store/{name}/pin`
+
+Body carries exactly one of `ref` (exact) or `pattern` (doublestar; matched against the full ref, name:tag, and the bare tag). Preview the effect with the GC dry-run — a broad pattern like `**` disables age GC entirely.
+
+> Body parameter
+
+```json
+{
+  "pattern": "*:stable",
+  "ref": "docker.io/library/nginx:1.27"
+}
+```
+
+<h3 id="pin-a-reference-or-pattern-(exempt-from-gc)-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference or pattern to pin|
+
+> Example responses
+
+> 400 Response
+
+```json
+{
+  "error": "string"
+}
+```
+
+<h3 id="pin-a-reference-or-pattern-(exempt-from-gc)-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|204|[No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5)|No Content|None|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Remove an image from an engine store
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/store/{name}/remove \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/store/{name}/remove`
+
+Manually deletes one image from an engine store and syncs the retention index.
+
+> Body parameter
+
+```json
+{
+  "ref": "docker.io/library/nginx:1.27"
+}
+```
+
+<h3 id="remove-an-image-from-an-engine-store-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+|body|body|[server.removeRequest](#schemaserver.removerequest)|true|reference to remove|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "deleted": [
+    "string"
+  ],
+  "untagged": [
+    "string"
+  ]
+}
+```
+
+<h3 id="remove-an-image-from-an-engine-store-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[down.RemoveResult](#schemadown.removeresult)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Usage-watcher status for a store
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/store/{name}/watcher \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/store/{name}/watcher`
+
+Liveness of the engine's usage-event stream. A dead stream freezes last-used times and silently degrades age GC — alert on connected=false or a stale last_event_at.
+
+<h3 id="usage-watcher-status-for-a-store-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "connected": true,
+  "last_error": "string",
+  "last_event_at": "string",
+  "last_seed_at": "string",
+  "reconnects": 0,
+  "watching_since": "string"
+}
+```
+
+<h3 id="usage-watcher-status-for-a-store-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[retention.WatcherStatus](#schemaretention.watcherstatus)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
 <h1 id="gantry-api-jobs">jobs</h1>
 
 ## List jobs
@@ -490,6 +1183,53 @@ To perform this operation, you must be authenticated by means of one of the foll
 BearerAuth
 </aside>
 
+## List images live containers hold on an engine
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/store/{name}/inuse \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/store/{name}/inuse`
+
+The references and image IDs running containers use right now — GC's top protection tier, as ground truth (probed live, not from the index).
+
+<h3 id="list-images-live-containers-hold-on-an-engine-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|name|path|string|true|engine store name|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "in_use": [
+    "string"
+  ]
+}
+```
+
+<h3 id="list-images-live-containers-hold-on-an-engine-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.inUseResponse](#schemaserver.inuseresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
 ## Trigger an engine store to pull
 
 > Code samples
@@ -540,380 +1280,6 @@ Tells one engine store to pull a reference, decoupled from the job pipeline (man
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
 |200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.storePullResponse](#schemaserver.storepullresponse)|
-|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
-|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
-|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
-
-<aside class="warning">
-To perform this operation, you must be authenticated by means of one of the following methods:
-BearerAuth
-</aside>
-
-<h1 id="gantry-api-retention">retention</h1>
-
-## Evaluate retention GC for a store (dry-run)
-
-> Code samples
-
-```shell
-# You can also use wget
-curl -X GET /v1/store/{name}/gc \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -H 'Authorization: API_KEY'
-
-```
-
-`GET /v1/store/{name}/gc`
-
-Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
-
-> Body parameter
-
-```json
-{
-  "keep_n": 3,
-  "max_age": "720h",
-  "pins": [
-    "docker.io/library/nginx:1.27"
-  ]
-}
-```
-
-<h3 id="evaluate-retention-gc-for-a-store-(dry-run)-parameters">Parameters</h3>
-
-|Name|In|Type|Required|Description|
-|---|---|---|---|---|
-|name|path|string|true|engine store name|
-|body|body|[server.gcRequest](#schemaserver.gcrequest)|false|policy overrides|
-
-> Example responses
-
-> 200 Response
-
-```json
-{
-  "delete": [
-    {
-      "digest": "string",
-      "last_used": "string",
-      "reason": "string",
-      "ref": "string"
-    }
-  ],
-  "keep": [
-    {
-      "reason": "string",
-      "ref": "string"
-    }
-  ],
-  "next_age_out": "string"
-}
-```
-
-<h3 id="evaluate-retention-gc-for-a-store-(dry-run)-responses">Responses</h3>
-
-|Status|Meaning|Description|Schema|
-|---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|dry-run keep/delete decision|[retention.Decision](#schemaretention.decision)|
-|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
-|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
-|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
-|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
-
-<aside class="warning">
-To perform this operation, you must be authenticated by means of one of the following methods:
-BearerAuth
-</aside>
-
-## Run retention GC for a store (apply)
-
-> Code samples
-
-```shell
-# You can also use wget
-curl -X POST /v1/store/{name}/gc \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -H 'Authorization: API_KEY'
-
-```
-
-`POST /v1/store/{name}/gc`
-
-Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
-
-> Body parameter
-
-```json
-{
-  "keep_n": 3,
-  "max_age": "720h",
-  "pins": [
-    "docker.io/library/nginx:1.27"
-  ]
-}
-```
-
-<h3 id="run-retention-gc-for-a-store-(apply)-parameters">Parameters</h3>
-
-|Name|In|Type|Required|Description|
-|---|---|---|---|---|
-|name|path|string|true|engine store name|
-|body|body|[server.gcRequest](#schemaserver.gcrequest)|false|policy overrides|
-
-> Example responses
-
-> 200 Response
-
-```json
-{
-  "deleted": [
-    "string"
-  ],
-  "errors": [
-    "string"
-  ],
-  "evaluated": 0,
-  "untagged": [
-    "string"
-  ]
-}
-```
-
-<h3 id="run-retention-gc-for-a-store-(apply)-responses">Responses</h3>
-
-|Status|Meaning|Description|Schema|
-|---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|deletions applied|[retention.ApplyResult](#schemaretention.applyresult)|
-|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
-|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
-|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
-|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
-
-<aside class="warning">
-To perform this operation, you must be authenticated by means of one of the following methods:
-BearerAuth
-</aside>
-
-## Unpin a reference or pattern
-
-> Code samples
-
-```shell
-# You can also use wget
-curl -X DELETE /v1/store/{name}/pin \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -H 'Authorization: API_KEY'
-
-```
-
-`DELETE /v1/store/{name}/pin`
-
-> Body parameter
-
-```json
-{
-  "pattern": "*:stable",
-  "ref": "docker.io/library/nginx:1.27"
-}
-```
-
-<h3 id="unpin-a-reference-or-pattern-parameters">Parameters</h3>
-
-|Name|In|Type|Required|Description|
-|---|---|---|---|---|
-|name|path|string|true|engine store name|
-|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference or pattern to unpin|
-
-> Example responses
-
-> 400 Response
-
-```json
-{
-  "error": "string"
-}
-```
-
-<h3 id="unpin-a-reference-or-pattern-responses">Responses</h3>
-
-|Status|Meaning|Description|Schema|
-|---|---|---|---|
-|204|[No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5)|No Content|None|
-|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
-|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
-|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
-|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
-
-<aside class="warning">
-To perform this operation, you must be authenticated by means of one of the following methods:
-BearerAuth
-</aside>
-
-## List pinned references for a store
-
-> Code samples
-
-```shell
-# You can also use wget
-curl -X GET /v1/store/{name}/pin \
-  -H 'Accept: application/json' \
-  -H 'Authorization: API_KEY'
-
-```
-
-`GET /v1/store/{name}/pin`
-
-Pins are exempt from retention GC: exact references, or doublestar patterns matched against the full ref, its name:tag short form, and the bare tag.
-
-<h3 id="list-pinned-references-for-a-store-parameters">Parameters</h3>
-
-|Name|In|Type|Required|Description|
-|---|---|---|---|---|
-|name|path|string|true|engine store name|
-
-> Example responses
-
-> 200 Response
-
-```json
-{
-  "pins": [
-    {
-      "pattern": true,
-      "pinned_at": "string",
-      "value": "string"
-    }
-  ]
-}
-```
-
-<h3 id="list-pinned-references-for-a-store-responses">Responses</h3>
-
-|Status|Meaning|Description|Schema|
-|---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.pinListResponse](#schemaserver.pinlistresponse)|
-|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
-|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
-|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
-
-<aside class="warning">
-To perform this operation, you must be authenticated by means of one of the following methods:
-BearerAuth
-</aside>
-
-## Pin a reference or pattern (exempt from GC)
-
-> Code samples
-
-```shell
-# You can also use wget
-curl -X POST /v1/store/{name}/pin \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -H 'Authorization: API_KEY'
-
-```
-
-`POST /v1/store/{name}/pin`
-
-Body carries exactly one of `ref` (exact) or `pattern` (doublestar; matched against the full ref, name:tag, and the bare tag). Preview the effect with the GC dry-run — a broad pattern like `**` disables age GC entirely.
-
-> Body parameter
-
-```json
-{
-  "pattern": "*:stable",
-  "ref": "docker.io/library/nginx:1.27"
-}
-```
-
-<h3 id="pin-a-reference-or-pattern-(exempt-from-gc)-parameters">Parameters</h3>
-
-|Name|In|Type|Required|Description|
-|---|---|---|---|---|
-|name|path|string|true|engine store name|
-|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference or pattern to pin|
-
-> Example responses
-
-> 400 Response
-
-```json
-{
-  "error": "string"
-}
-```
-
-<h3 id="pin-a-reference-or-pattern-(exempt-from-gc)-responses">Responses</h3>
-
-|Status|Meaning|Description|Schema|
-|---|---|---|---|
-|204|[No Content](https://tools.ietf.org/html/rfc7231#section-6.3.5)|No Content|None|
-|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
-|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
-|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
-|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
-
-<aside class="warning">
-To perform this operation, you must be authenticated by means of one of the following methods:
-BearerAuth
-</aside>
-
-## Remove an image from an engine store
-
-> Code samples
-
-```shell
-# You can also use wget
-curl -X POST /v1/store/{name}/remove \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -H 'Authorization: API_KEY'
-
-```
-
-`POST /v1/store/{name}/remove`
-
-Manually deletes one image from an engine store and syncs the retention index.
-
-> Body parameter
-
-```json
-{
-  "ref": "docker.io/library/nginx:1.27"
-}
-```
-
-<h3 id="remove-an-image-from-an-engine-store-parameters">Parameters</h3>
-
-|Name|In|Type|Required|Description|
-|---|---|---|---|---|
-|name|path|string|true|engine store name|
-|body|body|[server.removeRequest](#schemaserver.removerequest)|true|reference to remove|
-
-> Example responses
-
-> 200 Response
-
-```json
-{
-  "deleted": [
-    "string"
-  ],
-  "untagged": [
-    "string"
-  ]
-}
-```
-
-<h3 id="remove-an-image-from-an-engine-store-responses">Responses</h3>
-
-|Status|Meaning|Description|Schema|
-|---|---|---|---|
-|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[down.RemoveResult](#schemadown.removeresult)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
 |502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
@@ -1123,6 +1489,198 @@ BearerAuth
 |pinned_at|string|false|none|zero for pins stored before entries carried a timestamp|
 |value|string|false|none|none|
 
+<h2 id="tocS_retention.PolicyStatus">retention.PolicyStatus</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.policystatus"></a>
+<a id="schema_retention.PolicyStatus"></a>
+<a id="tocSretention.policystatus"></a>
+<a id="tocsretention.policystatus"></a>
+
+```json
+{
+  "keep_n": 0,
+  "max_age": "string",
+  "pins": [
+    "string"
+  ]
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|keep_n|integer|false|none|none|
+|max_age|string|false|none|none|
+|pins|[string]|false|none|none|
+
+<h2 id="tocS_retention.Record">retention.Record</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.record"></a>
+<a id="schema_retention.Record"></a>
+<a id="tocSretention.record"></a>
+<a id="tocsretention.record"></a>
+
+```json
+{
+  "digest": "string",
+  "first_seen": "string",
+  "last_distributed": "string",
+  "last_used": "string",
+  "pinned": true,
+  "ref": "string",
+  "repo": "string",
+  "tag": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|digest|string|false|none|resolved manifest digest, if known|
+|first_seen|string|false|none|none|
+|last_distributed|string|false|none|none|
+|last_used|string|false|none|the last-USED signal; zero => never observed used|
+|pinned|boolean|false|none|explicit pin on this exact ref|
+|ref|string|false|none|full local ref incl. tag, e.g. "cache.local/team/app:1.2"|
+|repo|string|false|none|RepositoryStr(); the keep-N grouping key|
+|tag|string|false|none|tag portion; "" for digest refs|
+
+<h2 id="tocS_retention.ScheduleStatus">retention.ScheduleStatus</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.schedulestatus"></a>
+<a id="schema_retention.ScheduleStatus"></a>
+<a id="tocSretention.schedulestatus"></a>
+<a id="tocsretention.schedulestatus"></a>
+
+```json
+{
+  "grace": "string",
+  "interval": "string",
+  "min_interval": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|grace|string|false|none|none|
+|interval|string|false|none|none|
+|min_interval|string|false|none|none|
+
+<h2 id="tocS_retention.Status">retention.Status</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.status"></a>
+<a id="schema_retention.Status"></a>
+<a id="tocSretention.status"></a>
+<a id="tocsretention.status"></a>
+
+```json
+{
+  "enabled": true,
+  "grace_until": "string",
+  "last_run": "string",
+  "next_wake": "string",
+  "policy": {
+    "keep_n": 0,
+    "max_age": "string",
+    "pins": [
+      "string"
+    ]
+  },
+  "running": true,
+  "schedule": {
+    "grace": "string",
+    "interval": "string",
+    "min_interval": "string"
+  },
+  "started": "string",
+  "stores": {
+    "property1": {
+      "pins": 0,
+      "records": 0
+    },
+    "property2": {
+      "pins": 0,
+      "records": 0
+    }
+  }
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|enabled|boolean|false|none|scheduler running (interval > 0)|
+|grace_until|string|false|none|age deletion held off until then|
+|last_run|string|false|none|none|
+|next_wake|string|false|none|none|
+|policy|[retention.PolicyStatus](#schemaretention.policystatus)|false|none|none|
+|running|boolean|false|none|a GC pass is executing right now|
+|schedule|[retention.ScheduleStatus](#schemaretention.schedulestatus)|false|none|none|
+|started|string|false|none|none|
+|stores|object|false|none|per-engine index sizes|
+|» **additionalProperties**|[retention.StoreCounts](#schemaretention.storecounts)|false|none|none|
+
+<h2 id="tocS_retention.StoreCounts">retention.StoreCounts</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.storecounts"></a>
+<a id="schema_retention.StoreCounts"></a>
+<a id="tocSretention.storecounts"></a>
+<a id="tocsretention.storecounts"></a>
+
+```json
+{
+  "pins": 0,
+  "records": 0
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|pins|integer|false|none|none|
+|records|integer|false|none|none|
+
+<h2 id="tocS_retention.WatcherStatus">retention.WatcherStatus</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.watcherstatus"></a>
+<a id="schema_retention.WatcherStatus"></a>
+<a id="tocSretention.watcherstatus"></a>
+<a id="tocsretention.watcherstatus"></a>
+
+```json
+{
+  "connected": true,
+  "last_error": "string",
+  "last_event_at": "string",
+  "last_seed_at": "string",
+  "reconnects": 0,
+  "watching_since": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|connected|boolean|false|none|none|
+|last_error|string|false|none|none|
+|last_event_at|string|false|none|receipt time of the last usage event|
+|last_seed_at|string|false|none|none|
+|reconnects|integer|false|none|times the event stream ended and was re-established|
+|watching_since|string|false|none|none|
+
 <h2 id="tocS_server.createJobRequest">server.createJobRequest</h2>
 <!-- backwards compatibility -->
 <a id="schemaserver.createjobrequest"></a>
@@ -1204,6 +1762,59 @@ BearerAuth
 |keep_n|integer|false|none|Override how many most-recent tags to keep per repo; 0 disables keep-N.|
 |max_age|string|false|none|Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.|
 |pins|[string]|false|none|Override the pinned references exempt from GC.|
+
+<h2 id="tocS_server.imageListResponse">server.imageListResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.imagelistresponse"></a>
+<a id="schema_server.imageListResponse"></a>
+<a id="tocSserver.imagelistresponse"></a>
+<a id="tocsserver.imagelistresponse"></a>
+
+```json
+{
+  "items": [
+    {
+      "digest": "string",
+      "first_seen": "string",
+      "last_distributed": "string",
+      "last_used": "string",
+      "pinned": true,
+      "ref": "string",
+      "repo": "string",
+      "tag": "string"
+    }
+  ]
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|items|[[retention.Record](#schemaretention.record)]|false|none|none|
+
+<h2 id="tocS_server.inUseResponse">server.inUseResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.inuseresponse"></a>
+<a id="schema_server.inUseResponse"></a>
+<a id="tocSserver.inuseresponse"></a>
+<a id="tocsserver.inuseresponse"></a>
+
+```json
+{
+  "in_use": [
+    "string"
+  ]
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|in_use|[string]|false|none|InUse mixes tag references and image IDs (sha256:...), exactly as live<br>containers reference them.|
 
 <h2 id="tocS_server.jobListResponse">server.jobListResponse</h2>
 <!-- backwards compatibility -->
@@ -1308,6 +1919,38 @@ BearerAuth
 |pattern|string|false|none|Doublestar pattern, matched against the full ref, name:tag, and the bare tag.|
 |ref|string|false|none|Exact image reference to pin or unpin.|
 
+<h2 id="tocS_server.readyzResponse">server.readyzResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.readyzresponse"></a>
+<a id="schema_server.readyzResponse"></a>
+<a id="tocSserver.readyzresponse"></a>
+<a id="tocsserver.readyzresponse"></a>
+
+```json
+{
+  "ready": true,
+  "stores": [
+    {
+      "cached": true,
+      "checked_at": "string",
+      "error": "string",
+      "healthy": true,
+      "kind": "string",
+      "latency_ms": 0,
+      "name": "string"
+    }
+  ]
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|ready|boolean|false|none|none|
+|stores|[[health.Report](#schemahealth.report)]|false|none|none|
+
 <h2 id="tocS_server.removeRequest">server.removeRequest</h2>
 <!-- backwards compatibility -->
 <a id="schemaserver.removerequest"></a>
@@ -1411,6 +2054,30 @@ BearerAuth
 |ref|string|false|none|none|
 |state|string|false|none|none|
 |store|string|false|none|none|
+
+<h2 id="tocS_server.versionResponse">server.versionResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.versionresponse"></a>
+<a id="schema_server.versionResponse"></a>
+<a id="tocSserver.versionresponse"></a>
+<a id="tocsserver.versionresponse"></a>
+
+```json
+{
+  "git_dirty": true,
+  "git_rev": "string",
+  "version": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|git_dirty|boolean|false|none|none|
+|git_rev|string|false|none|none|
+|version|string|false|none|none|
 
 <h2 id="tocS_store.Caps">store.Caps</h2>
 <!-- backwards compatibility -->

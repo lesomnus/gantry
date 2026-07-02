@@ -2,6 +2,7 @@ package retention
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -140,4 +141,66 @@ func TestWatcherStampsIndex(t *testing.T) {
 	if len(recs) != 1 || recs[0].Ref != "r/a:used" || !recs[0].LastUsed.Equal(ts) {
 		t.Errorf("watcher did not stamp index: %+v", recs)
 	}
+}
+
+func TestWatcherStatusStamps(t *testing.T) {
+	ix := openTemp(t)
+	first := true
+	eng := &fakeEng{name: "d", watch: func(ctx context.Context, sink down.UsageSink) error {
+		if first {
+			first = false
+			sink("cache.local/a/app:1", time.Now())
+			return errors.New("stream dropped") // watcher must reconnect and record the error
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{}, Schedule{})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m.StartWatchers(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		ws, ok := m.Watcher("d")
+		if !ok {
+			t.Fatal("engine must be tracked")
+		}
+		if !ws.LastEventAt.IsZero() && ws.Reconnects >= 1 && ws.LastError == "stream dropped" && !ws.LastSeedAt.IsZero() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	ws, _ := m.Watcher("d")
+	t.Fatalf("watcher status not stamped in time: %+v", ws)
+}
+
+func TestManagerStatusSchedulerFields(t *testing.T) {
+	ix := openTemp(t)
+	_ = ix.Touch("d", "r/a:1", time.Now())
+	eng := &fakeEng{name: "d"}
+	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{MaxAge: time.Hour},
+		Schedule{Interval: time.Hour, MinInterval: time.Minute, Grace: time.Hour})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go m.StartScheduler(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		st := m.Status()
+		if !st.LastRun.IsZero() && !st.NextWake.IsZero() {
+			if !st.Enabled {
+				t.Error("enabled must be true with a positive interval")
+			}
+			if st.GraceUntil.IsZero() {
+				t.Error("grace_until must be set after start")
+			}
+			if st.Schedule.Interval != "1h0m0s" {
+				t.Errorf("schedule.interval = %q", st.Schedule.Interval)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("scheduler status not populated in time: %+v", m.Status())
 }

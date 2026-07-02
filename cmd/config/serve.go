@@ -105,6 +105,10 @@ type HealthConfig struct {
 	// ProbeTimeout bounds a single store probe (engine ready-check or registry
 	// /v2/ ping). Default 3s.
 	ProbeTimeout Duration `yaml:"probe_timeout"`
+	// ReadyStores are the store names GET /readyz gates on. Empty means every
+	// engine store — a remote upstream registry must not flap node readiness,
+	// so registries join the gate only by being listed here.
+	ReadyStores []string `yaml:"ready_stores"`
 }
 
 // RetentionConfig governs image GC on engine stores. An empty Path disables

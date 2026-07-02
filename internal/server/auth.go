@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"os"
@@ -8,6 +9,15 @@ import (
 
 	"github.com/lesomnus/gantry/cmd/config"
 )
+
+// authedKey marks a request that passed authentication (or runs with auth
+// disabled), letting public endpoints add detail for operators only.
+type authedKey struct{}
+
+func isAuthed(ctx context.Context) bool {
+	v, _ := ctx.Value(authedKey{}).(bool)
+	return v
+}
 
 // Auth guards /v1/* with a bearer-token whitelist and/or mTLS. /healthz is
 // always exempt. If neither tokens nor a client CA are configured, auth is
@@ -25,7 +35,11 @@ func Auth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !enabled || isPublic(r.URL.Path) || authorized(r, tokens, mtls) {
+			authed := !enabled || authorized(r, tokens, mtls)
+			if authed {
+				r = r.WithContext(context.WithValue(r.Context(), authedKey{}, true))
+			}
+			if authed || isPublic(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -35,9 +49,9 @@ func Auth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 	}
 }
 
-// isPublic reports whether a path bypasses auth (liveness + the API schema).
+// isPublic reports whether a path bypasses auth (probes + the API schema).
 func isPublic(path string) bool {
-	return path == "/healthz" || path == "/openapi.json" || path == "/openapi.yaml"
+	return path == "/healthz" || path == "/readyz" || path == "/openapi.json" || path == "/openapi.yaml"
 }
 
 func authorized(r *http.Request, tokens [][]byte, mtls bool) bool {

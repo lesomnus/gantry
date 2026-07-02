@@ -28,6 +28,11 @@ func fakeDockerDaemon(t *testing.T) *httptest.Server {
 			w.Write([]byte("{\"status\":\"Pull complete\",\"id\":\"abc\"}\n"))
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[{"Image":"cache.local/team/app:1","ImageID":"sha256:abc"}]`))
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)

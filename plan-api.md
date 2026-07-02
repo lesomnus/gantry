@@ -402,6 +402,28 @@ race/vet clean, 적대 리뷰(4렌즈, 21건 확정 → 10개 고유 결함) 반
 - **남은 리스크/후속**: containerd 앵커드 pull은 유닛 커버리지 없음(레코드 정리 포함) — DinD
   containerd 소켓 통합 테스트로 검증 예정. mkot CI `GOWORK=off` 스텝 미적용.
 
+## 구현 현황 — §2 운영 가시성 (2026-07-02)
+
+6개 API 전부 구현. race/vet clean, 적대 리뷰(3렌즈, 14건 확정 → 7개 고유 결함) 반영 완료.
+
+- [x] **`GET /v1/gc`** — `Manager.Status()`: enabled/running/started/last_run/next_wake/grace_until +
+  정책/스케줄 + per-엔진 {records,pins}(Index.Counts, 라이브 데몬 무접촉). Manager에 mutex 도입
+  (기존 started/lastRun unlocked write 해결). 리뷰 반영: poke가 타이머를 단락시킬 때 next_wake 갱신.
+- [x] **`GET /v1/store/{name}/watcher`** — {connected, watching_since, last_event_at, last_seed_at,
+  reconnects, last_error}. watch 루프가 삼키던 에러를 상태로 기록. 리뷰 반영: connected는 직전
+  seed 성공(데몬 도달성 증명) 시에만 true — 낙관적 스탬프 방지.
+- [x] **`GET|DELETE /v1/store/{name}/image`** — 인벤토리(repo/ref/pinned 필터) + 고아 레코드 퍼지.
+  리뷰 반영: 없는 레코드 DELETE는 404(Index.Delete가 존재 여부 반환), 살아있는 이미지의 레코드는
+  watcher가 재생성됨을 문서화.
+- [x] **`GET /v1/store/{name}/inuse`** — 라이브 컨테이너 보유 ref/ID(정렬, 혼합 문서화).
+- [x] **`GET /readyz`** — 무인증(isPublic), `serve.health.ready_stores` 게이트(기본: 엔진만 — 원격
+  upstream이 readiness를 못 흔듦), 동시 fan-out. 리뷰 반영: **익명 응답은 verdict만**(per-store
+  breakdown은 인증 시에만 — probe 에러 문자열이 내부 호스트/소켓을 노출), ready_stores 오타는
+  기동 실패(조용한 영구 NotReady 방지).
+- [x] **`GET /v1/version`** — {version, git_rev, git_dirty}, 인증 뒤 유지.
+- **다음 후보**: §3 verify 표면(preflight/introspect/reload + JobSnapshot.verification), §4 job
+  라이프사이클(plan/retry/멱등성/목록 제어/cancel 분리), §5 이벤트 로그.
+
 ## 채택하지 않은 것
 
 | 제안 | 사유 |

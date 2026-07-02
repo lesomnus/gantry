@@ -3,6 +3,7 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -48,7 +49,7 @@ func (s *Server) handleStoreRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.gc != nil {
-		_ = s.gc.Index().Delete(name, req.Ref)
+		_, _ = s.gc.Index().Delete(name, req.Ref)
 	}
 	log.From(r.Context()).Info("image removed",
 		slog.String("store", name), slog.String("ref", req.Ref),
@@ -299,4 +300,146 @@ func (s *Server) gcReady(w http.ResponseWriter, name string) bool {
 		return false
 	}
 	return true
+}
+
+// handleGCStatus godoc
+//
+//	@Summary	GC scheduler status
+//	@Description	Scheduler observability: when GC last ran and will next wake, whether the post-startup grace window is holding age deletion off, the effective default policy, and per-engine index sizes. Never probes live daemons.
+//	@Tags		retention
+//	@Produce	json
+//	@Success	200	{object}	retention.Status
+//	@Failure	501	{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/gc [get]
+func (s *Server) handleGCStatus(w http.ResponseWriter, r *http.Request) {
+	if s.gc == nil {
+		writeErr(w, http.StatusNotImplemented, "retention/gc is not enabled (set serve.retention.path)")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.gc.Status())
+}
+
+// handleStoreWatcher godoc
+//
+//	@Summary	Usage-watcher status for a store
+//	@Description	Liveness of the engine's usage-event stream. A dead stream freezes last-used times and silently degrades age GC — alert on connected=false or a stale last_event_at.
+//	@Tags		retention
+//	@Produce	json
+//	@Param		name	path		string	true	"engine store name"
+//	@Success	200		{object}	retention.WatcherStatus
+//	@Failure	404		{object}	errorResponse
+//	@Failure	501		{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/store/{name}/watcher [get]
+func (s *Server) handleStoreWatcher(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !s.gcReady(w, name) {
+		return
+	}
+	ws, ok := s.gc.Watcher(name)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "store has no retention watcher")
+		return
+	}
+	writeJSON(w, http.StatusOK, ws)
+}
+
+// imageListResponse is the GET /v1/store/{name}/image body.
+type imageListResponse struct {
+	Items []retention.Record `json:"items"`
+}
+
+// handleStoreImages godoc
+//
+//	@Summary	List a store's image inventory
+//	@Description	The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned).
+//	@Tags		retention
+//	@Produce	json
+//	@Param		name	path		string	true	"engine store name"
+//	@Param		repo	query		string	false	"filter by exact repository"
+//	@Param		ref		query		string	false	"return only this exact reference"
+//	@Param		pinned	query		boolean	false	"filter by pinned state"
+//	@Success	200		{object}	imageListResponse
+//	@Failure	400		{object}	errorResponse
+//	@Failure	404		{object}	errorResponse
+//	@Failure	500		{object}	errorResponse
+//	@Failure	501		{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/store/{name}/image [get]
+func (s *Server) handleStoreImages(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !s.gcReady(w, name) {
+		return
+	}
+	recs, err := s.gc.Index().List(name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	q := r.URL.Query()
+	var pinned *bool
+	if v := q.Get("pinned"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid pinned filter: "+v)
+			return
+		}
+		pinned = &b
+	}
+	items := make([]retention.Record, 0, len(recs))
+	for _, rec := range recs {
+		if repo := q.Get("repo"); repo != "" && rec.Repo != repo {
+			continue
+		}
+		if ref := q.Get("ref"); ref != "" && rec.Ref != ref {
+			continue
+		}
+		if pinned != nil && rec.Pinned != *pinned {
+			continue
+		}
+		items = append(items, rec)
+	}
+	writeJSON(w, http.StatusOK, imageListResponse{Items: items})
+}
+
+// handleStoreImageDelete godoc
+//
+//	@Summary	Delete a retention index record
+//	@Description	Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next distribute. To delete the image itself use /remove.
+//	@Tags		retention
+//	@Accept		json
+//	@Param		name	path	string			true	"engine store name"
+//	@Param		request	body	removeRequest	true	"reference whose record to purge"
+//	@Success	204
+//	@Failure	400	{object}	errorResponse
+//	@Failure	404	{object}	errorResponse
+//	@Failure	500	{object}	errorResponse
+//	@Failure	501	{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/store/{name}/image [delete]
+func (s *Server) handleStoreImageDelete(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !s.gcReady(w, name) {
+		return
+	}
+	var req removeRequest
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if req.Ref == "" {
+		writeErr(w, http.StatusBadRequest, "ref is required")
+		return
+	}
+	existed, err := s.gc.Index().Delete(name, req.Ref)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !existed {
+		writeErr(w, http.StatusNotFound, "no index record for "+req.Ref)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

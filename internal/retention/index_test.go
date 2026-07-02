@@ -74,7 +74,13 @@ func TestIndexPinAndDelete(t *testing.T) {
 	if recs[0].Pinned {
 		t.Error("still pinned after unpin")
 	}
-	_ = ix.Delete("docker", "cache/app:1")
+	deleted, err := ix.Delete("docker", "cache/app:1")
+	if err != nil || !deleted {
+		t.Fatalf("delete = (%v, %v), want existing record removed", deleted, err)
+	}
+	if again, _ := ix.Delete("docker", "cache/app:1"); again {
+		t.Error("second delete must report the record as absent")
+	}
 	if recs, _ := ix.List("docker"); len(recs) != 0 {
 		t.Errorf("record not deleted: %+v", recs)
 	}

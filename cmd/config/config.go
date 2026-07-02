@@ -87,6 +87,13 @@ func (c *Config) Evaluate() error {
 
 	z.FallbackP((*time.Duration)(&c.Serve.Health.CacheTTL), 5*time.Second)
 	z.FallbackP((*time.Duration)(&c.Serve.Health.ProbeTimeout), 3*time.Second)
+	for _, n := range c.Serve.Health.ReadyStores {
+		// A typo here would otherwise make the node permanently NotReady with no
+		// startup diagnostic (Check returns unknown-store forever).
+		if _, ok := c.Serve.Stores[n]; !ok {
+			return z.Err(nil, "serve.health.ready_stores: unknown store %q", n)
+		}
+	}
 
 	if !c.Serve.Verify.Mode.Valid() {
 		return z.Err(nil, "serve.verify.mode %q is not one of off/verify-if-present/require", c.Serve.Verify.Mode)

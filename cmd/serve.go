@@ -63,6 +63,7 @@ func NewCmdServe() *xli.Command {
 			hc := health.NewChecker(stores, health.Options{
 				CacheTTL:     time.Duration(c.Serve.Health.CacheTTL),
 				ProbeTimeout: time.Duration(c.Serve.Health.ProbeTimeout),
+				ReadyStores:  c.Serve.Health.ReadyStores,
 			})
 
 			jobStore := warm.NewMemStore()
