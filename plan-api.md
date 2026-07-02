@@ -421,8 +421,27 @@ race/vet clean, 적대 리뷰(4렌즈, 21건 확정 → 10개 고유 결함) 반
   breakdown은 인증 시에만 — probe 에러 문자열이 내부 호스트/소켓을 노출), ready_stores 오타는
   기동 실패(조용한 영구 NotReady 방지).
 - [x] **`GET /v1/version`** — {version, git_rev, git_dirty}, 인증 뒤 유지.
-- **다음 후보**: §3 verify 표면(preflight/introspect/reload + JobSnapshot.verification), §4 job
-  라이프사이클(plan/retry/멱등성/목록 제어/cancel 분리), §5 이벤트 로그.
+- [x] **`GET /v1/version`** 이후 §3·§4·§5까지 전 단계 완료 — 아래 참조.
+
+## 구현 현황 — §3·§4·§5 (2026-07-02, 각 단계 커밋됨)
+
+전 로드맵 완료. race/vet clean, 각 단계 적대 리뷰 반영.
+
+- [x] **§3 verify 표면** (커밋 c01b3de + review fix) — `Verify`가 `Result{Mode,Digest}` 반환,
+  `JobSnapshot.verification`. `verify.Swappable`(atomic swap, reload 직렬화, 실패 시 옛 verifier
+  유지). `POST /v1/verify`(preflight; 422/404/502), `GET /v1/verify`(anchor 만료 감시 + per-store
+  mode), `POST /v1/verify/reload`(422=bad material / 500=transient). **critical 수정**: typed-nil
+  `verify.Service`가 disabled 가드를 우회해 핸들러를 패닉시키던 것 정규화.
+- [x] **§4 job 라이프사이클** (9adc952 + f0066b3) — `POST /v1/job/plan`(dry-run), `retry`(원본
+  Request 재제출로 재검증), 202/200+`coalesced` + `Idempotency-Key`, `?state/since/limit` 검증,
+  `POST /v1/job/{id}/cancel`(레코드 유지). **review 수정**: Retry의 job.State 락 밖 읽기(torn read),
+  멱등키가 coalesce 경로에서 유실돼 재실행되던 것.
+- [x] **§5 이벤트 로그** (e0c94e0) — `internal/event` bbolt 링(`serve.events.cap`), `GET /v1/event`
+  (type/store/ref/state/since/limit). Recorder를 warm/retention/manual-op에 배선(nil-safe, 실패가
+  작업을 안 깨뜨림). **review 수정**: forward 커서 delete+next가 백로그 제거 시 매 2번째 키를
+  건너뛰던 것(cap 축소 시 상한 위반) → collect-then-delete.
+- **남은 후속**: containerd 앵커드 pull 통합 검증(DinD), mkot CI `GOWORK=off`, §2.1 registry
+  `?ref=` digest resolve(분리 예정), 채택 보류 항목(reconcile/webhook/token API).
 
 ## 채택하지 않은 것
 
