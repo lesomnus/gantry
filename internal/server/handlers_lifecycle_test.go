@@ -34,11 +34,10 @@ func newJobServer(t *testing.T) (http.Handler, *warm.Warmer, warm.Store) {
 	t.Cleanup(func() { set.Close() })
 	js := warm.NewMemStore()
 	wmr := warm.NewWarmer(set, js, c.Serve.Warm)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	wmr.Start(ctx)
-	t.Cleanup(wmr.Stop)
-	return New(wmr, js, set, nil, health.NewChecker(set, health.Options{}), nil), wmr, js
+	// Prepare the warmer without workers: submissions enqueue as pending records
+	// the test drives deterministically, with nothing racing their state.
+	wmr.SetBaseContext(context.Background())
+	return New(wmr, js, set, nil, health.NewChecker(set, health.Options{}), nil, nil), wmr, js
 }
 
 func TestJobPlanDryRun(t *testing.T) {
@@ -130,6 +129,39 @@ func TestCreateJobIdempotencyKey(t *testing.T) {
 	}
 	if items := js.List(warm.Filter{}); len(items) != 1 {
 		t.Errorf("idempotent replay created a second job: %d", len(items))
+	}
+}
+
+// A keyed submit that COALESCES onto an active identical move must still record
+// the key, so a later replay maps back to the same job instead of re-running.
+func TestIdempotencyKeyOnCoalescedSubmit(t *testing.T) {
+	h, _, js := newJobServer(t)
+	body := `{"ref":"team/app:9","from":"docker.io","to":"cache","platforms":["linux/amd64"]}`
+	keyed := func(key string) string {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/job", strings.NewReader(body))
+		req.Header.Set("Idempotency-Key", key)
+		h.ServeHTTP(rr, req)
+		var res struct {
+			ID string `json:"id"`
+		}
+		json.Unmarshal(rr.Body.Bytes(), &res)
+		return res.ID
+	}
+	first := keyed("k-first")   // creates the job
+	second := keyed("k-second") // coalesces onto it (created=false)
+	if second != first {
+		t.Fatalf("second submit = %s, want coalesced onto %s", second, first)
+	}
+	// The coalesced-onto job finishes; a replay of the SECOND key must return the
+	// same job, not launch a duplicate move.
+	js.Update(first, func(j *warm.Job) { j.State = warm.JobDone })
+	replay := keyed("k-second")
+	if replay != first {
+		t.Errorf("replay of the coalesced key = %s, want %s", replay, first)
+	}
+	if items := js.List(warm.Filter{}); len(items) != 1 {
+		t.Errorf("coalesced-key replay created a duplicate: %d jobs", len(items))
 	}
 }
 

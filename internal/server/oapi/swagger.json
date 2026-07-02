@@ -22,6 +22,59 @@
                 },
                 "type": "object"
             },
+            "event.Event": {
+                "properties": {
+                    "at": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "object"
+                    },
+                    "digest": {
+                        "type": "string"
+                    },
+                    "error": {
+                        "type": "string"
+                    },
+                    "ref": {
+                        "type": "string"
+                    },
+                    "seq": {
+                        "type": "integer"
+                    },
+                    "state": {
+                        "type": "string"
+                    },
+                    "store": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "$ref": "#/components/schemas/event.Type"
+                    }
+                },
+                "type": "object"
+            },
+            "event.Type": {
+                "enum": [
+                    "job_admitted",
+                    "job_done",
+                    "gc_applied",
+                    "image_pulled",
+                    "image_removed",
+                    "pinned",
+                    "unpinned"
+                ],
+                "type": "string",
+                "x-enum-varnames": [
+                    "JobAdmitted",
+                    "JobDone",
+                    "GCApplied",
+                    "ImagePulled",
+                    "ImageRemove",
+                    "Pinned",
+                    "Unpinned"
+                ]
+            },
             "health.Report": {
                 "properties": {
                     "cached": {
@@ -393,6 +446,18 @@
                 "properties": {
                     "error": {
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.eventListResponse": {
+                "properties": {
+                    "items": {
+                        "items": {
+                            "$ref": "#/components/schemas/event.Event"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     }
                 },
                 "type": "object"
@@ -1083,6 +1148,111 @@
                 ]
             }
         },
+        "/v1/event": {
+            "get": {
+                "description": "Operationally significant events (jobs admitted/finished, GC applied, manual pull/remove, pins) that survive process restart — the durable record the in-memory job store cannot provide. Newest first.",
+                "parameters": [
+                    {
+                        "description": "filter by event type",
+                        "in": "query",
+                        "name": "type",
+                        "schema": {
+                            "enum": [
+                                "job_admitted",
+                                "job_done",
+                                "gc_applied",
+                                "image_pulled",
+                                "image_removed",
+                                "pinned",
+                                "unpinned"
+                            ],
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "filter by store",
+                        "in": "query",
+                        "name": "store",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "filter by exact reference",
+                        "in": "query",
+                        "name": "ref",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "filter by job terminal state",
+                        "in": "query",
+                        "name": "state",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "only events at/after this RFC 3339 instant",
+                        "in": "query",
+                        "name": "since",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "max events (default 100, max 1000)",
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.eventListResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Query the audit log",
+                "tags": [
+                    "meta"
+                ]
+            }
+        },
         "/v1/gc": {
             "get": {
                 "description": "Scheduler observability: when GC last ran and will next wake, whether the post-startup grace window is holding age deletion off, the effective default policy, and per-engine index sizes. Never probes live daemons.",
@@ -1208,11 +1378,21 @@
                     "required": true
                 },
                 "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.createJobResponse"
+                                }
+                            }
+                        },
+                        "description": "coalesced onto an identical in-flight move, or idempotent replay"
+                    },
                     "202": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/warm.JobSnapshot"
+                                    "$ref": "#/components/schemas/server.createJobResponse"
                                 }
                             }
                         },

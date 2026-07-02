@@ -92,6 +92,80 @@ Aggregate readiness over the gated stores (serve.health.ready_stores; defaults t
 This operation does not require authentication
 </aside>
 
+## Query the audit log
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/event \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/event`
+
+Operationally significant events (jobs admitted/finished, GC applied, manual pull/remove, pins) that survive process restart — the durable record the in-memory job store cannot provide. Newest first.
+
+<h3 id="query-the-audit-log-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|type|query|string|false|filter by event type|
+|store|query|string|false|filter by store|
+|ref|query|string|false|filter by exact reference|
+|state|query|string|false|filter by job terminal state|
+|since|query|string|false|only events at/after this RFC 3339 instant|
+|limit|query|integer|false|max events (default 100, max 1000)|
+
+#### Enumerated Values
+
+|Parameter|Value|
+|---|---|
+|type|job_admitted|
+|type|job_done|
+|type|gc_applied|
+|type|image_pulled|
+|type|image_removed|
+|type|pinned|
+|type|unpinned|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "items": [
+    {
+      "at": "string",
+      "detail": {},
+      "digest": "string",
+      "error": "string",
+      "ref": "string",
+      "seq": 0,
+      "state": "string",
+      "store": "string",
+      "type": "job_admitted"
+    }
+  ]
+}
+```
+
+<h3 id="query-the-audit-log-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.eventListResponse](#schemaserver.eventlistresponse)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
 ## Build info
 
 > Code samples
@@ -879,10 +953,11 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
 
 > Example responses
 
-> 202 Response
+> 200 Response
 
 ```json
 {
+  "coalesced": true,
   "created_at": "string",
   "ended_at": "string",
   "error": "string",
@@ -927,7 +1002,8 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
-|202|[Accepted](https://tools.ietf.org/html/rfc7231#section-6.3.3)|Accepted|[warm.JobSnapshot](#schemawarm.jobsnapshot)|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|coalesced onto an identical in-flight move, or idempotent replay|[server.createJobResponse](#schemaserver.createjobresponse)|
+|202|[Accepted](https://tools.ietf.org/html/rfc7231#section-6.3.3)|Accepted|[server.createJobResponse](#schemaserver.createjobresponse)|
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 |422|[Unprocessable Entity](https://tools.ietf.org/html/rfc2518#section-10.3)|source image signature verification failed|[server.errorResponse](#schemaserver.errorresponse)|
 |503|[Service Unavailable](https://tools.ietf.org/html/rfc7231#section-6.6.4)|Service Unavailable|[server.errorResponse](#schemaserver.errorresponse)|
@@ -1789,6 +1865,72 @@ BearerAuth
 |deleted|[string]|false|none|content IDs whose bytes were actually deleted|
 |untagged|[string]|false|none|tag refs removed; disk freed only when the last tag/content GCs|
 
+<h2 id="tocS_event.Event">event.Event</h2>
+<!-- backwards compatibility -->
+<a id="schemaevent.event"></a>
+<a id="schema_event.Event"></a>
+<a id="tocSevent.event"></a>
+<a id="tocsevent.event"></a>
+
+```json
+{
+  "at": "string",
+  "detail": {},
+  "digest": "string",
+  "error": "string",
+  "ref": "string",
+  "seq": 0,
+  "state": "string",
+  "store": "string",
+  "type": "job_admitted"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|at|string|false|none|none|
+|detail|object|false|none|none|
+|digest|string|false|none|none|
+|error|string|false|none|none|
+|ref|string|false|none|none|
+|seq|integer|false|none|none|
+|state|string|false|none|none|
+|store|string|false|none|none|
+|type|[event.Type](#schemaevent.type)|false|none|none|
+
+<h2 id="tocS_event.Type">event.Type</h2>
+<!-- backwards compatibility -->
+<a id="schemaevent.type"></a>
+<a id="schema_event.Type"></a>
+<a id="tocSevent.type"></a>
+<a id="tocsevent.type"></a>
+
+```json
+"job_admitted"
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|*anonymous*|string|false|none|none|
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|*anonymous*|job_admitted|
+|*anonymous*|job_done|
+|*anonymous*|gc_applied|
+|*anonymous*|image_pulled|
+|*anonymous*|image_removed|
+|*anonymous*|pinned|
+|*anonymous*|unpinned|
+
 <h2 id="tocS_health.Report">health.Report</h2>
 <!-- backwards compatibility -->
 <a id="schemahealth.report"></a>
@@ -2275,6 +2417,38 @@ BearerAuth
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
 |error|string|false|none|none|
+
+<h2 id="tocS_server.eventListResponse">server.eventListResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.eventlistresponse"></a>
+<a id="schema_server.eventListResponse"></a>
+<a id="tocSserver.eventlistresponse"></a>
+<a id="tocsserver.eventlistresponse"></a>
+
+```json
+{
+  "items": [
+    {
+      "at": "string",
+      "detail": {},
+      "digest": "string",
+      "error": "string",
+      "ref": "string",
+      "seq": 0,
+      "state": "string",
+      "store": "string",
+      "type": "job_admitted"
+    }
+  ]
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|items|[[event.Event](#schemaevent.event)]|false|none|none|
 
 <h2 id="tocS_server.gcRequest">server.gcRequest</h2>
 <!-- backwards compatibility -->

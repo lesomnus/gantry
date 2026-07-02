@@ -33,7 +33,8 @@ type createJobRequest struct {
 //	@Accept		json
 //	@Produce	json
 //	@Param		request	body		createJobRequest	true	"job request"
-//	@Success	202		{object}	warm.JobSnapshot
+//	@Success	202		{object}	createJobResponse
+//	@Success	200		{object}	createJobResponse	"coalesced onto an identical in-flight move, or idempotent replay"
 //	@Header		202		{string}	Location	"canonical URL of the created job (/v1/job/{id})"
 //	@Failure	400		{object}	errorResponse
 //	@Failure	422		{object}	errorResponse	"source image signature verification failed"
@@ -83,10 +84,13 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if key := r.Header.Get("Idempotency-Key"); key != "" {
+		// Record on BOTH paths: a coalesced submission (created=false) still
+		// hands the client a valid job id, and a later replay of the key must
+		// map back to it rather than re-running the whole move.
+		s.store.Remember(key, snap.ID)
+	}
 	if created {
-		if key := r.Header.Get("Idempotency-Key"); key != "" {
-			s.store.Remember(key, snap.ID)
-		}
 		log.From(r.Context()).Info("job accepted",
 			slog.String("job", snap.ID), slog.String("ref", req.Ref), slog.String("from", req.From), slog.String("to", req.To))
 	}

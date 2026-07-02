@@ -108,6 +108,7 @@ type Warmer struct {
 	metrics  *metrics
 	distHook func(engine, ref string) // notified when an engine pull completes (retention)
 	verifier verify.Verifier          // source-signature verification (nil = disabled)
+	rec      Recorder                 // audit log (nil = disabled)
 
 	base context.Context
 	stop chan struct{} // closed by Stop; ends goroutines not fed by the jobs channel
@@ -138,6 +139,16 @@ func (w *Warmer) SetDistributeHook(fn func(engine, ref string)) { w.distHook = f
 // set before Start/Submit.
 func (w *Warmer) SetVerifier(v verify.Verifier) { w.verifier = v }
 
+// Recorder receives audit events for admitted and finished jobs. Its methods
+// must not fail the operation they record.
+type Recorder interface {
+	JobAdmitted(ref, from, to, digest string)
+	JobFinished(id, ref, state, errMsg string, bytes int64)
+}
+
+// SetRecorder wires the audit log. Must be set before Start/Submit.
+func (w *Warmer) SetRecorder(r Recorder) { w.rec = r }
+
 // rootCtx is the base context for admission-time work (verification); it uses
 // the running server context once Start has been called.
 func (w *Warmer) rootCtx() context.Context {
@@ -146,6 +157,12 @@ func (w *Warmer) rootCtx() context.Context {
 	}
 	return context.Background()
 }
+
+// SetBaseContext sets the context new jobs derive from. Start calls it before
+// spawning workers; a caller that only submits or plans (tests, or an
+// admission-only warmer) can call it directly so submitted jobs enqueue but are
+// never processed. Stop is safe without Start.
+func (w *Warmer) SetBaseContext(ctx context.Context) { w.base = ctx }
 
 func (w *Warmer) Start(ctx context.Context) {
 	w.base = ctx
@@ -246,6 +263,13 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 	select {
 	case w.jobs <- job:
 		snap, _ := w.store.Snapshot(id)
+		if w.rec != nil {
+			digest := ""
+			if ex.verification != nil {
+				digest = ex.verification.Digest
+			}
+			w.rec.JobAdmitted(req.Ref, ex.from.Name, transferFrom(ex), digest)
+		}
 		return snap, true, nil
 	default:
 		w.store.Delete(id)
@@ -257,18 +281,17 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 // fresh signature verification, fresh digest pin — never the stored plan, whose
 // digest was pinned at the original admission.
 func (w *Warmer) Retry(id string) (JobSnapshot, bool, error) {
-	job, ok := w.store.Job(id)
-	if !ok {
+	var req Request
+	var state JobState
+	// Read state and the original request together under the store lock.
+	if ok := w.store.Update(id, func(j *Job) {
+		state = j.State
+		req = j.req
+	}); !ok {
 		return JobSnapshot{}, false, ErrJobNotFound
 	}
-	var req Request
-	terminal := false
-	w.store.Update(id, func(j *Job) {
-		terminal = j.State.Terminal()
-		req = j.req
-	})
-	if !terminal {
-		return JobSnapshot{}, false, fmt.Errorf("%w: %s is %s", ErrJobActive, id, job.State)
+	if !state.Terminal() {
+		return JobSnapshot{}, false, fmt.Errorf("%w: %s is %s", ErrJobActive, id, state)
 	}
 	return w.Submit(req)
 }
@@ -524,6 +547,13 @@ func (w *Warmer) run(job *Job) {
 	}
 	w.metrics.duration.Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("state", state)))
 	w.metrics.bytes.Add(ctx, jobBytes(job))
+	if w.rec != nil {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		w.rec.JobFinished(job.ID, job.Ref, state, errMsg, jobBytes(job))
+	}
 }
 
 func (w *Warmer) execute(ctx context.Context, job *Job) error {
