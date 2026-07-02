@@ -35,7 +35,7 @@ func TestVerifyRejectsAdmission(t *testing.T) {
 	fv := &fakeVerifier{err: fmt.Errorf("%w: up.example/app/x:1", verify.ErrUnsigned)}
 	w.SetVerifier(fv)
 
-	_, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	_, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
 	if !errors.Is(err, verify.ErrUnsigned) {
 		t.Fatalf("err = %v, want ErrUnsigned", err)
 	}
@@ -58,7 +58,7 @@ func TestVerifyPinKeepsCacheTagged(t *testing.T) {
 	w.SetVerifier(&fakeVerifier{dg: h})
 	w.base = context.Background() // enable Submit without starting workers
 
-	snap, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	snap, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestVerifyProxyModeRejected(t *testing.T) {
 	w.SetVerifier(&fakeVerifier{dg: h})
 	w.base = context.Background()
 
-	_, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	_, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
 	if err == nil || !strings.Contains(err.Error(), "proxy") {
 		t.Fatalf("err = %v, want a proxy-mode rejection", err)
 	}
@@ -107,7 +107,7 @@ func TestVerifyPinsDistributeRef(t *testing.T) {
 	w.SetVerifier(&fakeVerifier{dg: h})
 	w.base = context.Background() // enable Submit without starting workers
 
-	snap, err := w.Submit(Request{Ref: "app/x:1", From: "up", Distribute: []string{"eng"}, Platforms: []string{"linux/amd64"}})
+	snap, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", Distribute: []string{"eng"}, Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatal(err)
 	}

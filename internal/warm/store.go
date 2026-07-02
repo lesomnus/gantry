@@ -13,10 +13,11 @@ import (
 type memStore struct {
 	mu   sync.RWMutex
 	jobs map[string]*Job
+	idem map[string]string // client idempotency key -> job id
 }
 
 func NewMemStore() Store {
-	return &memStore{jobs: map[string]*Job{}}
+	return &memStore{jobs: map[string]*Job{}, idem: map[string]string{}}
 }
 
 func (s *memStore) Add(j *Job) error {
@@ -57,9 +58,15 @@ func (s *memStore) List(f Filter) []JobSnapshot {
 		if f.Ref != "" && !strings.Contains(j.Ref, f.Ref) {
 			continue
 		}
+		if !f.Since.IsZero() && j.CreatedAt.Before(f.Since) {
+			continue
+		}
 		out = append(out, j.snapshot())
 	}
 	sort.Slice(out, func(i, k int) bool { return out[i].CreatedAt.After(out[k].CreatedAt) })
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
 	return out
 }
 
@@ -67,7 +74,9 @@ func (s *memStore) Active(key string) (JobSnapshot, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, j := range s.jobs {
-		if j.State.Terminal() {
+		if j.State.Terminal() || j.Canceled() {
+			// A canceled job is on its way out; a resubmit must start fresh
+			// rather than coalesce onto the dying one.
 			continue
 		}
 		if j.DedupKey() == key {
@@ -121,5 +130,30 @@ func (s *memStore) Sweep(now time.Time, ttl time.Duration) int {
 			n++
 		}
 	}
+	for key, id := range s.idem {
+		if _, ok := s.jobs[id]; !ok {
+			delete(s.idem, key) // key retention rides on the job record's TTL
+		}
+	}
 	return n
+}
+
+func (s *memStore) Remember(key, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.idem[key] = id
+}
+
+func (s *memStore) Idem(key string) (JobSnapshot, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.idem[key]
+	if !ok {
+		return JobSnapshot{}, false
+	}
+	j, ok := s.jobs[id]
+	if !ok {
+		return JobSnapshot{}, false // job swept; treat as a miss
+	}
+	return j.snapshot(), true
 }

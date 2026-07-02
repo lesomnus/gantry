@@ -22,6 +22,16 @@ const (
 	JobCanceled JobState = "canceled"
 )
 
+// Valid reports whether s is a known state (for API filter validation).
+func (s JobState) Valid() bool {
+	switch s {
+	case JobPending, JobRunning, JobDone, JobFailed, JobCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s JobState) Terminal() bool {
 	switch s {
 	case JobDone, JobFailed, JobCanceled:
@@ -57,10 +67,12 @@ type Job struct {
 	EndedAt   time.Time
 
 	// Set by the Warmer at submit time; not serialized.
-	ctx    context.Context
-	cancel context.CancelFunc
-	dedup  string
-	exec   *jobExec
+	ctx      context.Context
+	cancel   context.CancelFunc
+	dedup    string
+	exec     *jobExec
+	req      Request     // the original request, for Retry's fresh re-plan
+	canceled atomic.Bool // Cancel was requested; Active must not coalesce onto it
 }
 
 func NewJob(id, ref string, platforms []string, now time.Time) *Job {
@@ -76,10 +88,14 @@ func NewJob(id, ref string, platforms []string, now time.Time) *Job {
 func (j *Job) SetCancel(fn context.CancelFunc) { j.cancel = fn }
 
 func (j *Job) Cancel() {
+	j.canceled.Store(true)
 	if j.cancel != nil {
 		j.cancel()
 	}
 }
+
+// Canceled reports whether Cancel was requested (the terminal state may lag).
+func (j *Job) Canceled() bool { return j.canceled.Load() }
 
 func (j *Job) DedupKey() string { return j.dedup }
 
@@ -215,6 +231,8 @@ func (j *Job) snapshot() JobSnapshot {
 type Filter struct {
 	State JobState
 	Ref   string
+	Since time.Time // only jobs created at/after this instant
+	Limit int       // truncate after sorting (newest first); 0 = no limit
 }
 
 // Store holds jobs. The in-memory implementation is ephemeral; the interface
@@ -231,4 +249,10 @@ type Store interface {
 	Update(id string, fn func(*Job)) bool
 	Delete(id string) bool
 	Sweep(now time.Time, ttl time.Duration) int
+
+	// Remember maps a client idempotency key to a job; Idem returns that job
+	// while its record survives, letting a retried POST return the same job
+	// instead of re-running the move.
+	Remember(key, id string)
+	Idem(key string) (JobSnapshot, bool)
 }

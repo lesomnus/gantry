@@ -98,7 +98,7 @@ func testJobCopyReferrersVerbatim(t *testing.T, start func(*testing.T) string) {
 	t.Cleanup(func() { cancel(); w.Stop() })
 
 	yes := true
-	snap, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", CopyReferrers: &yes})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", CopyReferrers: &yes})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestJobCopyReferrersSingleManifest(t *testing.T) {
 	t.Cleanup(func() { cancel(); w.Stop() })
 
 	yes := true
-	snap, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", CopyReferrers: &yes})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", CopyReferrers: &yes})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -172,19 +172,19 @@ func TestPlanCopyReferrersConflicts(t *testing.T) {
 	w.base = context.Background()
 	yes := true
 	t.Run("explicit platforms conflict", func(t *testing.T) {
-		_, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "cache", Platforms: []string{"linux/amd64"}, CopyReferrers: &yes})
+		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "cache", Platforms: []string{"linux/amd64"}, CopyReferrers: &yes})
 		if err == nil {
 			t.Error("narrowed platforms with copy_referrers must be rejected")
 		}
 	})
 	t.Run("proxy destination", func(t *testing.T) {
-		_, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "ro", CopyReferrers: &yes})
+		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "ro", CopyReferrers: &yes})
 		if err == nil {
 			t.Error("proxy destination with copy_referrers must be rejected")
 		}
 	})
 	t.Run("no destination", func(t *testing.T) {
-		_, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", Distribute: []string{"nope"}, CopyReferrers: &yes})
+		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", Distribute: []string{"nope"}, CopyReferrers: &yes})
 		if err == nil {
 			t.Error("copy_referrers without `to` must be rejected, not silently ignored")
 		}
@@ -203,7 +203,7 @@ func TestCopyReferrersDefault(t *testing.T) {
 		if verifier != nil {
 			w.SetVerifier(verifier)
 		}
-		ex, _, platforms, err := w.plan(req)
+		ex, _, platforms, err := w.plan(context.Background(), req)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -70,7 +70,11 @@ func Rewrite(rules []config.RewriteRule, cacheHost string, ref name.Reference, i
 		}
 		return dst, nil
 	}
-	return nil, z.Err(nil, "no rewrite rule matched %q", full)
+	patterns := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		patterns = append(patterns, rule.Pattern)
+	}
+	return nil, z.Err(nil, "no rewrite rule matched %q (tried: %s)", full, strings.Join(patterns, ", "))
 }
 
 // ensureIdentifier appends the source reference's tag/digest when the rendered

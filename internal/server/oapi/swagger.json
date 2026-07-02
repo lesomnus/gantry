@@ -343,6 +343,52 @@
                 ],
                 "type": "object"
             },
+            "server.createJobResponse": {
+                "properties": {
+                    "coalesced": {
+                        "type": "boolean"
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "ended_at": {
+                        "type": "string"
+                    },
+                    "error": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "platforms": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "ref": {
+                        "type": "string"
+                    },
+                    "started_at": {
+                        "type": "string"
+                    },
+                    "state": {
+                        "$ref": "#/components/schemas/warm.JobState"
+                    },
+                    "transfers": {
+                        "items": {
+                            "$ref": "#/components/schemas/warm.TransferSnapshot"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "verification": {
+                        "$ref": "#/components/schemas/warm.VerificationSnapshot"
+                    }
+                },
+                "type": "object"
+            },
             "server.errorResponse": {
                 "properties": {
                     "error": {
@@ -745,6 +791,17 @@
                 },
                 "type": "object"
             },
+            "warm.EnginePull": {
+                "properties": {
+                    "ref": {
+                        "type": "string"
+                    },
+                    "store": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "warm.JobSnapshot": {
                 "properties": {
                     "created_at": {
@@ -829,6 +886,53 @@
                     },
                     "total": {
                         "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "warm.PlanResult": {
+                "properties": {
+                    "coalesces": {
+                        "description": "active job an identical submit would join",
+                        "type": "string"
+                    },
+                    "copy_referrers": {
+                        "type": "boolean"
+                    },
+                    "dst_ref": {
+                        "description": "rewritten cache ref",
+                        "type": "string"
+                    },
+                    "engines": {
+                        "items": {
+                            "$ref": "#/components/schemas/warm.EnginePull"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "from": {
+                        "type": "string"
+                    },
+                    "platforms": {
+                        "description": "empty = all platforms",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "ref": {
+                        "type": "string"
+                    },
+                    "src_ref": {
+                        "description": "source ref, digest-pinned when verified",
+                        "type": "string"
+                    },
+                    "to": {
+                        "type": "string"
+                    },
+                    "verification": {
+                        "$ref": "#/components/schemas/warm.VerificationSnapshot"
                     }
                 },
                 "type": "object"
@@ -1023,6 +1127,13 @@
                         "in": "query",
                         "name": "state",
                         "schema": {
+                            "enum": [
+                                "pending",
+                                "running",
+                                "done",
+                                "failed",
+                                "canceled"
+                            ],
                             "type": "string"
                         }
                     },
@@ -1032,6 +1143,22 @@
                         "name": "ref",
                         "schema": {
                             "type": "string"
+                        }
+                    },
+                    {
+                        "description": "only jobs created at/after this RFC 3339 instant",
+                        "in": "query",
+                        "name": "since",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "return at most this many jobs (newest first)",
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "type": "integer"
                         }
                     }
                 ],
@@ -1045,6 +1172,16 @@
                             }
                         },
                         "description": "OK"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
                     }
                 },
                 "security": [
@@ -1131,6 +1268,63 @@
                 ]
             }
         },
+        "/v1/job/plan": {
+            "post": {
+                "description": "Resolves the same plan POST /v1/job would — store bindings, the rewritten cache ref, engine pull refs, signature verification with the pinned digest, referrer propagation — without moving bytes or creating a job. `coalesces` names the active job an identical submission would join.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/server.createJobRequest"
+                            }
+                        }
+                    },
+                    "description": "job request",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/warm.PlanResult"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "source image signature verification failed"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Dry-run a job admission",
+                "tags": [
+                    "jobs"
+                ]
+            }
+        },
         "/v1/job/{id}": {
             "delete": {
                 "parameters": [
@@ -1164,7 +1358,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "summary": "Cancel or evict a job",
+                "summary": "Evict a job record",
                 "tags": [
                     "jobs"
                 ]
@@ -1209,6 +1403,63 @@
                     }
                 ],
                 "summary": "Get a job",
+                "tags": [
+                    "jobs"
+                ]
+            }
+        },
+        "/v1/job/{id}/cancel": {
+            "post": {
+                "description": "Cancels the job's execution but keeps the record, so the terminal canceled state — which layers finished, how many bytes moved — stays inspectable. DELETE remains the evict operation. A resubmit after cancel starts a fresh job (no coalescing onto the dying one).",
+                "parameters": [
+                    {
+                        "description": "job id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/warm.JobSnapshot"
+                                }
+                            }
+                        },
+                        "description": "Accepted"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "job already terminal"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Cancel a job, keeping its record",
                 "tags": [
                     "jobs"
                 ]
@@ -1274,6 +1525,91 @@
                     }
                 ],
                 "summary": "Stream job progress",
+                "tags": [
+                    "jobs"
+                ]
+            }
+        },
+        "/v1/job/{id}/retry": {
+            "post": {
+                "description": "Re-submits the job's ORIGINAL request: fresh store resolution, fresh signature verification, fresh digest pin — a mutable tag is re-verified, never replayed from the stale plan. The retry coalesces/dedups like any submission.",
+                "parameters": [
+                    {
+                        "description": "job id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.createJobResponse"
+                                }
+                            }
+                        },
+                        "description": "Accepted",
+                        "headers": {
+                            "Location": {
+                                "description": "canonical URL of the new job",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "job has not reached a terminal state"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "source image signature verification failed"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Service Unavailable"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Retry a terminal job",
                 "tags": [
                     "jobs"
                 ]

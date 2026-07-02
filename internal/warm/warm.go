@@ -29,6 +29,12 @@ import (
 // ErrQueueFull is returned by Submit when the pending-job buffer is saturated.
 var ErrQueueFull = errors.New("warm queue is full")
 
+// ErrJobNotFound is returned by Retry for an unknown job id.
+var ErrJobNotFound = errors.New("job not found")
+
+// ErrJobActive is returned by Retry when the job has not reached a terminal state.
+var ErrJobActive = errors.New("job is still active")
+
 // metrics are the otel instruments for the job pipeline (no-op when unconfigured).
 type metrics struct {
 	bytes    metric.Int64Counter
@@ -213,40 +219,112 @@ func (w *Warmer) sweeper(ttl time.Duration) {
 }
 
 // Submit resolves and enqueues a job, collapsing identical in-flight moves.
-func (w *Warmer) Submit(req Request) (JobSnapshot, error) {
-	ex, transfers, platforms, err := w.plan(req)
+// created reports whether a new job was enqueued (false = coalesced onto an
+// active identical move).
+func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error) {
+	ex, transfers, platforms, err := w.plan(w.rootCtx(), req)
 	if err != nil {
-		return JobSnapshot{}, err
+		return JobSnapshot{}, false, err
 	}
 
 	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name, req.Distribute)
 	if snap, ok := w.store.Active(key); ok {
-		return snap, nil
+		return snap, false, nil
 	}
 
 	id := w.idgen()
 	ctx, cancel := context.WithCancel(w.base)
 	job := NewJob(id, req.Ref, platforms, time.Now())
-	job.ctx, job.cancel, job.dedup, job.exec = ctx, cancel, key, ex
+	job.ctx, job.cancel, job.dedup, job.exec, job.req = ctx, cancel, key, ex, req
 	job.Verification = ex.verification
 	job.Transfers = transfers
 	if err := w.store.Add(job); err != nil {
 		cancel()
-		return JobSnapshot{}, err
+		return JobSnapshot{}, false, err
 	}
 
 	select {
 	case w.jobs <- job:
 		snap, _ := w.store.Snapshot(id)
-		return snap, nil
+		return snap, true, nil
 	default:
 		w.store.Delete(id)
-		return JobSnapshot{}, ErrQueueFull
+		return JobSnapshot{}, false, ErrQueueFull
 	}
 }
 
+// Retry re-submits a terminal job's ORIGINAL request: fresh store resolution,
+// fresh signature verification, fresh digest pin — never the stored plan, whose
+// digest was pinned at the original admission.
+func (w *Warmer) Retry(id string) (JobSnapshot, bool, error) {
+	job, ok := w.store.Job(id)
+	if !ok {
+		return JobSnapshot{}, false, ErrJobNotFound
+	}
+	var req Request
+	terminal := false
+	w.store.Update(id, func(j *Job) {
+		terminal = j.State.Terminal()
+		req = j.req
+	})
+	if !terminal {
+		return JobSnapshot{}, false, fmt.Errorf("%w: %s is %s", ErrJobActive, id, job.State)
+	}
+	return w.Submit(req)
+}
+
+// EnginePull is one resolved downstream pull in a PlanResult.
+type EnginePull struct {
+	Store string `json:"store"`
+	Ref   string `json:"ref"`
+}
+
+// PlanResult is the fully resolved admission plan — store bindings, rewritten
+// refs, engine pull refs, and the verification outcome — without moving bytes
+// or creating a job.
+type PlanResult struct {
+	Ref           string                `json:"ref"`
+	From          string                `json:"from"`
+	To            string                `json:"to,omitempty"`
+	SrcRef        string                `json:"src_ref"`           // source ref, digest-pinned when verified
+	DstRef        string                `json:"dst_ref,omitempty"` // rewritten cache ref
+	Platforms     []string              `json:"platforms"`         // empty = all platforms
+	CopyReferrers bool                  `json:"copy_referrers"`
+	Verification  *VerificationSnapshot `json:"verification,omitempty"`
+	Engines       []EnginePull          `json:"engines,omitempty"`
+	Coalesces     string                `json:"coalesces,omitempty"` // active job an identical submit would join
+}
+
+// Plan dry-runs admission under the caller's context.
+func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
+	ex, _, platforms, err := w.plan(ctx, req)
+	if err != nil {
+		return PlanResult{}, err
+	}
+	out := PlanResult{
+		Ref:           req.Ref,
+		From:          ex.from.Name,
+		SrcRef:        ex.src.Name(),
+		Platforms:     platforms,
+		CopyReferrers: ex.copyReferrers,
+		Verification:  ex.verification,
+	}
+	if ex.hasCache {
+		out.To = ex.to.Name
+		out.DstRef = ex.dst.Name()
+	}
+	for _, step := range ex.engines {
+		out.Engines = append(out.Engines, EnginePull{Store: step.engine.Name(), Ref: step.ref})
+	}
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name, req.Distribute)
+	if snap, ok := w.store.Active(key); ok {
+		out.Coalesces = snap.ID
+	}
+	return out, nil
+}
+
 // plan resolves the request into an execution plan and the initial transfer rows.
-func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
+func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, []string, error) {
 	platforms := w.platforms(req.Platforms)
 
 	base, err := name.ParseReference(req.Ref, w.srcOpts...)
@@ -297,7 +375,7 @@ func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
 	// cache stays tag-named; only the source pull is pinned to the digest.
 	verified := false
 	if w.verifier != nil {
-		res, err := w.verifier.Verify(w.rootCtx(), ex.from, ex.src)
+		res, err := w.verifier.Verify(ctx, ex.from, ex.src)
 		if err != nil {
 			return nil, nil, nil, err // sentinel (ErrUnsigned/ErrUntrusted) preserved for the handler
 		}

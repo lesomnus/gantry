@@ -40,7 +40,10 @@ func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retent
 	s := &Server{warmer: warmer, store: jobStore, stores: stores, gc: gc, health: hc, verify: vf}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/job", s.handleCreateJob)
+	mux.HandleFunc("POST /v1/job/plan", s.handlePlanJob)
 	mux.HandleFunc("GET /v1/job", s.handleListJobs)
+	mux.HandleFunc("POST /v1/job/{id}/retry", s.handleRetryJob)
+	mux.HandleFunc("POST /v1/job/{id}/cancel", s.handleCancelJob)
 	mux.HandleFunc("GET /v1/job/{id}", s.handleGetJob)
 	mux.HandleFunc("DELETE /v1/job/{id}", s.handleDeleteJob)
 	mux.HandleFunc("GET /v1/job/{id}/progress", s.handleProgress)

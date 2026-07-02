@@ -760,6 +760,18 @@ curl -X GET /v1/job \
 |---|---|---|---|---|
 |state|query|string|false|filter by state|
 |ref|query|string|false|filter by ref substring|
+|since|query|string|false|only jobs created at/after this RFC 3339 instant|
+|limit|query|integer|false|return at most this many jobs (newest first)|
+
+#### Enumerated Values
+
+|Parameter|Value|
+|---|---|
+|state|pending|
+|state|running|
+|state|done|
+|state|failed|
+|state|canceled|
 
 > Example responses
 
@@ -816,6 +828,7 @@ curl -X GET /v1/job \
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
 |200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.jobListResponse](#schemaserver.joblistresponse)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 
 <aside class="warning">
 To perform this operation, you must be authenticated by means of one of the following methods:
@@ -930,7 +943,92 @@ To perform this operation, you must be authenticated by means of one of the foll
 BearerAuth
 </aside>
 
-## Cancel or evict a job
+## Dry-run a job admission
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/job/plan \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/job/plan`
+
+Resolves the same plan POST /v1/job would — store bindings, the rewritten cache ref, engine pull refs, signature verification with the pinned digest, referrer propagation — without moving bytes or creating a job. `coalesces` names the active job an identical submission would join.
+
+> Body parameter
+
+```json
+{
+  "copy_referrers": true,
+  "distribute": [
+    "node-a",
+    "node-b"
+  ],
+  "from": "dockerhub",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "ref": "docker.io/library/nginx:1.27",
+  "to": "local-cache"
+}
+```
+
+<h3 id="dry-run-a-job-admission-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|body|body|[server.createJobRequest](#schemaserver.createjobrequest)|true|job request|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "coalesces": "string",
+  "copy_referrers": true,
+  "dst_ref": "string",
+  "engines": [
+    {
+      "ref": "string",
+      "store": "string"
+    }
+  ],
+  "from": "string",
+  "platforms": [
+    "string"
+  ],
+  "ref": "string",
+  "src_ref": "string",
+  "to": "string",
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
+}
+```
+
+<h3 id="dry-run-a-job-admission-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[warm.PlanResult](#schemawarm.planresult)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|422|[Unprocessable Entity](https://tools.ietf.org/html/rfc2518#section-10.3)|source image signature verification failed|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Evict a job record
 
 > Code samples
 
@@ -944,7 +1042,7 @@ curl -X DELETE /v1/job/{id} \
 
 `DELETE /v1/job/{id}`
 
-<h3 id="cancel-or-evict-a-job-parameters">Parameters</h3>
+<h3 id="evict-a-job-record-parameters">Parameters</h3>
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
@@ -960,7 +1058,7 @@ curl -X DELETE /v1/job/{id} \
 }
 ```
 
-<h3 id="cancel-or-evict-a-job-responses">Responses</h3>
+<h3 id="evict-a-job-record-responses">Responses</h3>
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
@@ -1050,6 +1148,87 @@ To perform this operation, you must be authenticated by means of one of the foll
 BearerAuth
 </aside>
 
+## Cancel a job, keeping its record
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/job/{id}/cancel \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/job/{id}/cancel`
+
+Cancels the job's execution but keeps the record, so the terminal canceled state — which layers finished, how many bytes moved — stays inspectable. DELETE remains the evict operation. A resubmit after cancel starts a fresh job (no coalescing onto the dying one).
+
+<h3 id="cancel-a-job,-keeping-its-record-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|id|path|string|true|job id|
+
+> Example responses
+
+> 202 Response
+
+```json
+{
+  "created_at": "string",
+  "ended_at": "string",
+  "error": "string",
+  "id": "string",
+  "platforms": [
+    "string"
+  ],
+  "ref": "string",
+  "started_at": "string",
+  "state": "pending",
+  "transfers": [
+    {
+      "bytes_done": 0,
+      "bytes_total": 0,
+      "digest": "string",
+      "error": "string",
+      "from": "string",
+      "kind": "oci",
+      "layers": [
+        {
+          "digest": "string",
+          "done": 0,
+          "platform": "string",
+          "state": "pending",
+          "total": 0
+        }
+      ],
+      "ref": "string",
+      "state": "pending",
+      "store": "string"
+    }
+  ],
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
+}
+```
+
+<h3 id="cancel-a-job,-keeping-its-record-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|202|[Accepted](https://tools.ietf.org/html/rfc7231#section-6.3.3)|Accepted|[warm.JobSnapshot](#schemawarm.jobsnapshot)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|409|[Conflict](https://tools.ietf.org/html/rfc7231#section-6.5.8)|job already terminal|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
 ## Stream job progress
 
 > Code samples
@@ -1084,6 +1263,96 @@ Streams Server-Sent Events: repeated `event: progress` frames each carrying a JS
 |200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[warm.JobSnapshot](#schemawarm.jobsnapshot)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
 |500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|Internal Server Error|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Retry a terminal job
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/job/{id}/retry \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/job/{id}/retry`
+
+Re-submits the job's ORIGINAL request: fresh store resolution, fresh signature verification, fresh digest pin — a mutable tag is re-verified, never replayed from the stale plan. The retry coalesces/dedups like any submission.
+
+<h3 id="retry-a-terminal-job-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|id|path|string|true|job id|
+
+> Example responses
+
+> 202 Response
+
+```json
+{
+  "coalesced": true,
+  "created_at": "string",
+  "ended_at": "string",
+  "error": "string",
+  "id": "string",
+  "platforms": [
+    "string"
+  ],
+  "ref": "string",
+  "started_at": "string",
+  "state": "pending",
+  "transfers": [
+    {
+      "bytes_done": 0,
+      "bytes_total": 0,
+      "digest": "string",
+      "error": "string",
+      "from": "string",
+      "kind": "oci",
+      "layers": [
+        {
+          "digest": "string",
+          "done": 0,
+          "platform": "string",
+          "state": "pending",
+          "total": 0
+        }
+      ],
+      "ref": "string",
+      "state": "pending",
+      "store": "string"
+    }
+  ],
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
+}
+```
+
+<h3 id="retry-a-terminal-job-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|202|[Accepted](https://tools.ietf.org/html/rfc7231#section-6.3.3)|Accepted|[server.createJobResponse](#schemaserver.createjobresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
+|409|[Conflict](https://tools.ietf.org/html/rfc7231#section-6.5.8)|job has not reached a terminal state|[server.errorResponse](#schemaserver.errorresponse)|
+|422|[Unprocessable Entity](https://tools.ietf.org/html/rfc2518#section-10.3)|source image signature verification failed|[server.errorResponse](#schemaserver.errorresponse)|
+|503|[Service Unavailable](https://tools.ietf.org/html/rfc7231#section-6.6.4)|Service Unavailable|[server.errorResponse](#schemaserver.errorresponse)|
+
+### Response Headers
+
+|Status|Header|Type|Format|Description|
+|---|---|---|---|---|
+|202|Location|string||canonical URL of the new job|
 
 <aside class="warning">
 To perform this operation, you must be authenticated by means of one of the following methods:
@@ -1920,6 +2189,73 @@ BearerAuth
 |ref|string|true|none|Image reference to move (required).|
 |to|string|false|none|Destination registry store to copy into; empty means engines pull from `from` directly.|
 
+<h2 id="tocS_server.createJobResponse">server.createJobResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.createjobresponse"></a>
+<a id="schema_server.createJobResponse"></a>
+<a id="tocSserver.createjobresponse"></a>
+<a id="tocsserver.createjobresponse"></a>
+
+```json
+{
+  "coalesced": true,
+  "created_at": "string",
+  "ended_at": "string",
+  "error": "string",
+  "id": "string",
+  "platforms": [
+    "string"
+  ],
+  "ref": "string",
+  "started_at": "string",
+  "state": "pending",
+  "transfers": [
+    {
+      "bytes_done": 0,
+      "bytes_total": 0,
+      "digest": "string",
+      "error": "string",
+      "from": "string",
+      "kind": "oci",
+      "layers": [
+        {
+          "digest": "string",
+          "done": 0,
+          "platform": "string",
+          "state": "pending",
+          "total": 0
+        }
+      ],
+      "ref": "string",
+      "state": "pending",
+      "store": "string"
+    }
+  ],
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|coalesced|boolean|false|none|none|
+|created_at|string|false|none|none|
+|ended_at|string|false|none|none|
+|error|string|false|none|none|
+|id|string|false|none|none|
+|platforms|[string]|false|none|none|
+|ref|string|false|none|none|
+|started_at|string|false|none|none|
+|state|[warm.JobState](#schemawarm.jobstate)|false|none|none|
+|transfers|[[warm.TransferSnapshot](#schemawarm.transfersnapshot)]|false|none|none|
+|verification|[warm.VerificationSnapshot](#schemawarm.verificationsnapshot)|false|none|none|
+
 <h2 id="tocS_server.errorResponse">server.errorResponse</h2>
 <!-- backwards compatibility -->
 <a id="schemaserver.errorresponse"></a>
@@ -2577,6 +2913,28 @@ what this store can do
 |trusted_identities|[string]|false|none|none|
 |verification_level|string|false|none|none|
 
+<h2 id="tocS_warm.EnginePull">warm.EnginePull</h2>
+<!-- backwards compatibility -->
+<a id="schemawarm.enginepull"></a>
+<a id="schema_warm.EnginePull"></a>
+<a id="tocSwarm.enginepull"></a>
+<a id="tocswarm.enginepull"></a>
+
+```json
+{
+  "ref": "string",
+  "store": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|ref|string|false|none|none|
+|store|string|false|none|none|
+
 <h2 id="tocS_warm.JobSnapshot">warm.JobSnapshot</h2>
 <!-- backwards compatibility -->
 <a id="schemawarm.jobsnapshot"></a>
@@ -2707,6 +3065,55 @@ what this store can do
 |state|done|
 |state|exists|
 |state|failed|
+
+<h2 id="tocS_warm.PlanResult">warm.PlanResult</h2>
+<!-- backwards compatibility -->
+<a id="schemawarm.planresult"></a>
+<a id="schema_warm.PlanResult"></a>
+<a id="tocSwarm.planresult"></a>
+<a id="tocswarm.planresult"></a>
+
+```json
+{
+  "coalesces": "string",
+  "copy_referrers": true,
+  "dst_ref": "string",
+  "engines": [
+    {
+      "ref": "string",
+      "store": "string"
+    }
+  ],
+  "from": "string",
+  "platforms": [
+    "string"
+  ],
+  "ref": "string",
+  "src_ref": "string",
+  "to": "string",
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|coalesces|string|false|none|active job an identical submit would join|
+|copy_referrers|boolean|false|none|none|
+|dst_ref|string|false|none|rewritten cache ref|
+|engines|[[warm.EnginePull](#schemawarm.enginepull)]|false|none|none|
+|from|string|false|none|none|
+|platforms|[string]|false|none|empty = all platforms|
+|ref|string|false|none|none|
+|src_ref|string|false|none|source ref, digest-pinned when verified|
+|to|string|false|none|none|
+|verification|[warm.VerificationSnapshot](#schemawarm.verificationsnapshot)|false|none|none|
 
 <h2 id="tocS_warm.TransferSnapshot">warm.TransferSnapshot</h2>
 <!-- backwards compatibility -->

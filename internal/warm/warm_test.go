@@ -62,7 +62,7 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
-	snap, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -95,11 +95,11 @@ func TestWarmerDedup(t *testing.T) {
 	}, true)
 	w.base = context.Background() // enqueue without starting workers; jobs stay active
 	req := Request{Ref: "team/app:1", From: "docker.io", To: "cache", Platforms: []string{"linux/amd64"}}
-	s1, err := w.Submit(req)
+	s1, _, err := w.Submit(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, err := w.Submit(req)
+	s2, _, err := w.Submit(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,10 +114,10 @@ func TestWarmerQueueFull(t *testing.T) {
 	}, true)
 	w.base = context.Background()
 	w.jobs = make(chan *Job, 1)
-	if _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "cache"}); err != nil {
+	if _, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "cache"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := w.Submit(Request{Ref: "b/y:1", From: "r.io", To: "cache"})
+	_, _, err := w.Submit(Request{Ref: "b/y:1", From: "r.io", To: "cache"})
 	if !errors.Is(err, ErrQueueFull) {
 		t.Errorf("got %v, want ErrQueueFull", err)
 	}
@@ -126,7 +126,7 @@ func TestWarmerQueueFull(t *testing.T) {
 func TestWarmerNothingToDo(t *testing.T) {
 	w, _ := newWarmer(t, nil, true)
 	w.base = context.Background()
-	if _, err := w.Submit(Request{Ref: "x/y:1", From: "r.io"}); err == nil {
+	if _, _, err := w.Submit(Request{Ref: "x/y:1", From: "r.io"}); err == nil {
 		t.Error("expected error when neither to nor distribute is set")
 	}
 }
@@ -246,4 +246,49 @@ func TestFinish(t *testing.T) {
 			t.Fatalf("state = %q, want %q", snap.State, JobCanceled)
 		}
 	})
+}
+
+func TestActiveSkipsCanceledJob(t *testing.T) {
+	w, js := newWarmer(t, []config.StoreConfig{
+		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
+	}, true)
+	w.base = context.Background()
+	req := Request{Ref: "team/app:1", From: "docker.io", To: "cache", Platforms: []string{"linux/amd64"}}
+	s1, _, err := w.Submit(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cancel (without evicting): a resubmit must start a fresh job, not coalesce
+	// onto the dying one.
+	job, _ := js.Job(s1.ID)
+	job.Cancel()
+	s2, created, err := w.Submit(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || s2.ID == s1.ID {
+		t.Errorf("resubmit after cancel coalesced onto %s (created=%v)", s1.ID, created)
+	}
+}
+
+func TestRetryRequiresTerminal(t *testing.T) {
+	w, js := newWarmer(t, []config.StoreConfig{
+		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
+	}, true)
+	w.base = context.Background()
+	s1, _, err := w.Submit(Request{Ref: "team/app:1", From: "docker.io", To: "cache", Platforms: []string{"linux/amd64"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := w.Retry(s1.ID); !errors.Is(err, ErrJobActive) {
+		t.Errorf("retry of a pending job err = %v, want ErrJobActive", err)
+	}
+	if _, _, err := w.Retry("job_missing"); !errors.Is(err, ErrJobNotFound) {
+		t.Errorf("retry of a missing job err = %v, want ErrJobNotFound", err)
+	}
+	js.Update(s1.ID, func(j *Job) { j.State = JobFailed })
+	s2, created, err := w.Retry(s1.ID)
+	if err != nil || !created || s2.ID == s1.ID {
+		t.Errorf("retry = (%s, %v, %v), want a fresh job", s2.ID, created, err)
+	}
 }
