@@ -81,6 +81,7 @@ type jobExec struct {
 	dst           name.Reference // valid only when hasCache
 	cacheIdx      int            // index of the registry transfer, or -1
 	engines       []engineStep
+	verification  *VerificationSnapshot // admission-time verification, stamped onto the Job
 
 	// committed is the digest the cache copy landed at, set by runCopy; engine
 	// pulls are anchored to it so a mutable tag re-resolved by the cache cannot
@@ -227,6 +228,7 @@ func (w *Warmer) Submit(req Request) (JobSnapshot, error) {
 	ctx, cancel := context.WithCancel(w.base)
 	job := NewJob(id, req.Ref, platforms, time.Now())
 	job.ctx, job.cancel, job.dedup, job.exec = ctx, cancel, key, ex
+	job.Verification = ex.verification
 	job.Transfers = transfers
 	if err := w.store.Add(job); err != nil {
 		cancel()
@@ -295,12 +297,15 @@ func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
 	// cache stays tag-named; only the source pull is pinned to the digest.
 	verified := false
 	if w.verifier != nil {
-		dg, err := w.verifier.Verify(w.rootCtx(), ex.from, ex.src)
+		res, err := w.verifier.Verify(w.rootCtx(), ex.from, ex.src)
 		if err != nil {
 			return nil, nil, nil, err // sentinel (ErrUnsigned/ErrUntrusted) preserved for the handler
 		}
+		ex.verification = &VerificationSnapshot{Mode: string(res.Mode), Verified: res.Verified()}
+		dg := res.Digest
 		if dg.Hex != "" {
 			verified = true
+			ex.verification.Digest = dg.String()
 			// A proxy-mode cache reads through by tag and ignores the pinned source
 			// digest, so it could fill from a different (unverified) image if the tag
 			// moves after verification. Refuse rather than move unverified bytes.

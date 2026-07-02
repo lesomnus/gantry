@@ -511,6 +511,89 @@
                 },
                 "type": "object"
             },
+            "server.verifyDescribeResponse": {
+                "properties": {
+                    "anchors": {
+                        "items": {
+                            "$ref": "#/components/schemas/verify.AnchorInfo"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "level": {
+                        "type": "string"
+                    },
+                    "mode": {
+                        "description": "global default: off | verify-if-present | require",
+                        "type": "string"
+                    },
+                    "policies": {
+                        "items": {
+                            "$ref": "#/components/schemas/verify.PolicyInfo"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "provider": {
+                        "type": "string"
+                    },
+                    "stores": {
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "description": "Stores maps each source registry store to its effective mode (per-store\noverride or the global default).",
+                        "type": "object"
+                    }
+                },
+                "type": "object"
+            },
+            "server.verifyRequest": {
+                "properties": {
+                    "from": {
+                        "description": "Source registry store name or host; defaults to the ref's registry.",
+                        "example": "dockerhub",
+                        "type": "string"
+                    },
+                    "ref": {
+                        "description": "Image reference to verify (required).",
+                        "example": "docker.io/library/nginx:1.27",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "ref"
+                ],
+                "type": "object"
+            },
+            "server.verifyResponse": {
+                "properties": {
+                    "digest": {
+                        "description": "the verified digest",
+                        "type": "string"
+                    },
+                    "mode": {
+                        "description": "effective mode for the source store",
+                        "enum": [
+                            "off",
+                            "verify-if-present",
+                            "require"
+                        ],
+                        "type": "string"
+                    },
+                    "ref": {
+                        "description": "the resolved source reference that was checked",
+                        "type": "string"
+                    },
+                    "verified": {
+                        "description": "a signature was verified",
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
             "server.versionResponse": {
                 "properties": {
                     "git_dirty": {
@@ -590,6 +673,78 @@
                 },
                 "type": "object"
             },
+            "verify.AnchorInfo": {
+                "properties": {
+                    "fingerprint": {
+                        "description": "sha256 over the DER encoding",
+                        "type": "string"
+                    },
+                    "not_after": {
+                        "type": "string"
+                    },
+                    "subject": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "verify.Description": {
+                "properties": {
+                    "anchors": {
+                        "items": {
+                            "$ref": "#/components/schemas/verify.AnchorInfo"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "level": {
+                        "type": "string"
+                    },
+                    "mode": {
+                        "description": "global default: off | verify-if-present | require",
+                        "type": "string"
+                    },
+                    "policies": {
+                        "items": {
+                            "$ref": "#/components/schemas/verify.PolicyInfo"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "provider": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "verify.PolicyInfo": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "registry_scopes": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "trusted_identities": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "verification_level": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "warm.JobSnapshot": {
                 "properties": {
                     "created_at": {
@@ -626,6 +781,9 @@
                         },
                         "type": "array",
                         "uniqueItems": false
+                    },
+                    "verification": {
+                        "$ref": "#/components/schemas/warm.VerificationSnapshot"
                     }
                 },
                 "type": "object"
@@ -725,6 +883,28 @@
                     },
                     "store": {
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "warm.VerificationSnapshot": {
+                "properties": {
+                    "digest": {
+                        "description": "the digest the job was pinned to",
+                        "type": "string"
+                    },
+                    "mode": {
+                        "description": "effective mode for the source store",
+                        "enum": [
+                            "off",
+                            "verify-if-present",
+                            "require"
+                        ],
+                        "type": "string"
+                    },
+                    "verified": {
+                        "description": "a signature was actually verified",
+                        "type": "boolean"
                     }
                 },
                 "type": "object"
@@ -2025,6 +2205,173 @@
                 "summary": "Usage-watcher status for a store",
                 "tags": [
                     "retention"
+                ]
+            }
+        },
+        "/v1/verify": {
+            "get": {
+                "description": "The trust configuration in effect: provider, global and per-store modes, trust-policy scopes and identities, and each trust anchor's subject, fingerprint, and expiry (never key material). Anchor expiry is an outage in require mode — alert on not_after.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.verifyDescribeResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Effective verification configuration",
+                "tags": [
+                    "verify"
+                ]
+            },
+            "post": {
+                "description": "Runs the same notation verification job admission uses — resolve the tag on its source store, check the signature against the trust policy — without moving bytes or creating a job. Lets CI gate a rollout on \"this gantry will accept the image\".",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/server.verifyRequest"
+                            }
+                        }
+                    },
+                    "description": "reference to verify",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.verifyResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "reference not found on the source"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "unsigned, or signature verification failed"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "verification could not be completed"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Verify a reference without moving it",
+                "tags": [
+                    "verify"
+                ]
+            }
+        },
+        "/v1/verify/reload": {
+            "post": {
+                "description": "Re-reads the CA directory and trust policy from disk with the same fail-fast validation as startup, atomically swapping the verifier on success. On failure the previous verifier stays active. Makes CA/leaf rotation a fleet-safe operation without restarting gantry.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/verify.Description"
+                                }
+                            }
+                        },
+                        "description": "the newly loaded configuration"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "new trust material rejected; old verifier retained"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "reload could not complete (transient); old verifier retained"
+                    },
+                    "501": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.errorResponse"
+                                }
+                            }
+                        },
+                        "description": "Not Implemented"
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "summary": "Reload the trust store and policy",
+                "tags": [
+                    "verify"
                 ]
             }
         },

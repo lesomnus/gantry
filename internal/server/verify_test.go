@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
-	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/store"
@@ -20,8 +19,8 @@ import (
 
 type rejectVerifier struct{}
 
-func (rejectVerifier) Verify(context.Context, config.StoreConfig, name.Reference) (v1.Hash, error) {
-	return v1.Hash{}, fmt.Errorf("%w: up.example/app/x:1", verify.ErrUnsigned)
+func (rejectVerifier) Verify(context.Context, config.StoreConfig, name.Reference) (verify.Result, error) {
+	return verify.Result{Mode: config.VerifyRequire}, fmt.Errorf("%w: up.example/app/x:1", verify.ErrUnsigned)
 }
 
 // TestCreateJobVerifyRejected: a source-signature failure returns 422 and no job
@@ -48,7 +47,7 @@ func TestCreateJobVerifyRejected(t *testing.T) {
 	cancel()
 	wmr.Start(ctx)
 	t.Cleanup(wmr.Stop)
-	h := New(wmr, js, set, nil, health.NewChecker(set, health.Options{}))
+	h := New(wmr, js, set, nil, health.NewChecker(set, health.Options{}), nil)
 
 	rr := httptest.NewRecorder()
 	body := `{"ref":"app/x:1","from":"up","to":"cache","platforms":["linux/amd64"]}`

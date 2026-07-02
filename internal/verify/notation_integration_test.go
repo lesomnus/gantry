@@ -135,8 +135,8 @@ func TestVerifyNotationLive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("verify signed image: %v", err)
 		}
-		if got.String() != want.String() {
-			t.Errorf("verified digest = %s, want %s", got, want)
+		if got.Digest.String() != want.String() {
+			t.Errorf("verified digest = %s, want %s", got.Digest, want)
 		}
 	})
 
@@ -156,8 +156,8 @@ func TestVerifyNotationLive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("verify-if-present on unsigned should pass: %v", err)
 		}
-		if got.Hex != "" {
-			t.Errorf("unsigned image should not pin a digest, got %s", got)
+		if got.Verified() {
+			t.Errorf("unsigned image should not pin a digest, got %s", got.Digest)
 		}
 	})
 

@@ -40,7 +40,7 @@ func newGCServer(t *testing.T) (http.Handler, *retention.Index) {
 	}
 	t.Cleanup(func() { ix.Close() })
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{KeepN: 2}, retention.Schedule{})
-	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}))
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil)
 	return h, ix
 }
 
@@ -216,7 +216,7 @@ func TestReadyz(t *testing.T) {
 		}
 		t.Cleanup(func() { set.Close() })
 		hc := health.NewChecker(set, health.Options{ReadyStores: gate, ProbeTimeout: time.Second})
-		return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, hc)
+		return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, hc, nil)
 	}
 	host := strings.TrimPrefix(reg.URL, "http://")
 	t.Run("gated store healthy", func(t *testing.T) {

@@ -71,11 +71,15 @@ func NewCmdServe() *xli.Command {
 			if gc != nil {
 				wmr.SetDistributeHook(func(engine, ref string) { gc.Distributed(engine, ref, time.Now()) })
 			}
+			// The interface type matters: a nil *Swappable in a verify.Service
+			// interface is non-nil and would bypass every disabled-guard.
+			var vf verify.Service
 			if c.Serve.VerifyEnabled() {
-				v, err := verify.New(c.Serve.Verify)
+				v, err := verify.NewSwappable(c.Serve.Verify)
 				if err != nil {
 					return z.Err(err, "signature verification setup") // fail fast: don't serve unsafe
 				}
+				vf = v
 				wmr.SetVerifier(v)
 				l := log.From(ctx)
 				l.Info("signature verification enabled",
@@ -95,7 +99,7 @@ func NewCmdServe() *xli.Command {
 				go gc.StartScheduler(ctx)
 			}
 
-			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc, hc))
+			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc, hc, vf))
 			srv := &http.Server{
 				Addr:        c.Serve.Addr,
 				Handler:     h,

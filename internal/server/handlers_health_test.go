@@ -46,7 +46,7 @@ func TestStoreHealth(t *testing.T) {
 	wmr.Start(ctx)
 	t.Cleanup(wmr.Stop)
 	hc := health.NewChecker(set, health.Options{ProbeTimeout: 3 * time.Second})
-	h := New(wmr, js, set, nil, hc)
+	h := New(wmr, js, set, nil, hc, nil)
 
 	get := func(name string) (*httptest.ResponseRecorder, health.Report) {
 		rr := httptest.NewRecorder()

@@ -800,7 +800,12 @@ curl -X GET /v1/job \
           "state": "pending",
           "store": "string"
         }
-      ]
+      ],
+      "verification": {
+        "digest": "string",
+        "mode": "off",
+        "verified": true
+      }
     }
   ]
 }
@@ -896,7 +901,12 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
       "state": "pending",
       "store": "string"
     }
-  ]
+  ],
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
 }
 ```
 
@@ -1019,7 +1029,12 @@ curl -X GET /v1/job/{id} \
       "state": "pending",
       "store": "string"
     }
-  ]
+  ],
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
 }
 ```
 
@@ -1283,6 +1298,194 @@ Tells one engine store to pull a reference, decoupled from the job pipeline (man
 |400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
 |404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|Not Found|[server.errorResponse](#schemaserver.errorresponse)|
 |502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|Bad Gateway|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+<h1 id="gantry-api-verify">verify</h1>
+
+## Effective verification configuration
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X GET /v1/verify \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`GET /v1/verify`
+
+The trust configuration in effect: provider, global and per-store modes, trust-policy scopes and identities, and each trust anchor's subject, fingerprint, and expiry (never key material). Anchor expiry is an outage in require mode — alert on not_after.
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "anchors": [
+    {
+      "fingerprint": "string",
+      "not_after": "string",
+      "subject": "string"
+    }
+  ],
+  "enabled": true,
+  "level": "string",
+  "mode": "string",
+  "policies": [
+    {
+      "name": "string",
+      "registry_scopes": [
+        "string"
+      ],
+      "trusted_identities": [
+        "string"
+      ],
+      "verification_level": "string"
+    }
+  ],
+  "provider": "string",
+  "stores": {
+    "property1": "string",
+    "property2": "string"
+  }
+}
+```
+
+<h3 id="effective-verification-configuration-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.verifyDescribeResponse](#schemaserver.verifydescriberesponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Verify a reference without moving it
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/verify \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/verify`
+
+Runs the same notation verification job admission uses — resolve the tag on its source store, check the signature against the trust policy — without moving bytes or creating a job. Lets CI gate a rollout on "this gantry will accept the image".
+
+> Body parameter
+
+```json
+{
+  "from": "dockerhub",
+  "ref": "docker.io/library/nginx:1.27"
+}
+```
+
+<h3 id="verify-a-reference-without-moving-it-parameters">Parameters</h3>
+
+|Name|In|Type|Required|Description|
+|---|---|---|---|---|
+|body|body|[server.verifyRequest](#schemaserver.verifyrequest)|true|reference to verify|
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "digest": "string",
+  "mode": "off",
+  "ref": "string",
+  "verified": true
+}
+```
+
+<h3 id="verify-a-reference-without-moving-it-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|OK|[server.verifyResponse](#schemaserver.verifyresponse)|
+|400|[Bad Request](https://tools.ietf.org/html/rfc7231#section-6.5.1)|Bad Request|[server.errorResponse](#schemaserver.errorresponse)|
+|404|[Not Found](https://tools.ietf.org/html/rfc7231#section-6.5.4)|reference not found on the source|[server.errorResponse](#schemaserver.errorresponse)|
+|422|[Unprocessable Entity](https://tools.ietf.org/html/rfc2518#section-10.3)|unsigned, or signature verification failed|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
+|502|[Bad Gateway](https://tools.ietf.org/html/rfc7231#section-6.6.3)|verification could not be completed|[server.errorResponse](#schemaserver.errorresponse)|
+
+<aside class="warning">
+To perform this operation, you must be authenticated by means of one of the following methods:
+BearerAuth
+</aside>
+
+## Reload the trust store and policy
+
+> Code samples
+
+```shell
+# You can also use wget
+curl -X POST /v1/verify/reload \
+  -H 'Accept: application/json' \
+  -H 'Authorization: API_KEY'
+
+```
+
+`POST /v1/verify/reload`
+
+Re-reads the CA directory and trust policy from disk with the same fail-fast validation as startup, atomically swapping the verifier on success. On failure the previous verifier stays active. Makes CA/leaf rotation a fleet-safe operation without restarting gantry.
+
+> Example responses
+
+> 200 Response
+
+```json
+{
+  "anchors": [
+    {
+      "fingerprint": "string",
+      "not_after": "string",
+      "subject": "string"
+    }
+  ],
+  "enabled": true,
+  "level": "string",
+  "mode": "string",
+  "policies": [
+    {
+      "name": "string",
+      "registry_scopes": [
+        "string"
+      ],
+      "trusted_identities": [
+        "string"
+      ],
+      "verification_level": "string"
+    }
+  ],
+  "provider": "string"
+}
+```
+
+<h3 id="reload-the-trust-store-and-policy-responses">Responses</h3>
+
+|Status|Meaning|Description|Schema|
+|---|---|---|---|
+|200|[OK](https://tools.ietf.org/html/rfc7231#section-6.3.1)|the newly loaded configuration|[verify.Description](#schemaverify.description)|
+|422|[Unprocessable Entity](https://tools.ietf.org/html/rfc2518#section-10.3)|new trust material rejected; old verifier retained|[server.errorResponse](#schemaserver.errorresponse)|
+|500|[Internal Server Error](https://tools.ietf.org/html/rfc7231#section-6.6.1)|reload could not complete (transient); old verifier retained|[server.errorResponse](#schemaserver.errorresponse)|
+|501|[Not Implemented](https://tools.ietf.org/html/rfc7231#section-6.6.2)|Not Implemented|[server.errorResponse](#schemaserver.errorresponse)|
 
 <aside class="warning">
 To perform this operation, you must be authenticated by means of one of the following methods:
@@ -1858,7 +2061,12 @@ BearerAuth
           "state": "pending",
           "store": "string"
         }
-      ]
+      ],
+      "verification": {
+        "digest": "string",
+        "mode": "off",
+        "verified": true
+      }
     }
   ]
 }
@@ -2055,6 +2263,115 @@ BearerAuth
 |state|string|false|none|none|
 |store|string|false|none|none|
 
+<h2 id="tocS_server.verifyDescribeResponse">server.verifyDescribeResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.verifydescriberesponse"></a>
+<a id="schema_server.verifyDescribeResponse"></a>
+<a id="tocSserver.verifydescriberesponse"></a>
+<a id="tocsserver.verifydescriberesponse"></a>
+
+```json
+{
+  "anchors": [
+    {
+      "fingerprint": "string",
+      "not_after": "string",
+      "subject": "string"
+    }
+  ],
+  "enabled": true,
+  "level": "string",
+  "mode": "string",
+  "policies": [
+    {
+      "name": "string",
+      "registry_scopes": [
+        "string"
+      ],
+      "trusted_identities": [
+        "string"
+      ],
+      "verification_level": "string"
+    }
+  ],
+  "provider": "string",
+  "stores": {
+    "property1": "string",
+    "property2": "string"
+  }
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|anchors|[[verify.AnchorInfo](#schemaverify.anchorinfo)]|false|none|none|
+|enabled|boolean|false|none|none|
+|level|string|false|none|none|
+|mode|string|false|none|global default: off | verify-if-present | require|
+|policies|[[verify.PolicyInfo](#schemaverify.policyinfo)]|false|none|none|
+|provider|string|false|none|none|
+|stores|object|false|none|Stores maps each source registry store to its effective mode (per-store<br>override or the global default).|
+|» **additionalProperties**|string|false|none|none|
+
+<h2 id="tocS_server.verifyRequest">server.verifyRequest</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.verifyrequest"></a>
+<a id="schema_server.verifyRequest"></a>
+<a id="tocSserver.verifyrequest"></a>
+<a id="tocsserver.verifyrequest"></a>
+
+```json
+{
+  "from": "dockerhub",
+  "ref": "docker.io/library/nginx:1.27"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|from|string|false|none|Source registry store name or host; defaults to the ref's registry.|
+|ref|string|true|none|Image reference to verify (required).|
+
+<h2 id="tocS_server.verifyResponse">server.verifyResponse</h2>
+<!-- backwards compatibility -->
+<a id="schemaserver.verifyresponse"></a>
+<a id="schema_server.verifyResponse"></a>
+<a id="tocSserver.verifyresponse"></a>
+<a id="tocsserver.verifyresponse"></a>
+
+```json
+{
+  "digest": "string",
+  "mode": "off",
+  "ref": "string",
+  "verified": true
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|digest|string|false|none|the verified digest|
+|mode|string|false|none|effective mode for the source store|
+|ref|string|false|none|the resolved source reference that was checked|
+|verified|boolean|false|none|a signature was verified|
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|mode|off|
+|mode|verify-if-present|
+|mode|require|
+
 <h2 id="tocS_server.versionResponse">server.versionResponse</h2>
 <!-- backwards compatibility -->
 <a id="schemaserver.versionresponse"></a>
@@ -2159,6 +2476,107 @@ what this store can do
 |kind|docker|
 |kind|containerd|
 
+<h2 id="tocS_verify.AnchorInfo">verify.AnchorInfo</h2>
+<!-- backwards compatibility -->
+<a id="schemaverify.anchorinfo"></a>
+<a id="schema_verify.AnchorInfo"></a>
+<a id="tocSverify.anchorinfo"></a>
+<a id="tocsverify.anchorinfo"></a>
+
+```json
+{
+  "fingerprint": "string",
+  "not_after": "string",
+  "subject": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|fingerprint|string|false|none|sha256 over the DER encoding|
+|not_after|string|false|none|none|
+|subject|string|false|none|none|
+
+<h2 id="tocS_verify.Description">verify.Description</h2>
+<!-- backwards compatibility -->
+<a id="schemaverify.description"></a>
+<a id="schema_verify.Description"></a>
+<a id="tocSverify.description"></a>
+<a id="tocsverify.description"></a>
+
+```json
+{
+  "anchors": [
+    {
+      "fingerprint": "string",
+      "not_after": "string",
+      "subject": "string"
+    }
+  ],
+  "enabled": true,
+  "level": "string",
+  "mode": "string",
+  "policies": [
+    {
+      "name": "string",
+      "registry_scopes": [
+        "string"
+      ],
+      "trusted_identities": [
+        "string"
+      ],
+      "verification_level": "string"
+    }
+  ],
+  "provider": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|anchors|[[verify.AnchorInfo](#schemaverify.anchorinfo)]|false|none|none|
+|enabled|boolean|false|none|none|
+|level|string|false|none|none|
+|mode|string|false|none|global default: off | verify-if-present | require|
+|policies|[[verify.PolicyInfo](#schemaverify.policyinfo)]|false|none|none|
+|provider|string|false|none|none|
+
+<h2 id="tocS_verify.PolicyInfo">verify.PolicyInfo</h2>
+<!-- backwards compatibility -->
+<a id="schemaverify.policyinfo"></a>
+<a id="schema_verify.PolicyInfo"></a>
+<a id="tocSverify.policyinfo"></a>
+<a id="tocsverify.policyinfo"></a>
+
+```json
+{
+  "name": "string",
+  "registry_scopes": [
+    "string"
+  ],
+  "trusted_identities": [
+    "string"
+  ],
+  "verification_level": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|name|string|false|none|none|
+|registry_scopes|[string]|false|none|none|
+|trusted_identities|[string]|false|none|none|
+|verification_level|string|false|none|none|
+
 <h2 id="tocS_warm.JobSnapshot">warm.JobSnapshot</h2>
 <!-- backwards compatibility -->
 <a id="schemawarm.jobsnapshot"></a>
@@ -2199,7 +2617,12 @@ what this store can do
       "state": "pending",
       "store": "string"
     }
-  ]
+  ],
+  "verification": {
+    "digest": "string",
+    "mode": "off",
+    "verified": true
+  }
 }
 
 ```
@@ -2217,6 +2640,7 @@ what this store can do
 |started_at|string|false|none|none|
 |state|[warm.JobState](#schemawarm.jobstate)|false|none|none|
 |transfers|[[warm.TransferSnapshot](#schemawarm.transfersnapshot)]|false|none|none|
+|verification|[warm.VerificationSnapshot](#schemawarm.verificationsnapshot)|false|none|none|
 
 <h2 id="tocS_warm.JobState">warm.JobState</h2>
 <!-- backwards compatibility -->
@@ -2342,4 +2766,36 @@ what this store can do
 |state|done|
 |state|exists|
 |state|failed|
+
+<h2 id="tocS_warm.VerificationSnapshot">warm.VerificationSnapshot</h2>
+<!-- backwards compatibility -->
+<a id="schemawarm.verificationsnapshot"></a>
+<a id="schema_warm.VerificationSnapshot"></a>
+<a id="tocSwarm.verificationsnapshot"></a>
+<a id="tocswarm.verificationsnapshot"></a>
+
+```json
+{
+  "digest": "string",
+  "mode": "off",
+  "verified": true
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|digest|string|false|none|the digest the job was pinned to|
+|mode|string|false|none|effective mode for the source store|
+|verified|boolean|false|none|a signature was actually verified|
+
+#### Enumerated Values
+
+|Property|Value|
+|---|---|
+|mode|off|
+|mode|verify-if-present|
+|mode|require|
 

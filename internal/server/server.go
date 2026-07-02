@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/lesomnus/gantry/cmd/version"
@@ -14,6 +15,7 @@ import (
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server/oapi"
 	"github.com/lesomnus/gantry/internal/store"
+	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/internal/warm"
 )
 
@@ -24,11 +26,18 @@ type Server struct {
 	stores *store.Set
 	gc     *retention.Manager // nil when retention/GC is disabled
 	health *health.Checker
+	verify verify.Service // nil when verification is disabled
 }
 
-// New builds the API handler. gc may be nil. Wrap it with Auth for authentication.
-func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retention.Manager, hc *health.Checker) http.Handler {
-	s := &Server{warmer: warmer, store: jobStore, stores: stores, gc: gc, health: hc}
+// New builds the API handler. gc and vf may be nil. Wrap it with Auth for
+// authentication.
+func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retention.Manager, hc *health.Checker, vf verify.Service) http.Handler {
+	// A typed-nil Service (a nil *verify.Swappable in the interface) must mean
+	// disabled; otherwise every nil-guard passes and handlers dereference it.
+	if v := reflect.ValueOf(vf); vf != nil && v.Kind() == reflect.Pointer && v.IsNil() {
+		vf = nil
+	}
+	s := &Server{warmer: warmer, store: jobStore, stores: stores, gc: gc, health: hc, verify: vf}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/job", s.handleCreateJob)
 	mux.HandleFunc("GET /v1/job", s.handleListJobs)
@@ -36,6 +45,9 @@ func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retent
 	mux.HandleFunc("DELETE /v1/job/{id}", s.handleDeleteJob)
 	mux.HandleFunc("GET /v1/job/{id}/progress", s.handleProgress)
 	mux.HandleFunc("GET /v1/version", s.handleVersion)
+	mux.HandleFunc("GET /v1/verify", s.handleVerifyDescribe)
+	mux.HandleFunc("POST /v1/verify", s.handleVerifyPreflight)
+	mux.HandleFunc("POST /v1/verify/reload", s.handleVerifyReload)
 	mux.HandleFunc("GET /v1/gc", s.handleGCStatus)
 	mux.HandleFunc("GET /v1/store", s.handleListStores)
 	mux.HandleFunc("GET /v1/store/{name}/health", s.handleStoreHealth)

@@ -24,22 +24,29 @@ import (
 	"github.com/notaryproject/notation-go/verifier/trustpolicy"
 	"github.com/notaryproject/notation-go/verifier/truststore"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 // notaryVerifier verifies OCI-native (Notary Project / notation) signatures.
 type notaryVerifier struct {
-	cfg config.VerifyConfig
-	v   notation.Verifier
+	cfg    config.VerifyConfig
+	v      notation.Verifier
+	certs  []*x509.Certificate   // the loaded trust anchors, for Describe
+	policy *trustpolicy.Document // the effective policy, for Describe
 }
 
 // New builds a notation Verifier from the config. It fails fast (loads and
 // validates the trust store + policy now) so a misconfiguration stops startup
 // rather than failing every job later. Call only when cfg.Enabled().
 func New(cfg config.VerifyConfig) (Verifier, error) {
+	return newNotary(cfg)
+}
+
+func newNotary(cfg config.VerifyConfig) (*notaryVerifier, error) {
 	if cfg.Provider != "" && cfg.Provider != "notation" {
-		return nil, fmt.Errorf("verify provider %q is not supported (only \"notation\")", cfg.Provider)
+		return nil, fmt.Errorf("%w: verify provider %q is not supported (only \"notation\")", ErrBadTrustMaterial, cfg.Provider)
 	}
 	ts, err := loadTrustStore(cfg)
 	if err != nil {
@@ -50,19 +57,20 @@ func New(cfg config.VerifyConfig) (Verifier, error) {
 		return nil, err
 	}
 	if err := doc.Validate(); err != nil {
-		return nil, fmt.Errorf("trust policy: %w", err)
+		return nil, fmt.Errorf("%w: trust policy: %v", ErrBadTrustMaterial, err)
 	}
 	nv, err := verifier.New(doc, ts, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build notation verifier: %w", err)
 	}
-	return &notaryVerifier{cfg: cfg, v: nv}, nil
+	return &notaryVerifier{cfg: cfg, v: nv, certs: ts.certs, policy: doc}, nil
 }
 
-func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, src name.Reference) (v1.Hash, error) {
+func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, src name.Reference) (Result, error) {
 	mode := n.cfg.EffectiveMode(from)
+	res := Result{Mode: mode}
 	if mode == config.VerifyOff {
-		return v1.Hash{}, nil
+		return res, nil
 	}
 	if d := time.Duration(n.cfg.Timeout); d > 0 {
 		var cancel context.CancelFunc
@@ -72,26 +80,29 @@ func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, sr
 
 	repo, err := n.repo(from, src)
 	if err != nil {
-		return v1.Hash{}, fmt.Errorf("build repository client: %w", err)
+		return res, fmt.Errorf("build repository client: %w", err)
 	}
 	// Resolve the tag (or digest) to its manifest descriptor: this is what gets
 	// verified and pinned.
 	desc, err := repo.Resolve(ctx, src.Identifier())
 	if err != nil {
-		return v1.Hash{}, fmt.Errorf("resolve %s: %w", src.Name(), err)
+		if errors.Is(err, errdef.ErrNotFound) {
+			return res, fmt.Errorf("%w: %s: %v", ErrNotFound, src.Name(), err)
+		}
+		return res, fmt.Errorf("resolve %s: %w", src.Name(), err)
 	}
 
 	// Gate on signature presence (uniformly for both modes) so we can report a
 	// missing signature distinctly (ErrUnsigned) from a bad one (ErrUntrusted).
 	signed, err := hasSignature(ctx, repo, desc)
 	if err != nil {
-		return v1.Hash{}, fmt.Errorf("list signatures for %s: %w", src.Name(), err)
+		return res, fmt.Errorf("list signatures for %s: %w", src.Name(), err)
 	}
 	if !signed {
 		if mode == config.VerifyRequire {
-			return v1.Hash{}, fmt.Errorf("%w: %s", ErrUnsigned, src.Name())
+			return res, fmt.Errorf("%w: %s", ErrUnsigned, src.Name())
 		}
-		return v1.Hash{}, nil // verify-if-present: unsigned is allowed
+		return res, nil // verify-if-present: unsigned is allowed
 	}
 
 	artifactRef := src.Context().Digest(desc.Digest.String()).Name()
@@ -99,14 +110,15 @@ func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, sr
 		ArtifactReference:    artifactRef,
 		MaxSignatureAttempts: 50,
 	}); err != nil {
-		return v1.Hash{}, fmt.Errorf("%w: %v", ErrUntrusted, err)
+		return res, fmt.Errorf("%w: %v", ErrUntrusted, err)
 	}
 
 	h, err := v1.NewHash(desc.Digest.String())
 	if err != nil {
-		return v1.Hash{}, err
+		return res, err
 	}
-	return h, nil
+	res.Digest = h
+	return res, nil
 }
 
 // repo builds a notation repository over the source registry, matching the
@@ -187,7 +199,7 @@ func (s *certStore) GetCertificates(_ context.Context, storeType truststore.Type
 	return s.certs, nil
 }
 
-func loadTrustStore(cfg config.VerifyConfig) (truststore.X509TrustStore, error) {
+func loadTrustStore(cfg config.VerifyConfig) (*certStore, error) {
 	switch cfg.TrustStore {
 	case "":
 		return nil, errors.New("serve.verify.trust_store is required when verification is enabled")
@@ -199,7 +211,7 @@ func loadTrustStore(cfg config.VerifyConfig) (truststore.X509TrustStore, error) 
 		return nil, err
 	}
 	if len(certs) == 0 {
-		return nil, fmt.Errorf("no CA certificates found in serve.verify.trust_store %q", cfg.TrustStore)
+		return nil, fmt.Errorf("%w: no CA certificates found in serve.verify.trust_store %q", ErrBadTrustMaterial, cfg.TrustStore)
 	}
 	return &certStore{certs: certs}, nil
 }
@@ -234,7 +246,7 @@ func loadCertDir(dir string) ([]*x509.Certificate, error) {
 			}
 			c, err := x509.ParseCertificate(blk.Bytes)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", e.Name(), err)
+				return nil, fmt.Errorf("%w: %s: %v", ErrBadTrustMaterial, e.Name(), err)
 			}
 			certs = append(certs, c)
 		}
@@ -271,10 +283,10 @@ func loadOrSynthPolicy(cfg config.VerifyConfig) (*trustpolicy.Document, error) {
 		}
 		var doc trustpolicy.Document
 		if err := json.Unmarshal(b, &doc); err != nil {
-			return nil, fmt.Errorf("parse trust_policy: %w", err)
+			return nil, fmt.Errorf("%w: parse trust_policy: %v", ErrBadTrustMaterial, err)
 		}
 		if err := checkSingleCAStore(&doc); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrBadTrustMaterial, err)
 		}
 		return &doc, nil
 	}
@@ -285,7 +297,7 @@ func loadOrSynthPolicy(cfg config.VerifyConfig) (*trustpolicy.Document, error) {
 	if level == "audit" {
 		// Defense in depth (config also rejects it): audit downgrades authenticity
 		// to log-only, defeating the trust anchor.
-		return nil, fmt.Errorf("verify level %q disables trust-anchor enforcement and is not allowed", level)
+		return nil, fmt.Errorf("%w: verify level %q disables trust-anchor enforcement and is not allowed", ErrBadTrustMaterial, level)
 	}
 	// "trust anything that chains to the configured CA(s), any identity."
 	return &trustpolicy.Document{

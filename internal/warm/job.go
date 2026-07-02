@@ -31,6 +31,15 @@ func (s JobState) Terminal() bool {
 	}
 }
 
+// VerificationSnapshot reports the admission-time signature verification: the
+// audit primitive tying a mutable tag request to the exact digest that was
+// verified and moved.
+type VerificationSnapshot struct {
+	Mode     string `json:"mode" enums:"off,verify-if-present,require"` // effective mode for the source store
+	Verified bool   `json:"verified"`                                   // a signature was actually verified
+	Digest   string `json:"digest,omitempty"`                           // the digest the job was pinned to
+}
+
 // Job is the live record of one image move. Its Transfers are filled in by the
 // Warmer when the job is planned and run.
 type Job struct {
@@ -38,9 +47,10 @@ type Job struct {
 	Ref       string // the requested image reference
 	Platforms []string
 
-	State     JobState
-	Err       string
-	Transfers []*Transfer
+	State        JobState
+	Err          string
+	Verification *VerificationSnapshot // nil when verification is disabled
+	Transfers    []*Transfer
 
 	CreatedAt time.Time
 	StartedAt time.Time
@@ -127,15 +137,16 @@ type PlannedLayer struct {
 // --- snapshots (immutable views for the API) ---
 
 type JobSnapshot struct {
-	ID        string             `json:"id"`
-	Ref       string             `json:"ref"`
-	Platforms []string           `json:"platforms"`
-	State     JobState           `json:"state"`
-	Err       string             `json:"error"`
-	Transfers []TransferSnapshot `json:"transfers"`
-	CreatedAt time.Time          `json:"created_at"`
-	StartedAt time.Time          `json:"started_at,omitempty"`
-	EndedAt   time.Time          `json:"ended_at,omitempty"`
+	ID           string                `json:"id"`
+	Ref          string                `json:"ref"`
+	Platforms    []string              `json:"platforms"`
+	State        JobState              `json:"state"`
+	Err          string                `json:"error"`
+	Verification *VerificationSnapshot `json:"verification,omitempty"`
+	Transfers    []TransferSnapshot    `json:"transfers"`
+	CreatedAt    time.Time             `json:"created_at"`
+	StartedAt    time.Time             `json:"started_at,omitempty"`
+	EndedAt      time.Time             `json:"ended_at,omitempty"`
 }
 
 type TransferSnapshot struct {
@@ -169,6 +180,10 @@ func (j *Job) snapshot() JobSnapshot {
 		CreatedAt: j.CreatedAt,
 		StartedAt: j.StartedAt,
 		EndedAt:   j.EndedAt,
+	}
+	if j.Verification != nil {
+		v := *j.Verification
+		s.Verification = &v
 	}
 	for _, t := range j.Transfers {
 		ts := TransferSnapshot{

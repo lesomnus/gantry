@@ -20,9 +20,9 @@ type fakeVerifier struct {
 	calls []string
 }
 
-func (f *fakeVerifier) Verify(_ context.Context, _ config.StoreConfig, src name.Reference) (v1.Hash, error) {
+func (f *fakeVerifier) Verify(_ context.Context, _ config.StoreConfig, src name.Reference) (verify.Result, error) {
 	f.calls = append(f.calls, src.Name())
-	return f.dg, f.err
+	return verify.Result{Mode: config.VerifyRequire, Digest: f.dg}, f.err
 }
 
 // TestVerifyRejectsAdmission: a verification failure aborts Submit before any
@@ -69,6 +69,10 @@ func TestVerifyPinKeepsCacheTagged(t *testing.T) {
 	cacheRef := snap.Transfers[0].Ref
 	if strings.Contains(cacheRef, "@sha256:") || !strings.Contains(cacheRef, ":1") {
 		t.Errorf("cache ref = %q, want tag-named (not pinned to the source digest)", cacheRef)
+	}
+	if snap.Verification == nil || !snap.Verification.Verified ||
+		snap.Verification.Digest != h.String() || snap.Verification.Mode != string(config.VerifyRequire) {
+		t.Errorf("verification = %+v, want the verified digest surfaced on the snapshot", snap.Verification)
 	}
 }
 

@@ -110,7 +110,12 @@ func (s *Set) Engines() map[string]down.Engine {
 	return out
 }
 
-// EngineNames returns every declared engine store name, in config order.
+// Names returns every declared store name, sorted.
+func (s *Set) Names() []string {
+	return append([]string(nil), s.order...)
+}
+
+// EngineNames returns every declared engine store name, sorted.
 func (s *Set) EngineNames() []string {
 	var out []string
 	for _, name := range s.order {
