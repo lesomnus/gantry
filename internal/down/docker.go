@@ -140,6 +140,11 @@ func (e *dockerEngine) WatchUsage(ctx context.Context, sink UsageSink) error {
 func (e *dockerEngine) Remove(ctx context.Context, ref string) (RemoveResult, error) {
 	resp, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{PruneChildren: true})
 	if err != nil {
+		if client.IsErrNotFound(err) {
+			// Already gone (removed out-of-band, e.g. `docker rmi`). Report success
+			// so the caller syncs its retention index instead of erroring forever.
+			return RemoveResult{}, nil
+		}
 		return RemoveResult{}, z.Err(err, "image remove")
 	}
 	var rr RemoveResult

@@ -129,3 +129,120 @@ func TestWarmerNothingToDo(t *testing.T) {
 		t.Error("expected error when neither to nor distribute is set")
 	}
 }
+
+func TestWarmerSweepsTerminalJobs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w, js := newWarmer(t, nil, true)
+	w.wc.JobTTL = config.Duration(50 * time.Millisecond)
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	done_job := NewJob("job_done", "a/b:1", nil, time.Now())
+	done_job.State = JobDone
+	done_job.EndedAt = time.Now()
+	live_job := NewJob("job_live", "a/b:2", nil, time.Now())
+	for _, j := range []*Job{done_job, live_job} {
+		if err := js.Add(j); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := js.Snapshot("job_done"); !ok {
+			if _, ok := js.Snapshot("job_live"); !ok {
+				t.Fatal("non-terminal job was swept")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("terminal job was not swept after its TTL")
+}
+
+// failSource fails the first layer with a real error; other layers block until
+// the failure's self-cancel aborts them, like in-flight sibling copies.
+type failSource struct{}
+
+func (failSource) Resolve(context.Context, name.Reference, name.Reference, []string) (*Plan, error) {
+	return nil, nil
+}
+
+func (failSource) Warm(ctx context.Context, _, _ name.Repository, l PlannedLayer, _ ProgressSink) error {
+	if l.Digest == "sha256:1" {
+		return errors.New("copy blob: boom")
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (failSource) Commit(context.Context, name.Reference, name.Reference, []string) error {
+	return nil
+}
+
+func TestCopyLayersReportsLayerError(t *testing.T) {
+	w, js := newWarmer(t, nil, true)
+	w.wc.MaxConcurrentLayers = 1
+	ctx, cancel := context.WithCancel(context.Background())
+	job := NewJob("job_l", "a/b:1", nil, time.Now())
+	job.ctx, job.cancel = ctx, cancel
+	tr := &Transfer{Layers: []*LayerProgress{{}, {}, {}}}
+	job.Transfers = []*Transfer{tr}
+	if err := js.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
+	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
+	ex := &jobExec{src: src_ref, dst: dst_ref}
+	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}, {Digest: "sha256:2"}, {Digest: "sha256:3"}}}
+
+	// The failing layer self-cancels the job ctx while the dispatcher is still
+	// admitting layers; the returned error must be the layer error either way.
+	err := w.copyLayers(job.ctx, job, tr, failSource{}, plan, ex)
+	if err == nil || errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the layer error", err)
+	}
+	w.finish(job, err)
+	snap, _ := js.Snapshot("job_l")
+	if snap.State != JobFailed || snap.Err != "copy blob: boom" {
+		t.Fatalf("state = %q err = %q, want failed with the layer error", snap.State, snap.Err)
+	}
+}
+
+func TestFinish(t *testing.T) {
+	t.Run("layer failure self-cancel is recorded as failed", func(t *testing.T) {
+		w, js := newWarmer(t, nil, true)
+		ctx, cancel := context.WithCancel(context.Background())
+		job := NewJob("job_f", "a/b:1", nil, time.Now())
+		job.ctx, job.cancel = ctx, cancel
+		if err := js.Add(job); err != nil {
+			t.Fatal(err)
+		}
+		// A failing layer cancels the job context to abort its siblings before
+		// the error propagates; the real error must win over that cancellation.
+		job.Cancel()
+		w.finish(job, errors.New("copy blob: boom"))
+		snap, _ := js.Snapshot("job_f")
+		if snap.State != JobFailed {
+			t.Fatalf("state = %q, want %q", snap.State, JobFailed)
+		}
+		if snap.Err != "copy blob: boom" {
+			t.Fatalf("err = %q, want the layer error", snap.Err)
+		}
+	})
+	t.Run("cancellation stays canceled", func(t *testing.T) {
+		w, js := newWarmer(t, nil, true)
+		ctx, cancel := context.WithCancel(context.Background())
+		job := NewJob("job_c", "a/b:1", nil, time.Now())
+		job.ctx, job.cancel = ctx, cancel
+		if err := js.Add(job); err != nil {
+			t.Fatal(err)
+		}
+		job.Cancel()
+		w.finish(job, context.Canceled)
+		snap, _ := js.Snapshot("job_c")
+		if snap.State != JobCanceled {
+			t.Fatalf("state = %q, want %q", snap.State, JobCanceled)
+		}
+	})
+}

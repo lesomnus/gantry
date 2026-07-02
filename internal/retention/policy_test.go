@@ -1,6 +1,8 @@
 package retention
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,7 +88,7 @@ func TestEvaluateAgeBoundaryAndYoungKept(t *testing.T) {
 	if keep["r/a:young"] != "within_max_age" {
 		t.Errorf("young should be kept: %v", keep)
 	}
-	if d.NextAgeOut().IsZero() {
+	if d.NextAgeOut.IsZero() {
 		t.Error("expected a next age-out deadline for the young record")
 	}
 }
@@ -103,8 +105,8 @@ func TestEvaluateGraceHoldsDeletion(t *testing.T) {
 	if keep["r/a:old"] != "grace" {
 		t.Errorf("expected grace reason: keep=%v", keep)
 	}
-	if !d.NextAgeOut().Equal(graceUntil) {
-		t.Errorf("next age-out should be graceUntil, got %v", d.NextAgeOut())
+	if !d.NextAgeOut.Equal(graceUntil) {
+		t.Errorf("next age-out should be graceUntil, got %v", d.NextAgeOut)
 	}
 }
 
@@ -115,5 +117,23 @@ func TestEvaluateMaxAgeZeroDisablesAgeGC(t *testing.T) {
 	del, keep := decided(d)
 	if len(del) != 0 || keep["r/a:old"] != "age_gc_disabled" {
 		t.Errorf("max_age=0 should keep all: del=%v keep=%v", del, keep)
+	}
+}
+
+func TestDecisionSerializesNextAgeOut(t *testing.T) {
+	at := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	b, err := json.Marshal(Decision{NextAgeOut: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"next_age_out":"2026-07-02T12:00:00Z"`) {
+		t.Errorf("next_age_out missing: %s", b)
+	}
+	b, err = json.Marshal(Decision{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "next_age_out") {
+		t.Errorf("zero next_age_out should be omitted: %s", b)
 	}
 }

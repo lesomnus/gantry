@@ -82,8 +82,8 @@ func Evaluate(now time.Time, recs []Record, inUse map[string]bool, p Policy, gra
 			reason = "grace"
 		}
 		dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: reason})
-		if dec.earliestAgeOut.IsZero() || deletableAt.Before(dec.earliestAgeOut) {
-			dec.earliestAgeOut = deletableAt
+		if dec.NextAgeOut.IsZero() || deletableAt.Before(dec.NextAgeOut) {
+			dec.NextAgeOut = deletableAt
 		}
 	}
 	return dec

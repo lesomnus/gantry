@@ -501,7 +501,7 @@ curl -X POST /v1/store/{name}/pull \
 
 `POST /v1/store/{name}/pull`
 
-Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile).
+Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile). Stamps the retention index like a job's distribute step, so the pulled image stays eligible for age GC.
 
 > Body parameter
 
@@ -602,7 +602,8 @@ Returns the retention decision (keep/delete) without deleting anything. An optio
       "reason": "string",
       "ref": "string"
     }
-  ]
+  ],
+  "next_age_out": "string"
 }
 ```
 
@@ -1050,7 +1051,8 @@ BearerAuth
       "reason": "string",
       "ref": "string"
     }
-  ]
+  ],
+  "next_age_out": "string"
 }
 
 ```
@@ -1061,6 +1063,7 @@ BearerAuth
 |---|---|---|---|---|
 |delete|[[retention.Candidate](#schemaretention.candidate)]|false|none|none|
 |keep|[[retention.Kept](#schemaretention.kept)]|false|none|none|
+|next_age_out|string|false|none|NextAgeOut is the soonest a currently-kept record could become<br>age-deletable; the scheduler waits until then (or a usage event). Zero<br>means nothing is on an age path.|
 
 <h2 id="tocS_retention.Kept">retention.Kept</h2>
 <!-- backwards compatibility -->

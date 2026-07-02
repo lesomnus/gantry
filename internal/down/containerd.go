@@ -9,6 +9,7 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/typeurl/v2"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/z"
@@ -183,6 +184,11 @@ func (e *containerdEngine) WatchUsage(ctx context.Context, sink UsageSink) error
 func (e *containerdEngine) Remove(ctx context.Context, ref string) (RemoveResult, error) {
 	ctx = e.ns(ctx)
 	if err := e.cli.ImageService().Delete(ctx, ref, images.SynchronousDelete()); err != nil {
+		if cerrdefs.IsNotFound(err) {
+			// Already gone (removed out-of-band, e.g. `ctr images rm`). Report success
+			// so the caller syncs its retention index instead of erroring forever.
+			return RemoveResult{}, nil
+		}
 		return RemoveResult{}, z.Err(err, "delete image")
 	}
 	return RemoveResult{Deleted: []string{ref}}, nil

@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/lesomnus/gantry/internal/down"
 )
@@ -30,7 +31,7 @@ type storePullRequest struct {
 // handleStorePull godoc
 //
 //	@Summary	Trigger an engine store to pull
-//	@Description	Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile).
+//	@Description	Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile). Stamps the retention index like a job's distribute step, so the pulled image stays eligible for age GC.
 //	@Tags		stores
 //	@Accept		json
 //	@Produce	json
@@ -60,6 +61,11 @@ func (s *Server) handleStorePull(w http.ResponseWriter, r *http.Request) {
 	if err := eng.Pull(r.Context(), req.Ref, nopSink{}); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
+	}
+	if s.gc != nil {
+		// Same stamp as a job's distribute step: without a record the retention
+		// policy can never age-collect a manually pulled image.
+		s.gc.Distributed(eng.Name(), req.Ref, time.Now())
 	}
 	writeJSON(w, http.StatusOK, storePullResponse{
 		Store: eng.Name(),

@@ -57,11 +57,8 @@ type Decision struct {
 	Delete []Candidate `json:"delete"`
 	Keep   []Kept      `json:"keep"`
 
-	// earliestAgeOut is the soonest a currently-kept record could become
+	// NextAgeOut is the soonest a currently-kept record could become
 	// age-deletable; the scheduler waits until then (or a usage event). Zero
 	// means nothing is on an age path.
-	earliestAgeOut time.Time
+	NextAgeOut time.Time `json:"next_age_out,omitzero"`
 }
-
-// NextAgeOut returns the earliest time a kept record could become deletable.
-func (d Decision) NextAgeOut() time.Time { return d.earliestAgeOut }

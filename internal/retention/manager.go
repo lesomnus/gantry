@@ -211,8 +211,8 @@ func (m *Manager) gcAll(ctx context.Context) Decision {
 		m.apply(ctx, name, eng, dec)
 		merged.Delete = append(merged.Delete, dec.Delete...)
 		merged.Keep = append(merged.Keep, dec.Keep...)
-		if !dec.earliestAgeOut.IsZero() && (merged.earliestAgeOut.IsZero() || dec.earliestAgeOut.Before(merged.earliestAgeOut)) {
-			merged.earliestAgeOut = dec.earliestAgeOut
+		if !dec.NextAgeOut.IsZero() && (merged.NextAgeOut.IsZero() || dec.NextAgeOut.Before(merged.NextAgeOut)) {
+			merged.NextAgeOut = dec.NextAgeOut
 		}
 	}
 	m.lastRun = m.now()
@@ -221,7 +221,7 @@ func (m *Manager) gcAll(ctx context.Context) Decision {
 
 func (m *Manager) nextWake(dec Decision) time.Duration {
 	cap := m.sched.Interval
-	next := dec.NextAgeOut()
+	next := dec.NextAgeOut
 	if next.IsZero() {
 		return cap // nothing aging -> idle until Interval (or an event pokes)
 	}

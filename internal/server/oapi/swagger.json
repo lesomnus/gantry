@@ -115,6 +115,10 @@
                         },
                         "type": "array",
                         "uniqueItems": false
+                    },
+                    "next_age_out": {
+                        "description": "NextAgeOut is the soonest a currently-kept record could become\nage-deletable; the scheduler waits until then (or a usage event). Zero\nmeans nothing is on an age path.",
+                        "type": "string"
                     }
                 },
                 "type": "object"
@@ -1287,7 +1291,7 @@
         },
         "/v1/store/{name}/pull": {
             "post": {
-                "description": "Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile).",
+                "description": "Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile). Stamps the retention index like a job's distribute step, so the pulled image stays eligible for age GC.",
                 "parameters": [
                     {
                         "description": "engine store name",

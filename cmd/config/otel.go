@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/lesomnus/gantry/cmd/version"
+	_ "github.com/lesomnus/gantry/internal/otlp" // registers the "otlp" exporter
 	"github.com/lesomnus/mkot"
 	"github.com/lesomnus/mkot/pretty"
 	"github.com/lesomnus/otx"
@@ -58,6 +60,15 @@ func (c *OtelConfig) Build(ctx context.Context) (context.Context, *otx.Otx, erro
 		otc.Providers["logger"] = &mkot.ProviderConfig{
 			Exporters: []mkot.Id{"pretty"},
 		}
+	}
+	// Every provider carries the gantry service resource unless it already lists
+	// it: a config that wires its own providers/exporters must not silently lose
+	// service.name. Prepended, so a user-defined resource processor still wins.
+	for _, p := range otc.Providers {
+		if p == nil || slices.Contains(p.Processors, ServiceResourceId) {
+			continue
+		}
+		p.Processors = append([]mkot.Id{ServiceResourceId}, p.Processors...)
 	}
 
 	resolver := mkot.Make(ctx, otc)

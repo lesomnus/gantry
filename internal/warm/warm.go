@@ -89,6 +89,7 @@ type Warmer struct {
 	verifier verify.Verifier          // source-signature verification (nil = disabled)
 
 	base context.Context
+	stop chan struct{} // closed by Stop; ends goroutines not fed by the jobs channel
 	wg   sync.WaitGroup
 }
 
@@ -104,6 +105,7 @@ func NewWarmer(stores *store.Set, jobStore Store, wc config.WarmConfig) *Warmer 
 		jobs:    make(chan *Job, q),
 		idgen:   newID,
 		metrics: newMetrics(context.Background()),
+		stop:    make(chan struct{}),
 	}
 }
 
@@ -135,11 +137,38 @@ func (w *Warmer) Start(ctx context.Context) {
 		w.wg.Add(1)
 		go w.worker()
 	}
+	if ttl := time.Duration(w.wc.JobTTL); ttl > 0 {
+		w.wg.Add(1)
+		go w.sweeper(ttl)
+	}
 }
 
 func (w *Warmer) Stop() {
+	close(w.stop)
 	close(w.jobs)
 	w.wg.Wait()
+}
+
+// sweeper evicts terminal job records older than JobTTL so they do not
+// accumulate unbounded on a long-lived server.
+func (w *Warmer) sweeper(ttl time.Duration) {
+	defer w.wg.Done()
+	period := min(ttl/4, time.Minute)
+	if period <= 0 {
+		period = time.Millisecond
+	}
+	tick := time.NewTicker(period)
+	defer tick.Stop()
+	for {
+		select {
+		case <-w.base.Done():
+			return
+		case <-w.stop:
+			return
+		case <-tick.C:
+			w.store.Sweep(time.Now(), ttl)
+		}
+	}
 }
 
 // Submit resolves and enqueues a job, collapsing identical in-flight moves.
@@ -303,6 +332,9 @@ func (w *Warmer) worker() {
 }
 
 func (w *Warmer) run(job *Job) {
+	// Release the job's cancelCtx from the base context once it is terminal;
+	// otherwise every job leaks a child context until its record is deleted.
+	defer job.Cancel()
 	ctx, span := otx.TraceStart(job.ctx, "job", trace.WithAttributes(attribute.String("gantry.ref", job.Ref)))
 	defer span.End()
 	l := log.From(ctx)
@@ -319,9 +351,11 @@ func (w *Warmer) run(job *Job) {
 	case err == nil:
 		l.Info("job done", slog.String("job", job.ID), slog.String("ref", job.Ref),
 			slog.Int64("bytes", jobBytes(job)), slog.Int64("took_ms", time.Since(start).Milliseconds()))
-	case errors.Is(err, context.Canceled) || errors.Is(job.ctx.Err(), context.Canceled):
+	case errors.Is(err, context.Canceled):
 		// Cancellation (DELETE /v1/job or shutdown) is a normal terminal state
 		// (finish() maps it to JobCanceled), not a failure — don't alert on it.
+		// A real error wins even though a layer failure also cancels job.ctx to
+		// abort its siblings.
 		state = "canceled"
 		l.Info("job canceled", slog.String("job", job.ID), slog.String("ref", job.Ref))
 	default:
@@ -399,6 +433,12 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Wait()
+			// A failing layer cancels ctx to abort the dispatch, so the real error,
+			// not the derived cancellation, is the job's outcome. (wg.Wait orders
+			// the once.Do write of firstErr before this read.)
+			if firstErr != nil && !errors.Is(firstErr, context.Canceled) {
+				return firstErr
+			}
 			return ctx.Err()
 		}
 		wg.Add(1)
@@ -478,7 +518,10 @@ func (w *Warmer) finish(job *Job, err error) {
 		switch {
 		case err == nil:
 			j.State = JobDone
-		case errors.Is(err, context.Canceled), errors.Is(job.ctx.Err(), context.Canceled):
+		case errors.Is(err, context.Canceled):
+			// Only an error that IS the cancellation counts as canceled. A layer
+			// failure cancels job.ctx to abort its sibling copies, but the job must
+			// be recorded as failed with the real error, not silently "canceled".
 			j.State = JobCanceled
 		default:
 			j.State = JobFailed

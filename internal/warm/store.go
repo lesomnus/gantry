@@ -106,6 +106,7 @@ func (s *memStore) Sweep(now time.Time, ttl time.Duration) int {
 	n := 0
 	for id, j := range s.jobs {
 		if j.State.Terminal() && !j.EndedAt.IsZero() && now.Sub(j.EndedAt) > ttl {
+			j.Cancel() // release the job's context, mirroring Delete
 			delete(s.jobs, id)
 			n++
 		}
