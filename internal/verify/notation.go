@@ -2,16 +2,19 @@ package verify
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
@@ -106,9 +109,9 @@ func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, sr
 	return h, nil
 }
 
-// repo builds a notation repository over the source registry, matching gantry's
-// auth (basic when credentials are set, else anonymous) and insecure (plain
-// HTTP) handling for that store.
+// repo builds a notation repository over the source registry, matching the
+// ggcr copy path's wiring for that store: basic auth when credentials are set,
+// else the docker keychain; insecure covers plain-HTTP and self-signed.
 func (n *notaryVerifier) repo(from config.StoreConfig, ref name.Reference) (notationregistry.Repository, error) {
 	r, err := remote.NewRepository(ref.Context().Name())
 	if err != nil {
@@ -118,12 +121,38 @@ func (n *notaryVerifier) repo(from config.StoreConfig, ref name.Reference) (nota
 	if from.Username != "" {
 		client.Credential = auth.StaticCredential(ref.Context().RegistryStr(),
 			auth.Credential{Username: from.Username, Password: from.Password})
+	} else {
+		client.Credential = keychainCredential(ref.Context())
 	}
-	r.Client = client
 	if from.Insecure {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		client.Client = &http.Client{Transport: t}
 		r.PlainHTTP = true
 	}
+	r.Client = client
 	return notationregistry.NewRepository(r), nil
+}
+
+// keychainCredential resolves credentials from the docker keychain, matching
+// the copy path's authn.DefaultKeychain fallback.
+func keychainCredential(repo name.Repository) func(context.Context, string) (auth.Credential, error) {
+	return func(context.Context, string) (auth.Credential, error) {
+		a, err := authn.DefaultKeychain.Resolve(repo.Registry)
+		if err != nil {
+			return auth.EmptyCredential, nil
+		}
+		cfg, err := a.Authorization()
+		if err != nil || cfg == nil {
+			return auth.EmptyCredential, nil
+		}
+		return auth.Credential{
+			Username:     cfg.Username,
+			Password:     cfg.Password,
+			RefreshToken: cfg.IdentityToken,
+			AccessToken:  cfg.RegistryToken,
+		}, nil
+	}
 }
 
 // errSignatureFound stops ListSignatures early once any signature is seen.

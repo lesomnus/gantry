@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/otx/log"
 )
 
@@ -130,6 +132,12 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 			p.KeepN = *req.KeepN
 		}
 		if req.Pins != nil {
+			for _, pin := range req.Pins {
+				if !doublestar.ValidatePattern(pin) {
+					writeErr(w, http.StatusBadRequest, "invalid pin pattern "+pin)
+					return
+				}
+			}
 			p.Pins = req.Pins
 		}
 	}
@@ -151,18 +159,31 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 }
 
 type pinRequest struct {
-	Ref string `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to pin or unpin (exact-match, required).
+	Ref     string `json:"ref,omitempty" example:"docker.io/library/nginx:1.27"` // Exact image reference to pin or unpin.
+	Pattern string `json:"pattern,omitempty" example:"*:stable"`                 // Doublestar pattern, matched against the full ref, name:tag, and the bare tag.
+}
+
+// value returns the single pin value and whether it is a pattern: exactly one
+// of ref/pattern must be set.
+func (r pinRequest) value() (value string, pattern, ok bool) {
+	if (r.Ref == "") == (r.Pattern == "") {
+		return "", false, false
+	}
+	if r.Ref != "" {
+		return r.Ref, false, true
+	}
+	return r.Pattern, true, true
 }
 
 // pinListResponse is the GET /v1/store/{name}/pin body.
 type pinListResponse struct {
-	Pins []string `json:"pins"`
+	Pins []retention.PinEntry `json:"pins"`
 }
 
 // handleListPins godoc
 //
 //	@Summary	List pinned references for a store
-//	@Description	Pinned references are exempt from retention GC (exact-match).
+//	@Description	Pins are exempt from retention GC: exact references, or doublestar patterns matched against the full ref, its name:tag short form, and the bare tag.
 //	@Tags		retention
 //	@Produce	json
 //	@Param		name	path		string	true	"engine store name"
@@ -183,18 +204,19 @@ func (s *Server) handleListPins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if pins == nil {
-		pins = []string{}
+		pins = []retention.PinEntry{}
 	}
 	writeJSON(w, http.StatusOK, pinListResponse{Pins: pins})
 }
 
 // handlePin godoc
 //
-//	@Summary	Pin a reference (exempt from GC)
+//	@Summary	Pin a reference or pattern (exempt from GC)
+//	@Description	Body carries exactly one of `ref` (exact) or `pattern` (doublestar; matched against the full ref, name:tag, and the bare tag). Preview the effect with the GC dry-run — a broad pattern like `**` disables age GC entirely.
 //	@Tags		retention
 //	@Accept		json
 //	@Param		name	path	string		true	"engine store name"
-//	@Param		request	body	pinRequest	true	"reference to pin"
+//	@Param		request	body	pinRequest	true	"reference or pattern to pin"
 //	@Success	204
 //	@Failure	400	{object}	errorResponse
 //	@Failure	404	{object}	errorResponse
@@ -208,11 +230,22 @@ func (s *Server) handlePin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req pinRequest
-	if err := readJSON(r, &req); err != nil || req.Ref == "" {
-		writeErr(w, http.StatusBadRequest, "ref is required")
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
-	if err := s.gc.Pin(name, req.Ref); err != nil {
+	value, pattern, ok := req.value()
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "exactly one of ref or pattern is required")
+		return
+	}
+	// A malformed pattern would be accepted and then never match — the image the
+	// user believes is pinned gets GC'd. Fail closed here instead.
+	if pattern && !doublestar.ValidatePattern(value) {
+		writeErr(w, http.StatusBadRequest, "invalid doublestar pattern")
+		return
+	}
+	if err := s.gc.Pin(name, value, pattern); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -221,11 +254,11 @@ func (s *Server) handlePin(w http.ResponseWriter, r *http.Request) {
 
 // handleUnpin godoc
 //
-//	@Summary	Unpin a reference
+//	@Summary	Unpin a reference or pattern
 //	@Tags		retention
 //	@Accept		json
 //	@Param		name	path	string		true	"engine store name"
-//	@Param		request	body	pinRequest	true	"reference to unpin"
+//	@Param		request	body	pinRequest	true	"reference or pattern to unpin"
 //	@Success	204
 //	@Failure	400	{object}	errorResponse
 //	@Failure	404	{object}	errorResponse
@@ -239,11 +272,16 @@ func (s *Server) handleUnpin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req pinRequest
-	if err := readJSON(r, &req); err != nil || req.Ref == "" {
-		writeErr(w, http.StatusBadRequest, "ref is required")
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
-	if err := s.gc.Unpin(name, req.Ref); err != nil {
+	value, _, ok := req.value()
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "exactly one of ref or pattern is required")
+		return
+	}
+	if err := s.gc.Unpin(name, value); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

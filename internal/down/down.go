@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
 )
 
@@ -43,7 +44,10 @@ type Engine interface {
 	Name() string
 	Kind() string // docker | containerd
 	Ready(ctx context.Context) error
-	Pull(ctx context.Context, ref string, sink Sink) error
+	// Pull makes the engine pull ref. A non-empty digest anchors the pull: the
+	// engine pulls repo@digest and then tags it as ref locally, so a mutable tag
+	// re-resolved by a pull-through cache cannot substitute different bytes.
+	Pull(ctx context.Context, ref string, digest string, sink Sink) error
 
 	// InUse returns the references and image IDs currently held by live containers.
 	InUse(ctx context.Context) (map[string]bool, error)
@@ -80,6 +84,19 @@ func Capabilities(e Engine) Caps {
 	_, verify := e.(Verifier)
 	_, gc := e.(Collector)
 	return Caps{Pull: true, Verify: verify, GC: gc}
+}
+
+// anchoredRef rewrites a tag reference to pull by digest; a reference that is
+// already digest-anchored is returned unchanged.
+func anchoredRef(ref, digest string) (string, error) {
+	r, err := name.ParseReference(ref)
+	if err != nil {
+		return "", fmt.Errorf("parse ref %q: %w", ref, err)
+	}
+	if _, ok := r.(name.Digest); ok {
+		return ref, nil
+	}
+	return r.Context().Name() + "@" + digest, nil
 }
 
 // New builds an Engine for a docker/containerd store config.

@@ -47,7 +47,7 @@ func TestManagerWatchPlanLive(t *testing.T) {
 	defer cli.Close()
 
 	const ref = "busybox:latest"
-	if err := eng.Pull(ctx, ref, nopSink{}); err != nil {
+	if err := eng.Pull(ctx, ref, "", nopSink{}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 

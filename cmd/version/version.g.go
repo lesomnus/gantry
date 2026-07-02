@@ -4,6 +4,6 @@ package version
 func init(){
 	b := &build_info
 	b.Version   = "260702-r0"
-	b.GitRev    = "f8e2db3eb2cf7da98ec9197e111b2b01e5f9f7cd"
+	b.GitRev    = "44f922641d895a158f56b011f982ebfc5edb1426"
 	b.GitDirty  = true
 }

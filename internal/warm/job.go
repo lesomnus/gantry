@@ -89,6 +89,10 @@ type Transfer struct {
 	Kind  string // oci | docker | containerd
 	From  string // source store/host
 	Ref   string // the reference placed in the destination
+	// Digest is the manifest/index digest this transfer is anchored to: the
+	// digest the registry copy committed, and the digest an engine pull was
+	// pinned to. Empty when the step ran by tag alone.
+	Digest string
 
 	State      string // pending | running | done | exists | failed
 	BytesTotal int64
@@ -139,6 +143,7 @@ type TransferSnapshot struct {
 	Kind       string          `json:"kind" enums:"oci,docker,containerd"` // which store kind ran this step
 	From       string          `json:"from"`
 	Ref        string          `json:"ref"`
+	Digest     string          `json:"digest,omitempty"`                                 // manifest/index digest the step was anchored to
 	State      string          `json:"state" enums:"pending,running,done,exists,failed"` // transfer step state
 	BytesTotal int64           `json:"bytes_total"`
 	BytesDone  int64           `json:"bytes_done"`
@@ -171,6 +176,7 @@ func (j *Job) snapshot() JobSnapshot {
 			Kind:       t.Kind,
 			From:       t.From,
 			Ref:        t.Ref,
+			Digest:     t.Digest,
 			State:      t.State,
 			BytesTotal: t.BytesTotal,
 			BytesDone:  t.BytesDone.Load(),
@@ -203,6 +209,9 @@ type Store interface {
 	Job(id string) (*Job, bool)
 	Snapshot(id string) (JobSnapshot, bool)
 	List(f Filter) []JobSnapshot
+	// Counts tallies job records by state without materializing snapshots
+	// (polled by the metrics observer on every collection).
+	Counts() map[JobState]int
 	Active(key string) (JobSnapshot, bool)
 	Update(id string, fn func(*Job)) bool
 	Delete(id string) bool

@@ -368,12 +368,39 @@ store라 "배포 이미지가 리부트 전에 도착했었나"가 API로 답 �
   `github.com/lesomnus/mkot/otlp`로 교체, `internal/otlp` 삭제(RootCAs 워크어라운드 포함 소멸).
   gantry.yaml 예시를 mkot/otlp surface에 맞춤(headers는 name/value 리스트, timeout 필드 없음,
   retry_on_failure 있음). cmd/config의 Build 통합 테스트가 공개 모듈 기준으로 통과.
-- **남은 것**: ① mkot 워킹트리의 `otlp/go.mod` bump(mkot require → 2198e78 pseudo-version)
-  커밋/푸시 — 이거 전까지 `go get github.com/lesomnus/mkot/otlp`만 단독으로 쓰는 소비자는
-  MVS로 root를 함께 올려줘야 컴파일됨(gantry는 이미 그렇게 함). CI에 `GOWORK=off go build`
-  per-module 추가 권장. ② §2.6-3 계측 추가(큐 깊이, jobs-by-state, retention 카운트,
-  health latency)는 미착수. ③ pretty 모듈 테스트는 이 작업 전부터 실패 상태(otx ingress/egress
-  렌더링 WIP) — 무관.
+- [x] **mkot otlp/go.mod bump 푸시 완료 (6dcae04 → otlp v0.0.0-20260702152007-6dcae04c7342)** —
+  `mkot/otlp`가 단독 `go get`으로도 컴파일됨. gantry는 2198e78 계열 pseudo-version 유지(동일 코드,
+  MVS로 정합; 재bump 불필요). gantry 전환 커밋: 44f9226.
+- **남은 것**: ① §2.6-3 계측 추가(큐 깊이, jobs-by-state, retention 카운트, health latency) 미착수.
+  ② mkot CI에 `GOWORK=off go build` per-module 스텝 권장(버전 skew 재발 방지). ③ pretty 모듈
+  테스트는 이 작업 전부터 실패 상태(otx ingress/egress 렌더링 WIP) — 무관. 다음 로드맵 단계는
+  §1 검증 체인 3종(distribute digest 앵커링, copy_referrers, 패턴 pin).
+
+## 구현 현황 — §1 + §2.6-3 (2026-07-02)
+
+race/vet clean, 적대 리뷰(4렌즈, 21건 확정 → 10개 고유 결함) 반영 완료.
+
+- [x] **§2.6-3 계측** — `gantry.queue.depth/capacity`, `gantry.jobs{state}`(Store.Counts로 저비용 집계),
+  `gantry.retention.records/pins{store}`(Index.Counts, key-only), `gantry.health.probe.duration{store,kind,healthy}`.
+  ManualReader 수집 테스트.
+- [x] **§1.3 패턴 pin** — 저장은 `PinEntry{value, pattern, pinned_at}`(레거시 raw 마커=exact로 관용);
+  **exact pin은 ref 동일성만**(리뷰: short-name 월권 방지), pattern pin은 doublestar를
+  full ref / name:tag / bare tag에 적용. **모든 유입점에서 `doublestar.ValidatePattern` fail-closed**
+  (pin API 400 / gc body 400 / config는 기동 실패 — 리뷰: malformed 패턴이 조용히 보호 안 하는
+  fail-open 방지). config `retention.pins`는 문서화된 대로 패턴 의미론 유지.
+- [x] **§1.2 copy_referrers** — `POST /v1/job {copy_referrers}`; 유효 시 **verbatim commit**
+  (자식 manifest 전부 push 후 원본 index 바이트 → 소스 digest 보존) + oras CopyGraph로 referrer 복사
+  (referrers API/fallback tag 모두, 두 방식 다 E2E 테스트). 기본값: **이 job이 실제 검증됐고**(verifier
+  존재만이 아님 — 리뷰 반영) 요청·설정 어느 쪽도 platforms를 좁히지 않았을 때만 on(리뷰: 설정 협소화
+  조용한 무시 방지); 명시적 true는 config 협소화를 이기되 Warn 로그, 요청 platforms·proxy·no-`to`와는
+  400. orasRepo/notation repo 모두 docker keychain + self-signed TLS 패리티(리뷰 반영).
+- [x] **§1.1 digest 앵커링** — `Source.Commit`이 커밋된 digest 반환; 엔진 pull은 `repo@digest` 후
+  로컬 재태깅(docker `ImageTag`; containerd는 태그 레코드 생성 후 **digest 레코드 삭제** — 리뷰
+  critical: 남겨두면 retention GC가 영원히 회수 불가). 재태깅 실패 시 best-effort 정리(고아 방지).
+  `TransferSnapshot.digest` 노출. proxy 캐시는 digest를 모르므로 비앵커(기존 TOCTOU 잔존 — verify는
+  이미 proxy 목적지를 거부하므로 검증 경로에는 구멍 없음).
+- **남은 리스크/후속**: containerd 앵커드 pull은 유닛 커버리지 없음(레코드 정리 포함) — DinD
+  containerd 소켓 통합 테스트로 검증 예정. mkot CI `GOWORK=off` 스텝 미적용.
 
 ## 채택하지 않은 것
 

@@ -1,30 +1,64 @@
 package retention
 
 import (
+	"path"
 	"sort"
 	"time"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
+
+// matchPin reports whether a pin (an exact reference or a doublestar pattern)
+// protects the record. A pattern is tried against the full ref, the name:tag
+// short form (last repo segment), and the bare tag — so "cache.local/a/app:1",
+// "*:stable", and "prod-*" all work as plan-gc.md documents.
+func matchPin(pin string, r Record) bool {
+	if pin == r.Ref {
+		return true
+	}
+	for _, s := range []string{r.Ref, shortName(r), r.Tag} {
+		if s == "" {
+			continue
+		}
+		if ok, err := doublestar.Match(pin, s); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+func shortName(r Record) string {
+	if r.Repo == "" || r.Tag == "" {
+		return ""
+	}
+	return path.Base(r.Repo) + ":" + r.Tag
+}
+
+func pinned(pins []string, r Record) bool {
+	for _, pin := range pins {
+		if matchPin(pin, r) {
+			return true
+		}
+	}
+	return false
+}
 
 // Evaluate applies the retention policy and returns the delete/keep decision.
 // Protection order (a protected image is never deleted):
 //  1. in-use   — referenced by a live container (inUse holds refs and digests)
-//  2. pinned   — Record.Pinned or Ref in policy.Pins
+//  2. pinned   — Record.Pinned, or a policy.Pins entry (exact ref or doublestar
+//     pattern) matches
 //  3. keep-N   — the KeepN most-recently-used tags per repository
 //  4. age      — of the rest, delete those whose last-used age exceeds MaxAge,
 //     unless still within the grace window (now < graceUntil).
 func Evaluate(now time.Time, recs []Record, inUse map[string]bool, p Policy, graceUntil time.Time) Decision {
-	pins := make(map[string]bool, len(p.Pins))
-	for _, ref := range p.Pins {
-		pins[ref] = true
-	}
-
 	var dec Decision
 	var remaining []Record
 	for _, r := range recs {
 		switch {
 		case inUse[r.Ref] || (r.Digest != "" && inUse[r.Digest]):
 			dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: "in_use"})
-		case r.Pinned || pins[r.Ref]:
+		case r.Pinned || pinned(p.Pins, r):
 			dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: "pinned"})
 		default:
 			remaining = append(remaining, r)

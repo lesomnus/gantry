@@ -40,7 +40,7 @@ func TestContainerdEngineLive(t *testing.T) {
 		t.Skipf("no reachable containerd (%s): %v", containerdAddr(), err)
 	}
 
-	if err := eng.Pull(ctx, "docker.io/library/busybox:latest", &recSink{}); err != nil {
+	if err := eng.Pull(ctx, "docker.io/library/busybox:latest", "", &recSink{}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 }

@@ -45,16 +45,52 @@ func (e *containerdEngine) Ready(ctx context.Context) error {
 
 func (e *containerdEngine) Close() error { return e.cli.Close() }
 
-func (e *containerdEngine) Pull(ctx context.Context, ref string, sink Sink) error {
+func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, sink Sink) error {
 	ctx = namespaces.WithNamespace(ctx, e.namespace)
+	pull_ref := ref
+	if digest != "" {
+		var err error
+		if pull_ref, err = anchoredRef(ref, digest); err != nil {
+			return err
+		}
+	}
 	done := make(chan struct{})
 	go e.poll(ctx, sink, done)
-	_, err := e.cli.Pull(ctx, ref, containerd.WithPullUnpack)
+	img, err := e.cli.Pull(ctx, pull_ref, containerd.WithPullUnpack)
 	close(done)
 	if err != nil {
 		return z.Err(err, "pull")
 	}
+	if pull_ref != ref {
+		// Record the tag name for the digest-pulled content so containers, the
+		// retention index, and kubelet resolve it as usual.
+		rec := images.Image{Name: ref, Target: img.Target()}
+		if _, err := e.cli.ImageService().Create(ctx, rec); err != nil {
+			if !cerrdefs.IsAlreadyExists(err) {
+				e.untrack(ctx, pull_ref) // don't leave content rooted by an invisible record
+				return z.Err(err, "tag %q", ref)
+			}
+			if _, err := e.cli.ImageService().Update(ctx, rec, "target"); err != nil {
+				e.untrack(ctx, pull_ref)
+				return z.Err(err, "retag %q", ref)
+			}
+		}
+		// The pull itself recorded the digest-named ref. The retention index only
+		// ever tracks the tag, so that record would root the content forever;
+		// drop it now that the tag record holds the same target.
+		if err := e.cli.ImageService().Delete(ctx, pull_ref); err != nil && !cerrdefs.IsNotFound(err) {
+			return z.Err(err, "untrack %q", pull_ref)
+		}
+	}
 	return nil
+}
+
+// untrack best-effort deletes an image record on an error path; the pull
+// context may already be canceled, so it detaches from it.
+func (e *containerdEngine) untrack(ctx context.Context, ref string) {
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = e.cli.ImageService().Delete(dctx, ref)
 }
 
 // poll samples the content store while the pull runs, reporting per-blob bytes.

@@ -137,3 +137,41 @@ func TestDecisionSerializesNextAgeOut(t *testing.T) {
 		t.Errorf("zero next_age_out should be omitted: %s", b)
 	}
 }
+
+func TestMatchPin(t *testing.T) {
+	r := Record{Ref: "cache.local/team/app:stable", Repo: "cache.local/team/app", Tag: "stable"}
+	cases := map[string]bool{
+		"cache.local/team/app:stable": true,  // exact ref
+		"*:stable":                    true,  // name:tag short form
+		"app:*":                       true,  // short-form name glob
+		"stable":                      true,  // bare tag
+		"prod-*":                      false, // tag glob, no match
+		"cache.local/team/app:1.2":    false,
+		"**":                          true, // matches the full ref
+	}
+	for pin, want := range cases {
+		if got := matchPin(pin, r); got != want {
+			t.Errorf("matchPin(%q) = %v, want %v", pin, got, want)
+		}
+	}
+	prod := Record{Ref: "cache.local/team/app:prod-3", Repo: "cache.local/team/app", Tag: "prod-3"}
+	if !matchPin("prod-*", prod) {
+		t.Error("prod-* should pin tag prod-3")
+	}
+}
+
+func TestEvaluatePatternPins(t *testing.T) {
+	now := time.Now()
+	recs := []Record{
+		{Ref: "cache.local/a/app:stable", Repo: "cache.local/a/app", Tag: "stable", LastUsed: now.Add(-100 * time.Hour), FirstSeen: now.Add(-100 * time.Hour)},
+		{Ref: "cache.local/a/app:old", Repo: "cache.local/a/app", Tag: "old", LastUsed: now.Add(-100 * time.Hour), FirstSeen: now.Add(-100 * time.Hour)},
+	}
+	d := Evaluate(now, recs, nil, Policy{MaxAge: time.Hour, Pins: []string{"*:stable"}}, time.Time{})
+	del, keep := decided(d)
+	if keep["cache.local/a/app:stable"] != "pinned" {
+		t.Errorf("pattern pin should protect the stable tag: keep=%v", keep)
+	}
+	if del["cache.local/a/app:old"] != "age_exceeded" {
+		t.Errorf("unpinned old tag should be deleted: del=%v", del)
+	}
+}

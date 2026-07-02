@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/lesomnus/gantry/internal/down"
+	"github.com/lesomnus/otx"
 	"github.com/lesomnus/otx/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Schedule controls the adaptive GC scheduler.
@@ -65,18 +68,40 @@ func (m *Manager) Distributed(engine, ref string, t time.Time) {
 	m.poke()
 }
 
-func (m *Manager) Pin(engine, ref string) error         { return m.ix.Pin(engine, ref) }
-func (m *Manager) Unpin(engine, ref string) error       { return m.ix.Unpin(engine, ref) }
-func (m *Manager) Pins(engine string) ([]string, error) { return m.ix.Pins(engine) }
+func (m *Manager) Pin(engine, ref string, pattern bool) error { return m.ix.Pin(engine, ref, pattern) }
+func (m *Manager) Unpin(engine, ref string) error             { return m.ix.Unpin(engine, ref) }
+func (m *Manager) Pins(engine string) ([]PinEntry, error)     { return m.ix.Pins(engine) }
 
 // --- usage watchers ---
 
 // StartWatchers launches one usage watcher per engine: cold-start seed, then a
 // reconnecting WatchUsage loop that stamps the index.
 func (m *Manager) StartWatchers(ctx context.Context) {
+	m.registerGauges(ctx)
 	for name, eng := range m.engines {
 		go m.watch(ctx, name, eng)
 	}
+}
+
+// registerGauges observes per-engine retention index sizes (records and pins).
+func (m *Manager) registerGauges(ctx context.Context) {
+	mt := otx.Meter(ctx)
+	records, _ := mt.Int64ObservableGauge("gantry.retention.records",
+		metric.WithDescription("retention index records per engine store"))
+	pins, _ := mt.Int64ObservableGauge("gantry.retention.pins",
+		metric.WithDescription("pinned references per engine store"))
+	_, _ = mt.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		for name := range m.engines {
+			nrec, npin, err := m.ix.Counts(name)
+			if err != nil {
+				continue
+			}
+			store_attr := metric.WithAttributes(attribute.String("store", name))
+			o.ObserveInt64(records, int64(nrec), store_attr)
+			o.ObserveInt64(pins, int64(npin), store_attr)
+		}
+		return nil
+	}, records, pins)
 }
 
 func (m *Manager) watch(ctx context.Context, name string, eng down.Engine) {

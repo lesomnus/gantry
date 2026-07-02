@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/store"
@@ -32,6 +34,7 @@ type metrics struct {
 	bytes    metric.Int64Counter
 	duration metric.Float64Histogram
 	active   metric.Int64UpDownCounter
+	gauges   metric.Registration // queue depth/capacity + jobs-by-state observer
 }
 
 func newMetrics(ctx context.Context) *metrics {
@@ -54,6 +57,11 @@ type Request struct {
 	From       string
 	To         string
 	Distribute []string
+	// CopyReferrers copies the source's referrer artifacts (e.g. notation
+	// signatures) into the cache alongside the image, preserving the source
+	// digest so the signatures still verify there. nil defaults to on when
+	// verification is enabled and the destination is a copy-mode cache.
+	CopyReferrers *bool
 }
 
 // engineStep is one resolved downstream pull.
@@ -65,13 +73,19 @@ type engineStep struct {
 
 // jobExec is the resolved plan for a job, computed at submit time.
 type jobExec struct {
-	from     config.StoreConfig
-	to       config.StoreConfig
-	hasCache bool
-	src      name.Reference
-	dst      name.Reference // valid only when hasCache
-	cacheIdx int            // index of the registry transfer, or -1
-	engines  []engineStep
+	from          config.StoreConfig
+	to            config.StoreConfig
+	hasCache      bool
+	copyReferrers bool
+	src           name.Reference
+	dst           name.Reference // valid only when hasCache
+	cacheIdx      int            // index of the registry transfer, or -1
+	engines       []engineStep
+
+	// committed is the digest the cache copy landed at, set by runCopy; engine
+	// pulls are anchored to it so a mutable tag re-resolved by the cache cannot
+	// substitute different bytes.
+	committed v1.Hash
 }
 
 // Warmer runs a two-tier worker pool: MaxConcurrentJobs jobs at once, each moving
@@ -129,6 +143,7 @@ func (w *Warmer) rootCtx() context.Context {
 func (w *Warmer) Start(ctx context.Context) {
 	w.base = ctx
 	w.metrics = newMetrics(ctx)
+	w.metrics.gauges = w.registerGauges(ctx)
 	n := w.wc.MaxConcurrentJobs
 	if n < 1 {
 		n = 1
@@ -143,10 +158,35 @@ func (w *Warmer) Start(ctx context.Context) {
 	}
 }
 
+// registerGauges observes queue saturation (visible before clients hit the 503
+// of a full queue) and job records by state.
+func (w *Warmer) registerGauges(ctx context.Context) metric.Registration {
+	m := otx.Meter(ctx)
+	depth, _ := m.Int64ObservableGauge("gantry.queue.depth",
+		metric.WithDescription("jobs waiting in the pending-job queue"))
+	capacity, _ := m.Int64ObservableGauge("gantry.queue.capacity",
+		metric.WithDescription("pending-job queue buffer size"))
+	jobs, _ := m.Int64ObservableGauge("gantry.jobs",
+		metric.WithDescription("job records by state"))
+	reg, _ := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(depth, int64(len(w.jobs)))
+		o.ObserveInt64(capacity, int64(cap(w.jobs)))
+		counts := w.store.Counts()
+		for _, st := range []JobState{JobPending, JobRunning, JobDone, JobFailed, JobCanceled} {
+			o.ObserveInt64(jobs, int64(counts[st]), metric.WithAttributes(attribute.String("state", string(st))))
+		}
+		return nil
+	}, depth, capacity, jobs)
+	return reg
+}
+
 func (w *Warmer) Stop() {
 	close(w.stop)
 	close(w.jobs)
 	w.wg.Wait()
+	if w.metrics.gauges != nil {
+		_ = w.metrics.gauges.Unregister()
+	}
 }
 
 // sweeper evicts terminal job records older than JobTTL so they do not
@@ -253,12 +293,14 @@ func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
 	// ex.src to the verified digest so copy/distribute move exactly what was
 	// verified. Runs after the cache (dst) ref is derived from the tag, so the
 	// cache stays tag-named; only the source pull is pinned to the digest.
+	verified := false
 	if w.verifier != nil {
 		dg, err := w.verifier.Verify(w.rootCtx(), ex.from, ex.src)
 		if err != nil {
 			return nil, nil, nil, err // sentinel (ErrUnsigned/ErrUntrusted) preserved for the handler
 		}
 		if dg.Hex != "" {
+			verified = true
 			// A proxy-mode cache reads through by tag and ignores the pinned source
 			// digest, so it could fill from a different (unverified) image if the tag
 			// moves after verification. Refuse rather than move unverified bytes.
@@ -268,6 +310,40 @@ func (w *Warmer) plan(req Request) (*jobExec, []*Transfer, []string, error) {
 			ex.src = ex.src.Context().Digest(dg.String())
 			log.From(w.rootCtx()).Info("source signature verified",
 				slog.String("ref", req.Ref), slog.String("from", ex.from.Name), slog.String("digest", dg.String()))
+		}
+	}
+
+	// Referrer propagation (signatures travel with the image): copy the source's
+	// referrer artifacts into the cache with the source digest preserved — which
+	// requires copying the image verbatim, i.e. every platform.
+	if req.CopyReferrers != nil && *req.CopyReferrers && !ex.hasCache {
+		return nil, nil, nil, fmt.Errorf("copy_referrers requires a copy-mode destination; set `to`")
+	}
+	if ex.hasCache {
+		if req.CopyReferrers != nil {
+			ex.copyReferrers = *req.CopyReferrers
+		} else {
+			// Default on only when this job actually verified a signature and
+			// neither the request nor the config narrowed the platform set: the
+			// pinned digest still protects a narrowed copy, only signature
+			// propagation is skipped.
+			ex.copyReferrers = verified && ex.to.Mode != "proxy" &&
+				len(req.Platforms) == 0 && len(w.wc.Platforms) == 0
+		}
+		if ex.copyReferrers {
+			if ex.to.Mode == "proxy" {
+				return nil, nil, nil, fmt.Errorf("copy_referrers requires a copy-mode destination; store %q is proxy", ex.to.Name)
+			}
+			if len(req.Platforms) > 0 {
+				return nil, nil, nil, fmt.Errorf("copy_referrers preserves the source image verbatim (all platforms); omit platforms or set copy_referrers to false")
+			}
+			if len(w.wc.Platforms) > 0 {
+				// An explicit opt-in wins over the config narrowing, but widening
+				// the copy to every platform must be observable.
+				log.From(w.rootCtx()).Warn("copy_referrers overrides the configured platform narrowing; copying all platforms",
+					slog.String("ref", req.Ref), slog.String("configured", strings.Join(w.wc.Platforms, ",")))
+			}
+			platforms = nil // the verbatim commit needs every child manifest present
 		}
 	}
 
@@ -407,10 +483,26 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec) error {
 	if err := w.copyLayers(ctx, job, t, src, plan, ex); err != nil {
 		return w.failTransfer(job, t, err)
 	}
-	if err := src.Commit(ctx, ex.src, ex.dst, job.Platforms); err != nil {
+	committed, err := src.Commit(ctx, ex.src, ex.dst, job.Platforms, ex.copyReferrers)
+	if err != nil {
 		return w.failTransfer(job, t, z.Err(err, "commit"))
 	}
-	w.store.Update(job.ID, func(*Job) { t.State = "done" })
+	ex.committed = committed
+	if ex.copyReferrers {
+		n, err := copyReferrers(ctx, ex.from, ex.to, ex.src, committed, ex.dst.Context())
+		if err != nil {
+			// Fail closed: the signatures are the point of referrer propagation.
+			return w.failTransfer(job, t, z.Err(err, "copy referrers"))
+		}
+		log.From(ctx).Info("referrers copied",
+			slog.Int("count", n), slog.String("subject", committed.String()), slog.String("store", ex.to.Name))
+	}
+	w.store.Update(job.ID, func(*Job) {
+		if committed != (v1.Hash{}) {
+			t.Digest = committed.String()
+		}
+		t.State = "done"
+	})
 	log.From(ctx).Info("cache filled",
 		slog.String("store", ex.to.Name), slog.String("ref", ex.dst.Name()), slog.Int64("bytes", t.BytesDone.Load()))
 	return nil
@@ -463,15 +555,25 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 // runDistribute triggers each engine to pull concurrently. An engine failure
 // marks only its transfer; the job still completes.
 func (w *Warmer) runDistribute(ctx context.Context, job *Job, ex *jobExec) {
+	// Anchor engine pulls to the digest the cache copy committed: a pull-through
+	// cache re-resolves mutable tags upstream, so a tag pull could hand engines
+	// different (unverified) bytes than what was just copied.
+	digest := ""
+	if ex.hasCache && ex.committed != (v1.Hash{}) {
+		digest = ex.committed.String()
+	}
 	var wg sync.WaitGroup
 	for _, step := range ex.engines {
 		wg.Add(1)
 		go func(step engineStep) {
 			defer wg.Done()
 			t := job.Transfers[step.transfer]
-			w.store.Update(job.ID, func(*Job) { t.State = "running" })
+			w.store.Update(job.ID, func(*Job) {
+				t.State = "running"
+				t.Digest = digest
+			})
 			sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
-			err := step.engine.Pull(ctx, step.ref, sink)
+			err := step.engine.Pull(ctx, step.ref, digest, sink)
 			if err != nil {
 				log.From(ctx).Warn("distribute failed",
 					slog.String("engine", step.engine.Name()), slog.String("ref", step.ref), slog.String("error", err.Error()))

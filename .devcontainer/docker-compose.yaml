@@ -14,6 +14,7 @@ services:
       CONTAINERD_ADDRESS: /run/docker/containerd/containerd.sock
 
     volumes:
+      - command.history:/commandhistory
       - go.cache.mod:/home/hypnos/go/pkg/mod
       - go.cache.bin:/home/hypnos/.cache/go-build
 
@@ -67,6 +68,7 @@ services:
           memory: 4G
 
 volumes:
+  command.history:
   go.cache.mod:
   go.cache.bin:
   docker.data:

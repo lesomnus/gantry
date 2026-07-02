@@ -40,6 +40,19 @@ func startRegistry(t *testing.T) string {
 	return u.Host
 }
 
+// startReferrersRegistry serves a registry with the OCI referrers API enabled
+// (like zot), so oras exercises the API path instead of the fallback tag.
+func startReferrersRegistry(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(registry.New(registry.WithReferrersSupport(true)))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
+}
+
 func pushImage(t *testing.T, ref string, layers int) name.Reference {
 	t.Helper()
 	img, err := random.Image(512, int64(layers))
@@ -124,7 +137,7 @@ func TestCopySourceWarmCommitAndDedup(t *testing.T) {
 		t.Errorf("moved %d bytes, want plan total %d", moved, plan.Total)
 	}
 
-	if err := s.Commit(ctx, src, dst, nil); err != nil {
+	if _, err := s.Commit(ctx, src, dst, nil, false); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	if _, err := remote.Get(dst); err != nil {

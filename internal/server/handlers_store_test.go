@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -78,5 +79,100 @@ func TestStorePullStampsRetentionIndex(t *testing.T) {
 	}
 	if recs[0].LastDistributed.IsZero() {
 		t.Error("LastDistributed should be stamped by a manual pull")
+	}
+}
+
+func TestPinAPIPatterns(t *testing.T) {
+	daemon := fakeDockerDaemon(t)
+
+	var c config.Config
+	c.Serve.Stores = map[string]config.StoreConfig{
+		"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
+	}
+	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	if err := c.Evaluate(); err != nil {
+		t.Fatal(err)
+	}
+	set, err := store.NewSet(c.Serve.Stores, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { set.Close() })
+	ix, err := retention.Open(filepath.Join(t.TempDir(), "retention.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ix.Close() })
+	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}))
+
+	do := func(method, body string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(method, "/v1/store/eng/pin", strings.NewReader(body))
+		h.ServeHTTP(rr, req)
+		return rr
+	}
+	if rr := do(http.MethodPost, `{"pattern":"*:stable"}`); rr.Code != http.StatusNoContent {
+		t.Fatalf("pin pattern: code = %d, body = %s", rr.Code, rr.Body)
+	}
+	if rr := do(http.MethodPost, `{"ref":"a:1","pattern":"b:*"}`); rr.Code != http.StatusBadRequest {
+		t.Errorf("both ref and pattern must be rejected: %d", rr.Code)
+	}
+	if rr := do(http.MethodPost, `{}`); rr.Code != http.StatusBadRequest {
+		t.Errorf("empty body must be rejected: %d", rr.Code)
+	}
+	rr := do(http.MethodGet, "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list: code = %d", rr.Code)
+	}
+	var listed struct {
+		Pins []retention.PinEntry `json:"pins"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Pins) != 1 || listed.Pins[0].Value != "*:stable" || listed.Pins[0].At.IsZero() {
+		t.Fatalf("pins = %+v, want one timestamped *:stable entry", listed.Pins)
+	}
+	if rr := do(http.MethodDelete, `{"pattern":"*:stable"}`); rr.Code != http.StatusNoContent {
+		t.Fatalf("unpin: code = %d", rr.Code)
+	}
+}
+
+func TestPinAPIRejectsInvalidPattern(t *testing.T) {
+	daemon := fakeDockerDaemon(t)
+
+	var c config.Config
+	c.Serve.Stores = map[string]config.StoreConfig{
+		"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
+	}
+	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	if err := c.Evaluate(); err != nil {
+		t.Fatal(err)
+	}
+	set, err := store.NewSet(c.Serve.Stores, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { set.Close() })
+	ix, err := retention.Open(filepath.Join(t.TempDir(), "retention.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ix.Close() })
+	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}))
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/store/eng/pin", strings.NewReader(`{"pattern":"[unclosed"}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("malformed pattern must be rejected, got %d", rr.Code)
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/store/eng/gc", strings.NewReader(`{"pins":["[unclosed"]}`))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("malformed gc pin override must be rejected, got %d", rr.Code)
 	}
 }

@@ -117,7 +117,8 @@ type RetentionConfig struct {
 	// KeepN keeps the N most-recently-used tags per repository (even if old);
 	// zero disables keep-N.
 	KeepN int `yaml:"keep_n"`
-	// Pins are exact references that are never GC'd.
+	// Pins are never GC'd: exact references, or doublestar patterns matched
+	// against the full ref, its name:tag short form, and the bare tag.
 	Pins []string `yaml:"pins"`
 	// Interval is the scheduler's safety/idle cadence — the longest it waits
 	// between GC checks. The scheduler wakes earlier when a record is about to

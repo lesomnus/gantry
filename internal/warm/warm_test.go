@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/store"
@@ -176,8 +177,8 @@ func (failSource) Warm(ctx context.Context, _, _ name.Repository, l PlannedLayer
 	return ctx.Err()
 }
 
-func (failSource) Commit(context.Context, name.Reference, name.Reference, []string) error {
-	return nil
+func (failSource) Commit(context.Context, name.Reference, name.Reference, []string, bool) (v1.Hash, error) {
+	return v1.Hash{}, nil
 }
 
 func TestCopyLayersReportsLayerError(t *testing.T) {

@@ -59,8 +59,15 @@ func (e *dockerEngine) Ready(ctx context.Context) error {
 
 func (e *dockerEngine) Close() error { return e.cli.Close() }
 
-func (e *dockerEngine) Pull(ctx context.Context, ref string, sink Sink) error {
-	rc, err := e.cli.ImagePull(ctx, ref, image.PullOptions{})
+func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, sink Sink) error {
+	pull_ref := ref
+	if digest != "" {
+		var err error
+		if pull_ref, err = anchoredRef(ref, digest); err != nil {
+			return err
+		}
+	}
+	rc, err := e.cli.ImagePull(ctx, pull_ref, image.PullOptions{})
 	if err != nil {
 		return z.Err(err, "image pull")
 	}
@@ -72,10 +79,10 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, sink Sink) error {
 	for {
 		var m jsonmessage.JSONMessage
 		if err := dec.Decode(&m); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
+			if !errors.Is(err, io.EOF) {
+				return z.Err(err, "decode pull stream")
 			}
-			return z.Err(err, "decode pull stream")
+			break
 		}
 		if m.Error != nil {
 			return fmt.Errorf("pull: %s", m.Error.Message)
@@ -84,6 +91,21 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, sink Sink) error {
 			sink.Layer(u)
 		}
 	}
+	if pull_ref != ref {
+		// The digest pull leaves the image untagged; give it the tag callers,
+		// containers, and the retention index know it by.
+		if err := e.cli.ImageTag(ctx, pull_ref, ref); err != nil {
+			// Best-effort: an untagged image is invisible to the retention index
+			// and would never be reclaimed. Untagging the canonical ref is safe —
+			// content held by other tags stays. The pull context may already be
+			// canceled (a likely cause of the failure), so detach from it.
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_, _ = e.cli.ImageRemove(dctx, pull_ref, image.RemoveOptions{})
+			return z.Err(err, "tag %q", ref)
+		}
+	}
+	return nil
 }
 
 func (e *dockerEngine) InUse(ctx context.Context) (map[string]bool, error) {

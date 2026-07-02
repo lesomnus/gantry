@@ -13,6 +13,9 @@ import (
 
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/store"
+	"github.com/lesomnus/otx"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // fakeClock is a manually-advanced clock for deterministic TTL tests.
@@ -264,4 +267,38 @@ func TestProbeStoreRegistryDispatch(t *testing.T) {
 	if r.LatencyMS < 0 {
 		t.Errorf("latency = %d", r.LatencyMS)
 	}
+}
+
+func TestProbeDurationRecorded(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { mp.Shutdown(context.Background()) })
+	ctx := otx.Into(context.Background(), otx.New(otx.WithMeterProvider(mp)))
+
+	ck, _ := newChecker(t, time.Second)
+	ck.probe = func(context.Context, config.StoreConfig) error { return nil }
+	if _, err := ck.Check(ctx, "reg"); err != nil {
+		t.Fatal(err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatal(err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "gantry.health.probe.duration" {
+				continue
+			}
+			h, ok := m.Data.(metricdata.Histogram[float64])
+			if !ok {
+				t.Fatalf("data = %T, want float64 histogram", m.Data)
+			}
+			if len(h.DataPoints) != 1 || h.DataPoints[0].Count != 1 {
+				t.Fatalf("datapoints = %+v, want one recording", h.DataPoints)
+			}
+			return
+		}
+	}
+	t.Fatal("probe duration histogram not recorded")
 }

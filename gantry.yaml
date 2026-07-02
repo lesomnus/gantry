@@ -95,7 +95,9 @@ serve:
   #
   # Eviction order (a record is kept by the first rule that matches):
   #   1. in_use         - an image a running container references
-  #   2. pinned         - an exact ref listed in `pins` or pinned via the API
+  #   2. pinned         - matches a `pins` entry or an API pin (exact ref, or a
+  #                       doublestar pattern tried against the full ref,
+  #                       name:tag, and the bare tag)
   #   3. keep_n_recent  - the N most-recently-used tags *per repository*
   #   4. within_max_age - last used more recently than `max_age`
   # Anything else is deleted (held only by the post-startup `grace` window).
@@ -106,7 +108,8 @@ serve:
   #   max_age: "720h"          # 30 days
   #   # Keep the N most-recently-used tags per repo, even if older than max_age.
   #   keep_n: 3
-  #   # Exact references never collected (in addition to the pin API).
+  #   # Never collected (in addition to the pin API): exact refs or doublestar
+  #   # patterns (e.g. "*:stable" pins every stable tag).
   #   pins:
   #     - "registry.cache.local/lesomnus/a:stable"
   #   # Scheduler idle cap: the longest gantry waits between GC checks. It wakes

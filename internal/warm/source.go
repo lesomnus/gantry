@@ -31,10 +31,13 @@ type ProgressSink interface {
 type Source interface {
 	Resolve(ctx context.Context, src, dst name.Reference, platforms []string) (*Plan, error)
 	Warm(ctx context.Context, src, dst name.Repository, l PlannedLayer, sink ProgressSink) error
-	// Commit publishes the manifest(s) under the cache tag. copy mode pushes a
-	// platform-filtered index referencing the blobs Warm uploaded; proxy mode is
-	// a no-op (resolving + reading already populated the cache).
-	Commit(ctx context.Context, src, dst name.Reference, platforms []string) error
+	// Commit publishes the manifest(s) under the cache tag and returns the
+	// committed digest (zero when unknown, e.g. proxy mode). copy mode pushes a
+	// platform-filtered index referencing the blobs Warm uploaded — or, with
+	// verbatim, the source manifest/index byte-for-byte so its digest (and any
+	// signature over it) is preserved; proxy mode is a no-op (resolving +
+	// reading already populated the cache).
+	Commit(ctx context.Context, src, dst name.Reference, platforms []string, verbatim bool) (v1.Hash, error)
 }
 
 // NewSource builds a registry copy/proxy between two registry stores, selected

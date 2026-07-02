@@ -77,6 +77,16 @@ func (s *memStore) Active(key string) (JobSnapshot, bool) {
 	return JobSnapshot{}, false
 }
 
+func (s *memStore) Counts() map[JobState]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[JobState]int, 5)
+	for _, j := range s.jobs {
+		out[j.State]++
+	}
+	return out
+}
+
 func (s *memStore) Update(id string, fn func(*Job)) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

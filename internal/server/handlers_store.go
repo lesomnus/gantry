@@ -58,7 +58,7 @@ func (s *Server) handleStorePull(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "ref is required")
 		return
 	}
-	if err := eng.Pull(r.Context(), req.Ref, nopSink{}); err != nil {
+	if err := eng.Pull(r.Context(), req.Ref, "", nopSink{}); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}

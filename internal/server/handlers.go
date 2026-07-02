@@ -17,12 +17,17 @@ type createJobRequest struct {
 	From       string   `json:"from" example:"dockerhub"`                                      // Source registry store name or host; defaults to the ref's registry.
 	To         string   `json:"to" example:"local-cache"`                                      // Destination registry store to copy into; empty means engines pull from `from` directly.
 	Distribute []string `json:"distribute" example:"node-a,node-b"`                            // Engine store names that should pull the image afterwards.
+	// Copy the source's referrer artifacts (notation signatures) into `to` with
+	// the source digest preserved, so the image still verifies against the cache.
+	// Requires copying all platforms (the request must not narrow `platforms`).
+	// Defaults to true when verification is enabled and `to` is a copy-mode store.
+	CopyReferrers *bool `json:"copy_referrers,omitempty"`
 }
 
 // handleCreateJob godoc
 //
 //	@Summary	Create a job
-//	@Description	Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it. Idempotent per identical move.
+//	@Description	Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it, anchored to the digest the copy committed. Idempotent per identical move.
 //	@Tags		jobs
 //	@Accept		json
 //	@Produce	json
@@ -45,11 +50,12 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap, err := s.warmer.Submit(warm.Request{
-		Ref:        req.Ref,
-		Platforms:  req.Platforms,
-		From:       req.From,
-		To:         req.To,
-		Distribute: req.Distribute,
+		Ref:           req.Ref,
+		Platforms:     req.Platforms,
+		From:          req.From,
+		To:            req.To,
+		Distribute:    req.Distribute,
+		CopyReferrers: req.CopyReferrers,
 	})
 	switch {
 	case errors.Is(err, warm.ErrQueueFull):

@@ -59,13 +59,13 @@ func (s *recSink) bytesDone() int64 {
 
 type fakeEngine struct{ name string }
 
-func (f *fakeEngine) Name() string                                   { return f.name }
-func (f *fakeEngine) Kind() string                                   { return "fake" }
-func (f *fakeEngine) Ready(context.Context) error                    { return nil }
-func (f *fakeEngine) Pull(context.Context, string, Sink) error       { return nil }
-func (f *fakeEngine) InUse(context.Context) (map[string]bool, error) { return nil, nil }
-func (f *fakeEngine) SeedUsage(context.Context, UsageSink) error     { return nil }
-func (f *fakeEngine) WatchUsage(context.Context, UsageSink) error    { return nil }
+func (f *fakeEngine) Name() string                                     { return f.name }
+func (f *fakeEngine) Kind() string                                     { return "fake" }
+func (f *fakeEngine) Ready(context.Context) error                      { return nil }
+func (f *fakeEngine) Pull(context.Context, string, string, Sink) error { return nil }
+func (f *fakeEngine) InUse(context.Context) (map[string]bool, error)   { return nil, nil }
+func (f *fakeEngine) SeedUsage(context.Context, UsageSink) error       { return nil }
+func (f *fakeEngine) WatchUsage(context.Context, UsageSink) error      { return nil }
 func (f *fakeEngine) Remove(context.Context, string) (RemoveResult, error) {
 	return RemoveResult{}, nil
 }

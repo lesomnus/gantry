@@ -18,6 +18,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/store"
+	"github.com/lesomnus/otx"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // ErrUnknownStore is returned by Check when the store name is not configured.
@@ -56,6 +59,11 @@ type Checker struct {
 
 	now   func() time.Time
 	probe func(ctx context.Context, c config.StoreConfig) error // overridable in tests
+
+	// probeDur is created lazily from the first Check's context, since the
+	// Checker is built before the otel-carrying serve context exists.
+	minit    sync.Once
+	probeDur metric.Float64Histogram
 
 	mu      sync.Mutex
 	entries map[string]*entry
@@ -133,16 +141,26 @@ func (ck *Checker) runProbe(ctx context.Context, c config.StoreConfig) Report {
 
 	start := ck.now()
 	err := ck.probe(pctx, c)
+	dur := ck.now().Sub(start)
 	rep := Report{
 		Name:      c.Name,
 		Kind:      c.Kind,
 		Healthy:   err == nil,
-		LatencyMS: ck.now().Sub(start).Milliseconds(),
+		LatencyMS: dur.Milliseconds(),
 		CheckedAt: start,
 	}
 	if err != nil {
 		rep.Error = err.Error()
 	}
+	ck.minit.Do(func() {
+		ck.probeDur, _ = otx.Meter(ctx).Float64Histogram("gantry.health.probe.duration",
+			metric.WithUnit("s"), metric.WithDescription("store health probe duration"))
+	})
+	ck.probeDur.Record(ctx, dur.Seconds(), metric.WithAttributes(
+		attribute.String("store", c.Name),
+		attribute.String("kind", c.Kind),
+		attribute.Bool("healthy", rep.Healthy),
+	))
 	return rep
 }
 

@@ -90,6 +90,7 @@ curl -X GET /v1/job \
         {
           "bytes_done": 0,
           "bytes_total": 0,
+          "digest": "string",
           "error": "string",
           "from": "string",
           "kind": "oci",
@@ -138,12 +139,13 @@ curl -X POST /v1/job \
 
 `POST /v1/job`
 
-Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it. Idempotent per identical move.
+Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it, anchored to the digest the copy committed. Idempotent per identical move.
 
 > Body parameter
 
 ```json
 {
+  "copy_referrers": true,
   "distribute": [
     "node-a",
     "node-b"
@@ -184,6 +186,7 @@ Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` eng
     {
       "bytes_done": 0,
       "bytes_total": 0,
+      "digest": "string",
       "error": "string",
       "from": "string",
       "kind": "oci",
@@ -306,6 +309,7 @@ curl -X GET /v1/job/{id} \
     {
       "bytes_done": 0,
       "bytes_total": 0,
+      "digest": "string",
       "error": "string",
       "from": "string",
       "kind": "oci",
@@ -692,7 +696,7 @@ To perform this operation, you must be authenticated by means of one of the foll
 BearerAuth
 </aside>
 
-## Unpin a reference
+## Unpin a reference or pattern
 
 > Code samples
 
@@ -711,16 +715,17 @@ curl -X DELETE /v1/store/{name}/pin \
 
 ```json
 {
+  "pattern": "*:stable",
   "ref": "docker.io/library/nginx:1.27"
 }
 ```
 
-<h3 id="unpin-a-reference-parameters">Parameters</h3>
+<h3 id="unpin-a-reference-or-pattern-parameters">Parameters</h3>
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |name|path|string|true|engine store name|
-|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference to unpin|
+|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference or pattern to unpin|
 
 > Example responses
 
@@ -732,7 +737,7 @@ curl -X DELETE /v1/store/{name}/pin \
 }
 ```
 
-<h3 id="unpin-a-reference-responses">Responses</h3>
+<h3 id="unpin-a-reference-or-pattern-responses">Responses</h3>
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
@@ -761,7 +766,7 @@ curl -X GET /v1/store/{name}/pin \
 
 `GET /v1/store/{name}/pin`
 
-Pinned references are exempt from retention GC (exact-match).
+Pins are exempt from retention GC: exact references, or doublestar patterns matched against the full ref, its name:tag short form, and the bare tag.
 
 <h3 id="list-pinned-references-for-a-store-parameters">Parameters</h3>
 
@@ -776,7 +781,11 @@ Pinned references are exempt from retention GC (exact-match).
 ```json
 {
   "pins": [
-    "string"
+    {
+      "pattern": true,
+      "pinned_at": "string",
+      "value": "string"
+    }
   ]
 }
 ```
@@ -795,7 +804,7 @@ To perform this operation, you must be authenticated by means of one of the foll
 BearerAuth
 </aside>
 
-## Pin a reference (exempt from GC)
+## Pin a reference or pattern (exempt from GC)
 
 > Code samples
 
@@ -810,20 +819,23 @@ curl -X POST /v1/store/{name}/pin \
 
 `POST /v1/store/{name}/pin`
 
+Body carries exactly one of `ref` (exact) or `pattern` (doublestar; matched against the full ref, name:tag, and the bare tag). Preview the effect with the GC dry-run — a broad pattern like `**` disables age GC entirely.
+
 > Body parameter
 
 ```json
 {
+  "pattern": "*:stable",
   "ref": "docker.io/library/nginx:1.27"
 }
 ```
 
-<h3 id="pin-a-reference-(exempt-from-gc)-parameters">Parameters</h3>
+<h3 id="pin-a-reference-or-pattern-(exempt-from-gc)-parameters">Parameters</h3>
 
 |Name|In|Type|Required|Description|
 |---|---|---|---|---|
 |name|path|string|true|engine store name|
-|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference to pin|
+|body|body|[server.pinRequest](#schemaserver.pinrequest)|true|reference or pattern to pin|
 
 > Example responses
 
@@ -835,7 +847,7 @@ curl -X POST /v1/store/{name}/pin \
 }
 ```
 
-<h3 id="pin-a-reference-(exempt-from-gc)-responses">Responses</h3>
+<h3 id="pin-a-reference-or-pattern-(exempt-from-gc)-responses">Responses</h3>
 
 |Status|Meaning|Description|Schema|
 |---|---|---|---|
@@ -1087,6 +1099,30 @@ BearerAuth
 |reason|string|false|none|in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled|
 |ref|string|false|none|none|
 
+<h2 id="tocS_retention.PinEntry">retention.PinEntry</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.pinentry"></a>
+<a id="schema_retention.PinEntry"></a>
+<a id="tocSretention.pinentry"></a>
+<a id="tocsretention.pinentry"></a>
+
+```json
+{
+  "pattern": true,
+  "pinned_at": "string",
+  "value": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|pattern|boolean|false|none|none|
+|pinned_at|string|false|none|zero for pins stored before entries carried a timestamp|
+|value|string|false|none|none|
+
 <h2 id="tocS_server.createJobRequest">server.createJobRequest</h2>
 <!-- backwards compatibility -->
 <a id="schemaserver.createjobrequest"></a>
@@ -1096,6 +1132,7 @@ BearerAuth
 
 ```json
 {
+  "copy_referrers": true,
   "distribute": [
     "node-a",
     "node-b"
@@ -1115,6 +1152,7 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
+|copy_referrers|boolean|false|none|Copy the source's referrer artifacts (notation signatures) into `to` with<br>the source digest preserved, so the image still verifies against the cache.<br>Requires copying all platforms (the request must not narrow `platforms`).<br>Defaults to true when verification is enabled and `to` is a copy-mode store.|
 |distribute|[string]|false|none|Engine store names that should pull the image afterwards.|
 |from|string|false|none|Source registry store name or host; defaults to the ref's registry.|
 |platforms|[string]|false|none|Platforms to move; defaults to the server platform when empty.|
@@ -1192,6 +1230,7 @@ BearerAuth
         {
           "bytes_done": 0,
           "bytes_total": 0,
+          "digest": "string",
           "error": "string",
           "from": "string",
           "kind": "oci",
@@ -1231,7 +1270,11 @@ BearerAuth
 ```json
 {
   "pins": [
-    "string"
+    {
+      "pattern": true,
+      "pinned_at": "string",
+      "value": "string"
+    }
   ]
 }
 
@@ -1241,7 +1284,7 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|pins|[string]|false|none|none|
+|pins|[[retention.PinEntry](#schemaretention.pinentry)]|false|none|none|
 
 <h2 id="tocS_server.pinRequest">server.pinRequest</h2>
 <!-- backwards compatibility -->
@@ -1252,6 +1295,7 @@ BearerAuth
 
 ```json
 {
+  "pattern": "*:stable",
   "ref": "docker.io/library/nginx:1.27"
 }
 
@@ -1261,7 +1305,8 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|ref|string|true|none|Image reference to pin or unpin (exact-match, required).|
+|pattern|string|false|none|Doublestar pattern, matched against the full ref, name:tag, and the bare tag.|
+|ref|string|false|none|Exact image reference to pin or unpin.|
 
 <h2 id="tocS_server.removeRequest">server.removeRequest</h2>
 <!-- backwards compatibility -->
@@ -1470,6 +1515,7 @@ what this store can do
     {
       "bytes_done": 0,
       "bytes_total": 0,
+      "digest": "string",
       "error": "string",
       "from": "string",
       "kind": "oci",
@@ -1582,6 +1628,7 @@ what this store can do
 {
   "bytes_done": 0,
   "bytes_total": 0,
+  "digest": "string",
   "error": "string",
   "from": "string",
   "kind": "oci",
@@ -1607,6 +1654,7 @@ what this store can do
 |---|---|---|---|---|
 |bytes_done|integer|false|none|none|
 |bytes_total|integer|false|none|none|
+|digest|string|false|none|manifest/index digest the step was anchored to|
 |error|string|false|none|none|
 |from|string|false|none|none|
 |kind|string|false|none|which store kind ran this step|

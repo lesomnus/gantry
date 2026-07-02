@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 	"github.com/lesomnus/z"
 )
@@ -108,6 +109,11 @@ func (c *Config) Evaluate() error {
 	}
 
 	if c.Serve.Retention.Enabled() {
+		for _, pin := range c.Serve.Retention.Pins {
+			if !doublestar.ValidatePattern(pin) {
+				return z.Err(nil, "serve.retention.pins: invalid doublestar pattern %q", pin)
+			}
+		}
 		z.FallbackP((*time.Duration)(&c.Serve.Retention.Interval), time.Hour)
 		z.FallbackP((*time.Duration)(&c.Serve.Retention.MinInterval), time.Minute)
 		// Grace defaults to MaxAge: protect everything for one max-age window after

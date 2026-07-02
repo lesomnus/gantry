@@ -39,13 +39,13 @@ func TestDockerEngineLive(t *testing.T) {
 	_, _ = eng.cli.ImageRemove(ctx, ref, image.RemoveOptions{Force: true})
 
 	sink := &recSink{}
-	if err := eng.Pull(ctx, ref, sink); err != nil {
+	if err := eng.Pull(ctx, ref, "", sink); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	if sink.bytesDone() == 0 {
 		t.Error("expected per-layer byte progress from the pull stream")
 	}
-	if err := eng.Pull(ctx, "library/gantry-does-not-exist:nope", nopSink{}); err == nil {
+	if err := eng.Pull(ctx, "library/gantry-does-not-exist:nope", "", nopSink{}); err == nil {
 		t.Error("expected error pulling a nonexistent image")
 	}
 }

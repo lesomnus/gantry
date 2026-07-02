@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	imagesapi "github.com/containerd/containerd/api/services/images/v1"
@@ -91,5 +92,66 @@ func TestContainerdRemoveNotFound(t *testing.T) {
 	}
 	if len(res.Deleted)+len(res.Untagged) != 0 {
 		t.Fatalf("res = %+v, want empty", res)
+	}
+}
+
+func TestAnchoredRef(t *testing.T) {
+	dg := "sha256:0123456789012345678901234567890123456789012345678901234567890123"
+	got, err := anchoredRef("cache.local:5000/team/app:1", dg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "cache.local:5000/team/app@"+dg {
+		t.Errorf("anchoredRef = %q", got)
+	}
+	already := "cache.local/team/app@" + dg
+	if got, _ := anchoredRef(already, dg); got != already {
+		t.Errorf("digest ref should pass through, got %q", got)
+	}
+}
+
+func TestDockerPullAnchoredTags(t *testing.T) {
+	var mu sync.Mutex
+	var pull_tag, tag_repo, tag_tag string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/_ping"):
+			w.Header().Set("API-Version", "1.44")
+		case strings.Contains(r.URL.Path, "/images/create"):
+			mu.Lock()
+			pull_tag = r.URL.Query().Get("tag")
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("{\"status\":\"Pull complete\",\"id\":\"abc\"}\n"))
+		case strings.HasSuffix(r.URL.Path, "/tag"):
+			mu.Lock()
+			tag_repo, tag_tag = r.URL.Query().Get("repo"), r.URL.Query().Get("tag")
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cli, err := client.NewClientWithOpts(
+		client.WithHost("tcp://"+srv.Listener.Addr().String()),
+		client.WithAPIVersionNegotiation(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := &dockerEngine{name: "d", cli: cli}
+	dg := "sha256:0123456789012345678901234567890123456789012345678901234567890123"
+	if err := eng.Pull(context.Background(), "cache.local/team/app:1", dg, nopSink{}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if pull_tag != dg {
+		t.Errorf("pull tag param = %q, want the digest (anchored pull)", pull_tag)
+	}
+	if tag_repo != "cache.local/team/app" || tag_tag != "1" {
+		t.Errorf("tag call = repo %q tag %q, want the original tag restored", tag_repo, tag_tag)
 	}
 }

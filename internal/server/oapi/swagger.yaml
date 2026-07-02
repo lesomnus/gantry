@@ -100,8 +100,25 @@ components:
         ref:
           type: string
       type: object
+    retention.PinEntry:
+      properties:
+        pattern:
+          type: boolean
+        pinned_at:
+          description: zero for pins stored before entries carried a timestamp
+          type: string
+        value:
+          type: string
+      type: object
     server.createJobRequest:
       properties:
+        copy_referrers:
+          description: |-
+            Copy the source's referrer artifacts (notation signatures) into `to` with
+            the source digest preserved, so the image still verifies against the cache.
+            Requires copying all platforms (the request must not narrow `platforms`).
+            Defaults to true when verification is enabled and `to` is a copy-mode store.
+          type: boolean
         distribute:
           description: Engine store names that should pull the image afterwards.
           example:
@@ -174,18 +191,21 @@ components:
       properties:
         pins:
           items:
-            type: string
+            $ref: '#/components/schemas/retention.PinEntry'
           type: array
           uniqueItems: false
       type: object
     server.pinRequest:
       properties:
+        pattern:
+          description: Doublestar pattern, matched against the full ref, name:tag,
+            and the bare tag.
+          example: '*:stable'
+          type: string
         ref:
-          description: Image reference to pin or unpin (exact-match, required).
+          description: Exact image reference to pin or unpin.
           example: docker.io/library/nginx:1.27
           type: string
-      required:
-      - ref
       type: object
     server.removeRequest:
       properties:
@@ -338,6 +358,9 @@ components:
           type: integer
         bytes_total:
           type: integer
+        digest:
+          description: manifest/index digest the step was anchored to
+          type: string
         error:
           type: string
         from:
@@ -423,7 +446,8 @@ paths:
       - jobs
     post:
       description: 'Move an image: copy `from` (oci) into `to` (oci), then have the
-        `distribute` engines pull it. Idempotent per identical move.'
+        `distribute` engines pull it, anchored to the digest the copy committed. Idempotent
+        per identical move.'
       requestBody:
         content:
           application/json:
@@ -731,7 +755,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/server.pinRequest'
-        description: reference to unpin
+        description: reference or pattern to unpin
         required: true
       responses:
         "204":
@@ -762,11 +786,13 @@ paths:
           description: Not Implemented
       security:
       - BearerAuth: []
-      summary: Unpin a reference
+      summary: Unpin a reference or pattern
       tags:
       - retention
     get:
-      description: Pinned references are exempt from retention GC (exact-match).
+      description: 'Pins are exempt from retention GC: exact references, or doublestar
+        patterns matched against the full ref, its name:tag short form, and the bare
+        tag.'
       parameters:
       - description: engine store name
         in: path
@@ -805,6 +831,9 @@ paths:
       tags:
       - retention
     post:
+      description: Body carries exactly one of `ref` (exact) or `pattern` (doublestar;
+        matched against the full ref, name:tag, and the bare tag). Preview the effect
+        with the GC dry-run — a broad pattern like `**` disables age GC entirely.
       parameters:
       - description: engine store name
         in: path
@@ -817,7 +846,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/server.pinRequest'
-        description: reference to pin
+        description: reference or pattern to pin
         required: true
       responses:
         "204":
@@ -848,7 +877,7 @@ paths:
           description: Not Implemented
       security:
       - BearerAuth: []
-      summary: Pin a reference (exempt from GC)
+      summary: Pin a reference or pattern (exempt from GC)
       tags:
       - retention
   /v1/store/{name}/pull:

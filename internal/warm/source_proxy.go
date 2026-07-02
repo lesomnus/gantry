@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/z"
@@ -45,7 +46,8 @@ func (s *proxySource) Warm(ctx context.Context, _, dst name.Repository, l Planne
 }
 
 // Commit is a no-op for proxy mode: Resolve pulled the manifest through the
-// cache and Warm pulled every blob, so the cache is already populated.
-func (s *proxySource) Commit(ctx context.Context, src, dst name.Reference, platforms []string) error {
-	return nil
+// cache and Warm pulled every blob, so the cache is already populated. The
+// committed digest is unknown (the cache resolves the tag itself).
+func (s *proxySource) Commit(ctx context.Context, src, dst name.Reference, platforms []string, verbatim bool) (v1.Hash, error) {
+	return v1.Hash{}, nil
 }
