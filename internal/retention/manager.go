@@ -40,6 +40,7 @@ type Manager struct {
 	now    func() time.Time
 	signal chan struct{}
 	onRun  func(Decision) // test hook
+	rec    Recorder       // audit log (nil = disabled)
 
 	// mu guards the scheduler/watcher state read by Status/Watcher from the API.
 	mu       sync.Mutex
@@ -149,6 +150,16 @@ func (m *Manager) Watcher(engine string) (WatcherStatus, bool) {
 
 func (m *Manager) Index() *Index { return m.ix }
 
+// Recorder receives GC-apply and manual pin/remove audit events.
+type Recorder interface {
+	GCApplied(store string, deleted, untagged, errs int)
+	ImageRemoved(store, ref string)
+	Pinned(store, value string, unpin bool)
+}
+
+// SetRecorder wires the audit log. Set before Start.
+func (m *Manager) SetRecorder(r Recorder) { m.rec = r }
+
 // DefaultPolicy is the configured policy used by the scheduler and as the API default.
 func (m *Manager) DefaultPolicy() Policy { return m.policy }
 
@@ -165,9 +176,22 @@ func (m *Manager) Distributed(engine, ref string, t time.Time) {
 	m.poke()
 }
 
-func (m *Manager) Pin(engine, ref string, pattern bool) error { return m.ix.Pin(engine, ref, pattern) }
-func (m *Manager) Unpin(engine, ref string) error             { return m.ix.Unpin(engine, ref) }
-func (m *Manager) Pins(engine string) ([]PinEntry, error)     { return m.ix.Pins(engine) }
+func (m *Manager) Pin(engine, ref string, pattern bool) error {
+	err := m.ix.Pin(engine, ref, pattern)
+	if err == nil && m.rec != nil {
+		m.rec.Pinned(engine, ref, false)
+	}
+	return err
+}
+
+func (m *Manager) Unpin(engine, ref string) error {
+	err := m.ix.Unpin(engine, ref)
+	if err == nil && m.rec != nil {
+		m.rec.Pinned(engine, ref, true)
+	}
+	return err
+}
+func (m *Manager) Pins(engine string) ([]PinEntry, error) { return m.ix.Pins(engine) }
 
 // --- usage watchers ---
 
@@ -300,10 +324,16 @@ func (m *Manager) apply(ctx context.Context, name string, eng down.Engine, dec D
 		res.Deleted = append(res.Deleted, rr.Deleted...)
 		res.Untagged = append(res.Untagged, rr.Untagged...)
 		_, _ = m.ix.Delete(name, c.Ref)
+		if m.rec != nil {
+			m.rec.ImageRemoved(name, c.Ref)
+		}
 	}
 	if len(res.Deleted)+len(res.Untagged) > 0 {
 		log.From(ctx).Info("gc collected", slog.String("store", name),
 			slog.Int("deleted", len(res.Deleted)), slog.Int("untagged", len(res.Untagged)), slog.Int("evaluated", res.Evaluated))
+		if m.rec != nil {
+			m.rec.GCApplied(name, len(res.Deleted), len(res.Untagged), len(res.Errors))
+		}
 	}
 	if len(res.Errors) > 0 {
 		log.From(ctx).Warn("gc removal errors", slog.String("store", name), slog.Int("count", len(res.Errors)))

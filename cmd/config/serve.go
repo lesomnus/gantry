@@ -16,7 +16,20 @@ type ServeConfig struct {
 	Retention RetentionConfig        `yaml:"retention"`
 	Health    HealthConfig           `yaml:"health"`
 	Verify    VerifyConfig           `yaml:"verify"`
+	Events    EventsConfig           `yaml:"events"`
 }
+
+// EventsConfig governs the audit log (GET /v1/event). An empty Path disables it.
+// It is independent of retention so the log works even when GC is off.
+type EventsConfig struct {
+	// Path is the bbolt file for the audit ring. Empty disables the log.
+	Path string `yaml:"path"`
+	// Cap is the maximum number of entries retained (oldest evicted). Default 10000.
+	Cap int `yaml:"cap"`
+}
+
+// Enabled reports whether the audit log is configured.
+func (c EventsConfig) Enabled() bool { return c.Path != "" }
 
 // VerifyMode selects how source-image signatures are checked at job admission.
 type VerifyMode string

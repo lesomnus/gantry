@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/store"
@@ -40,7 +41,7 @@ func newGCServer(t *testing.T) (http.Handler, *retention.Index) {
 	}
 	t.Cleanup(func() { ix.Close() })
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{KeepN: 2}, retention.Schedule{})
-	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil)
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 	return h, ix
 }
 
@@ -216,7 +217,7 @@ func TestReadyz(t *testing.T) {
 		}
 		t.Cleanup(func() { set.Close() })
 		hc := health.NewChecker(set, health.Options{ReadyStores: gate, ProbeTimeout: time.Second})
-		return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, hc, nil)
+		return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, hc, nil, nil)
 	}
 	host := strings.TrimPrefix(reg.URL, "http://")
 	t.Run("gated store healthy", func(t *testing.T) {
@@ -266,6 +267,81 @@ func TestReadyz(t *testing.T) {
 		h.ServeHTTP(rr, req)
 		if !strings.Contains(rr.Body.String(), "stores") {
 			t.Errorf("authorized body must include the breakdown: %s", rr.Body)
+		}
+	})
+}
+
+func TestEventLogEndpoint(t *testing.T) {
+	t.Run("disabled without events path", func(t *testing.T) {
+		h, _ := newTestServer(t)
+		if rr := do(t, h, http.MethodGet, "/v1/event", ""); rr.Code != http.StatusNotImplemented {
+			t.Errorf("code = %d, want 501", rr.Code)
+		}
+	})
+	t.Run("records manual ops and lists them", func(t *testing.T) {
+		daemon := fakeDockerDaemon(t)
+		var c config.Config
+		c.Serve.Stores = map[string]config.StoreConfig{
+			"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
+		}
+		c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+		if err := c.Evaluate(); err != nil {
+			t.Fatal(err)
+		}
+		set, err := store.NewSet(c.Serve.Stores, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { set.Close() })
+		ix, err := retention.Open(filepath.Join(t.TempDir(), "retention.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ix.Close() })
+		gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
+		ev, err := event.Open(filepath.Join(t.TempDir(), "evt.db"), 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ev.Close() })
+		gc.SetRecorder(event.NewRecorder(ev))
+		h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, ev)
+
+		// A manual pull and a pin are auditable events.
+		if rr := do(t, h, http.MethodPost, "/v1/store/eng/pull", `{"ref":"cache.local/a:1"}`); rr.Code != http.StatusOK {
+			t.Fatalf("pull = %d, body = %s", rr.Code, rr.Body)
+		}
+		if rr := do(t, h, http.MethodPost, "/v1/store/eng/pin", `{"ref":"cache.local/a:1"}`); rr.Code != http.StatusNoContent {
+			t.Fatalf("pin = %d", rr.Code)
+		}
+
+		rr := do(t, h, http.MethodGet, "/v1/event", "")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list = %d", rr.Code)
+		}
+		var res struct {
+			Items []event.Event `json:"items"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Items) != 2 {
+			t.Fatalf("events = %+v, want pull + pin", res.Items)
+		}
+		// Newest first: pin, then pull.
+		if res.Items[0].Type != event.Pinned || res.Items[1].Type != event.ImagePulled {
+			t.Errorf("types = %s,%s want pinned,image_pulled", res.Items[0].Type, res.Items[1].Type)
+		}
+		if rr := do(t, h, http.MethodGet, "/v1/event?type=pinned", ""); rr.Code != http.StatusOK {
+			t.Fatal("type filter failed")
+		} else {
+			json.Unmarshal(rr.Body.Bytes(), &res)
+			if len(res.Items) != 1 {
+				t.Errorf("type filter = %d, want 1", len(res.Items))
+			}
+		}
+		if rr := do(t, h, http.MethodGet, "/v1/event?limit=-1", ""); rr.Code != http.StatusBadRequest {
+			t.Errorf("bad limit = %d, want 400", rr.Code)
 		}
 	})
 }

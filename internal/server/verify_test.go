@@ -47,7 +47,7 @@ func TestCreateJobVerifyRejected(t *testing.T) {
 	cancel()
 	wmr.Start(ctx)
 	t.Cleanup(wmr.Stop)
-	h := New(wmr, js, set, nil, health.NewChecker(set, health.Options{}), nil)
+	h := New(wmr, js, set, nil, health.NewChecker(set, health.Options{}), nil, nil)
 
 	rr := httptest.NewRecorder()
 	body := `{"ref":"app/x:1","from":"up","to":"cache","platforms":["linux/amd64"]}`

@@ -55,7 +55,7 @@ func newVerifyServer(t *testing.T, vf verify.Service) http.Handler {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { set.Close() })
-	return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, health.NewChecker(set, health.Options{}), vf)
+	return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, health.NewChecker(set, health.Options{}), vf, nil)
 }
 
 func TestVerifyPreflight(t *testing.T) {

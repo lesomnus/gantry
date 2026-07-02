@@ -204,3 +204,43 @@ func TestManagerStatusSchedulerFields(t *testing.T) {
 	}
 	t.Fatalf("scheduler status not populated in time: %+v", m.Status())
 }
+
+// recRecorder captures emitted audit calls.
+type recRecorder struct {
+	gc      int
+	removed []string
+	pins    []string
+}
+
+func (r *recRecorder) GCApplied(string, int, int, int) { r.gc++ }
+func (r *recRecorder) ImageRemoved(_, ref string)      { r.removed = append(r.removed, ref) }
+func (r *recRecorder) Pinned(_, value string, _ bool)  { r.pins = append(r.pins, value) }
+
+func TestApplyEmitsAuditEvents(t *testing.T) {
+	ix := openTemp(t)
+	_ = ix.Touch("d", "r/a:old", time.Now().Add(-100*time.Hour))
+	eng := &fakeEng{name: "d"}
+	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{MaxAge: time.Hour}, Schedule{})
+	rec := &recRecorder{}
+	m.SetRecorder(rec)
+
+	dec, err := m.Plan(context.Background(), "d", m.policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Apply(context.Background(), "d", dec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.gc != 1 {
+		t.Errorf("gc_applied emitted %d times, want 1", rec.gc)
+	}
+	if len(rec.removed) != 1 || rec.removed[0] != "r/a:old" {
+		t.Errorf("image_removed = %v, want [r/a:old]", rec.removed)
+	}
+	if err := m.Pin("d", "r/a:new", false); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.pins) != 1 || rec.pins[0] != "r/a:new" {
+		t.Errorf("pinned = %v", rec.pins)
+	}
+}

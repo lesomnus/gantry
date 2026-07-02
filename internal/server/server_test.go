@@ -37,7 +37,7 @@ func newTestServer(t *testing.T) (http.Handler, warm.Store) {
 	wmr.Start(ctx)
 	t.Cleanup(wmr.Stop)
 	hc := health.NewChecker(set, health.Options{})
-	return New(wmr, js, set, nil, hc, nil), js
+	return New(wmr, js, set, nil, hc, nil, nil), js
 }
 
 func TestHealthz(t *testing.T) {

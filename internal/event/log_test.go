@@ -1,0 +1,189 @@
+package event
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func openTemp(t *testing.T, cap int) *Log {
+	t.Helper()
+	l, err := Open(filepath.Join(t.TempDir(), "evt.db"), cap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	return l
+}
+
+func TestAppendListNewestFirst(t *testing.T) {
+	l := openTemp(t, 100)
+	for _, ref := range []string{"a:1", "b:1", "c:1"} {
+		if err := l.Append(Event{Type: JobAdmitted, Ref: ref}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := l.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Ref != "c:1" || got[2].Ref != "a:1" {
+		t.Fatalf("list = %+v, want newest-first", got)
+	}
+	if got[0].Seq <= got[1].Seq {
+		t.Error("seq must be monotonic")
+	}
+	if got[0].At.IsZero() {
+		t.Error("At must be stamped")
+	}
+}
+
+func TestListFilters(t *testing.T) {
+	l := openTemp(t, 100)
+	_ = l.Append(Event{Type: JobDone, Store: "eng", Ref: "a:1", State: "done"})
+	_ = l.Append(Event{Type: GCApplied, Store: "eng"})
+	_ = l.Append(Event{Type: JobDone, Store: "other", Ref: "b:1", State: "failed"})
+
+	cases := map[Filter]int{
+		{Type: JobDone}:     2,
+		{Store: "eng"}:      2,
+		{Ref: "a:1"}:        1,
+		{State: "failed"}:   1,
+		{Type: GCApplied}:   1,
+		{Type: ImagePulled}: 0,
+	}
+	for f, want := range cases {
+		got, err := l.List(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != want {
+			t.Errorf("filter %+v = %d, want %d", f, len(got), want)
+		}
+	}
+}
+
+func TestRingEviction(t *testing.T) {
+	l := openTemp(t, 3)
+	for i := 0; i < 10; i++ {
+		if err := l.Append(Event{Type: JobAdmitted, Ref: string(rune('a' + i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := l.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("kept %d entries, want cap 3", len(got))
+	}
+	// The three newest survive; the oldest were evicted.
+	if got[0].Ref != "j" || got[2].Ref != "h" {
+		t.Errorf("survivors = %v, want the newest three", []string{got[0].Ref, got[1].Ref, got[2].Ref})
+	}
+}
+
+func TestListLimit(t *testing.T) {
+	l := openTemp(t, 1000)
+	for i := 0; i < 50; i++ {
+		_ = l.Append(Event{Type: JobAdmitted, Ref: "r"})
+	}
+	got, _ := l.List(Filter{Limit: 10})
+	if len(got) != 10 {
+		t.Errorf("limit 10 returned %d", len(got))
+	}
+	got, _ = l.List(Filter{}) // default cap 100 > 50
+	if len(got) != 50 {
+		t.Errorf("default returned %d, want all 50", len(got))
+	}
+}
+
+func TestSinceFilter(t *testing.T) {
+	l := openTemp(t, 100)
+	cutoff := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	_ = l.Append(Event{Type: JobAdmitted, Ref: "old", At: cutoff.Add(-time.Hour)})
+	_ = l.Append(Event{Type: JobAdmitted, Ref: "new", At: cutoff.Add(time.Hour)})
+	got, _ := l.List(Filter{Since: cutoff})
+	if len(got) != 1 || got[0].Ref != "new" {
+		t.Errorf("since filter = %+v, want only the newer event", got)
+	}
+}
+
+func TestRecorderNilSafe(t *testing.T) {
+	var r *Recorder
+	r.JobAdmitted("a", "b", "c", "d") // must not panic
+	r = NewRecorder(nil)
+	r.GCApplied("eng", 1, 2, 3) // nil log, no panic
+}
+
+func TestRecorderEmits(t *testing.T) {
+	l := openTemp(t, 100)
+	r := NewRecorder(l)
+	r.JobAdmitted("a:1", "up", "cache", "sha256:x")
+	r.GCApplied("eng", 2, 1, 0)
+	r.Pinned("eng", "*:stable", false)
+	r.ImagePulled("eng", "b:1")
+
+	got, _ := l.List(Filter{})
+	if len(got) != 4 {
+		t.Fatalf("emitted %d events, want 4", len(got))
+	}
+	byType := map[Type]Event{}
+	for _, e := range got {
+		byType[e.Type] = e
+	}
+	if e := byType[JobAdmitted]; e.Ref != "a:1" || e.Store != "cache" || e.Digest != "sha256:x" {
+		t.Errorf("admitted = %+v", e)
+	}
+	if _, ok := byType[GCApplied]; !ok {
+		t.Error("gc_applied not recorded")
+	}
+	if e := byType[Pinned]; e.Ref != "*:stable" {
+		t.Errorf("pinned = %+v", e)
+	}
+}
+
+// A cap DECREASE across restart forces one Append to evict a backlog; the ring
+// bound must hold (the buggy cursor-delete kept ~every other straggler).
+func TestRingEvictionBacklog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "evt.db")
+	big, err := Open(path, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		if err := big.Append(Event{Type: JobAdmitted, Ref: "r"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	big.Close()
+
+	small, err := Open(path, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer small.Close()
+	if err := small.Append(Event{Type: JobAdmitted, Ref: "newest"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := small.List(Filter{Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("after cap decrease + append, kept %d entries, want cap 3", len(got))
+	}
+	if got[0].Ref != "newest" {
+		t.Errorf("newest survivor = %q, want the just-appended entry", got[0].Ref)
+	}
+}
+
+func TestRecorderImageRemoved(t *testing.T) {
+	l := openTemp(t, 100)
+	NewRecorder(l).ImageRemoved("eng", "cache.local/a:1")
+	got, _ := l.List(Filter{Type: ImageRemove})
+	if len(got) != 1 || got[0].Ref != "cache.local/a:1" || got[0].Store != "eng" {
+		t.Errorf("image_removed = %+v", got)
+	}
+}

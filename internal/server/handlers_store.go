@@ -68,6 +68,7 @@ func (s *Server) handleStorePull(w http.ResponseWriter, r *http.Request) {
 		// policy can never age-collect a manually pulled image.
 		s.gc.Distributed(eng.Name(), req.Ref, time.Now())
 	}
+	s.rec.ImagePulled(eng.Name(), req.Ref)
 	writeJSON(w, http.StatusOK, storePullResponse{
 		Store: eng.Name(),
 		Kind:  eng.Kind(),

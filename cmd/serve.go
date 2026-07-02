@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server"
@@ -66,8 +67,26 @@ func NewCmdServe() *xli.Command {
 				ReadyStores:  c.Serve.Health.ReadyStores,
 			})
 
+			var events *event.Log
+			if c.Serve.Events.Enabled() {
+				ev, err := event.Open(c.Serve.Events.Path, c.Serve.Events.Cap)
+				if err != nil {
+					return z.Err(err, "open audit log")
+				}
+				defer ev.Close()
+				events = ev
+				rec := event.NewRecorder(ev)
+				if gc != nil {
+					gc.SetRecorder(rec)
+				}
+				log.From(ctx).Info("audit log enabled", slog.String("path", c.Serve.Events.Path))
+			}
+
 			jobStore := warm.NewMemStore()
 			wmr := warm.NewWarmer(stores, jobStore, c.Serve.Warm)
+			if events != nil {
+				wmr.SetRecorder(event.NewRecorder(events))
+			}
 			if gc != nil {
 				wmr.SetDistributeHook(func(engine, ref string) { gc.Distributed(engine, ref, time.Now()) })
 			}
@@ -99,7 +118,7 @@ func NewCmdServe() *xli.Command {
 				go gc.StartScheduler(ctx)
 			}
 
-			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc, hc, vf))
+			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc, hc, vf, events))
 			srv := &http.Server{
 				Addr:        c.Serve.Addr,
 				Handler:     h,

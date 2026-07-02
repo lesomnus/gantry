@@ -126,6 +126,14 @@ serve:
   #   # during downtime). Defaults to max_age.
   #   grace: "1h"
 
+  # Audit log (GET /v1/event): an append-only ring of operationally significant
+  # events (jobs admitted/finished, GC applied, manual pull/remove, pins) that
+  # survive process restart — the durable record the in-memory job store cannot
+  # provide. Independent of retention, so it works even when GC is disabled.
+  # events:
+  #   path: "/var/lib/gantry/events.db"   # bbolt file; empty disables the log
+  #   cap: 10000                          # max entries retained (oldest evicted)
+
   # Source-image signature verification (Notary Project / notation). When enabled,
   # gantry verifies the `from` image's signature at job creation; a failure rejects
   # the job (422) and nothing is created. Disabled unless `mode` is set.

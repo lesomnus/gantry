@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lesomnus/gantry/cmd/version"
+	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/server/oapi"
@@ -27,17 +28,19 @@ type Server struct {
 	gc     *retention.Manager // nil when retention/GC is disabled
 	health *health.Checker
 	verify verify.Service // nil when verification is disabled
+	events *event.Log     // nil when the audit log is disabled
+	rec    *event.Recorder
 }
 
 // New builds the API handler. gc and vf may be nil. Wrap it with Auth for
 // authentication.
-func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retention.Manager, hc *health.Checker, vf verify.Service) http.Handler {
+func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retention.Manager, hc *health.Checker, vf verify.Service, ev *event.Log) http.Handler {
 	// A typed-nil Service (a nil *verify.Swappable in the interface) must mean
 	// disabled; otherwise every nil-guard passes and handlers dereference it.
 	if v := reflect.ValueOf(vf); vf != nil && v.Kind() == reflect.Pointer && v.IsNil() {
 		vf = nil
 	}
-	s := &Server{warmer: warmer, store: jobStore, stores: stores, gc: gc, health: hc, verify: vf}
+	s := &Server{warmer: warmer, store: jobStore, stores: stores, gc: gc, health: hc, verify: vf, events: ev, rec: event.NewRecorder(ev)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/job", s.handleCreateJob)
 	mux.HandleFunc("POST /v1/job/plan", s.handlePlanJob)
@@ -48,6 +51,7 @@ func New(warmer *warm.Warmer, jobStore warm.Store, stores *store.Set, gc *retent
 	mux.HandleFunc("DELETE /v1/job/{id}", s.handleDeleteJob)
 	mux.HandleFunc("GET /v1/job/{id}/progress", s.handleProgress)
 	mux.HandleFunc("GET /v1/version", s.handleVersion)
+	mux.HandleFunc("GET /v1/event", s.handleListEvents)
 	mux.HandleFunc("GET /v1/verify", s.handleVerifyDescribe)
 	mux.HandleFunc("POST /v1/verify", s.handleVerifyPreflight)
 	mux.HandleFunc("POST /v1/verify/reload", s.handleVerifyReload)

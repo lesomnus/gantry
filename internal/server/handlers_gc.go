@@ -8,6 +8,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/otx/log"
 )
@@ -51,6 +52,7 @@ func (s *Server) handleStoreRemove(w http.ResponseWriter, r *http.Request) {
 	if s.gc != nil {
 		_, _ = s.gc.Index().Delete(name, req.Ref)
 	}
+	s.rec.ImageRemoved(name, req.Ref)
 	log.From(r.Context()).Info("image removed",
 		slog.String("store", name), slog.String("ref", req.Ref),
 		slog.Any("untagged", res.Untagged), slog.Any("deleted", res.Deleted))
@@ -442,4 +444,65 @@ func (s *Server) handleStoreImageDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// eventListResponse is the GET /v1/event body.
+type eventListResponse struct {
+	Items []event.Event `json:"items"`
+}
+
+// handleListEvents godoc
+//
+//	@Summary	Query the audit log
+//	@Description	Operationally significant events (jobs admitted/finished, GC applied, manual pull/remove, pins) that survive process restart — the durable record the in-memory job store cannot provide. Newest first.
+//	@Tags		meta
+//	@Produce	json
+//	@Param		type	query		string	false	"filter by event type"	Enums(job_admitted,job_done,gc_applied,image_pulled,image_removed,pinned,unpinned)
+//	@Param		store	query		string	false	"filter by store"
+//	@Param		ref		query		string	false	"filter by exact reference"
+//	@Param		state	query		string	false	"filter by job terminal state"
+//	@Param		since	query		string	false	"only events at/after this RFC 3339 instant"
+//	@Param		limit	query		integer	false	"max events (default 100, max 1000)"
+//	@Success	200		{object}	eventListResponse
+//	@Failure	400		{object}	errorResponse
+//	@Failure	501		{object}	errorResponse
+//	@Security	BearerAuth
+//	@Router		/v1/event [get]
+func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
+	if s.events == nil {
+		writeErr(w, http.StatusNotImplemented, "the audit log is not enabled (set serve.events.path)")
+		return
+	}
+	q := r.URL.Query()
+	f := event.Filter{
+		Type:  event.Type(q.Get("type")),
+		Store: q.Get("store"),
+		Ref:   q.Get("ref"),
+		State: q.Get("state"),
+	}
+	if v := q.Get("since"); v != "" {
+		at, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid since: "+err.Error())
+			return
+		}
+		f.Since = at
+	}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			writeErr(w, http.StatusBadRequest, "invalid limit: "+v)
+			return
+		}
+		f.Limit = n
+	}
+	items, err := s.events.List(f)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []event.Event{}
+	}
+	writeJSON(w, http.StatusOK, eventListResponse{Items: items})
 }

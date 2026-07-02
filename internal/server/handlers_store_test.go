@@ -66,7 +66,7 @@ func TestStorePullStampsRetentionIndex(t *testing.T) {
 	js := warm.NewMemStore()
 	wmr := warm.NewWarmer(set, js, c.Serve.Warm)
 	hc := health.NewChecker(set, health.Options{})
-	h := New(wmr, js, set, gc, hc, nil)
+	h := New(wmr, js, set, gc, hc, nil, nil)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/store/eng/pull", strings.NewReader(`{"ref":"cache.local/team/app:1"}`))
@@ -109,7 +109,7 @@ func TestPinAPIPatterns(t *testing.T) {
 	}
 	t.Cleanup(func() { ix.Close() })
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
-	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil)
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 
 	do := func(method, body string) *httptest.ResponseRecorder {
 		rr := httptest.NewRecorder()
@@ -166,7 +166,7 @@ func TestPinAPIRejectsInvalidPattern(t *testing.T) {
 	}
 	t.Cleanup(func() { ix.Close() })
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
-	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil)
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/store/eng/pin", strings.NewReader(`{"pattern":"[unclosed"}`))
