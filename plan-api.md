@@ -351,11 +351,29 @@ store라 "배포 이미지가 리부트 전에 도착했었나"가 API로 답 �
     무시됨 → creds()에서 RootCAs로 이동(워크어라운드; 상류 수정 후 제거). 자가서명 CA TLS 테스트.
   - sweeper/종료가 job ctx를 cancel하지 않아 base ctx에 cancelCtx 자식 누적 →
     `Warmer.run`에 `defer job.Cancel()` + `memStore.Sweep`이 evict 전 Cancel.
-- **남은 것**: mkot repo에 `exporters/otlp` 모듈로 추출(코드 이식 + go.mod). **추출 전 상류 수정 2건**:
-  ① `ClientTlsConfig.Build`의 ClientCAs→RootCAs, ② `QueueConfig.BuildSpanProcessor/BuildLogProcessor`가
-  0값 큐 크기를 그대로 넘겨 batcher가 전부 drop(디버그 exporter도 동일 패턴 — flush 없는
-  exporter-as-component 포함). 그 후 gantry는 import 경로만 교체. §2.6-3 계측 추가(큐 깊이,
-  jobs-by-state, retention 카운트, health latency)는 미착수.
+- [x] **mkot 상류 수정 완료 (2026-07-02, /workspaces/github.com/lesomnus/mkot 워킹트리)** — 리포에
+  이미 있던 미공개 중첩 모듈 `mkot/otlp`(README의 `exporters/otlp`가 아님; 경로 수정함)를 발견,
+  거기에 수정을 얹음: ① tls.go `ClientCAs`→`RootCAs`, ② queue.go 0값 가드,
+  ③ `mkot.SpanComponent`/`LogComponent` 공유 헬퍼(component.go) — processor-drain Shutdown +
+  Start 위임, ④ debug: sending_queue 명시 설정 없으면 동기 출력(베이스라인부터 깨져 있던
+  기존 테스트가 이걸로 복구), MetricReader 전환, ⑤ otlp: MetricReader 전환 + interval/temporality
+  추가 + 선언만 되고 무시되던 headers/retry/keepalive/wait_for_ready/balancer_name 배선.
+  적대 리뷰 2라운드에서 5건 추가 수정: **delta 셀렉터가 gauge를 delta로 보내 산발 기록 gauge가
+  증발**(SDK `metric.DeltaTemporalitySelector`로 교체 — gantry internal/otlp에도 동일 수정),
+  retry의 multiplier/randomization_factor는 exporter가 표현 불가 → 조용히 버리는 대신 에러,
+  keepalive `time: 0`이 grpc 최소 10s로 클램프되며 몰래 켜지는 것 가드, debug의 부분 설정된
+  sending_queue를 opt-in으로 존중, otlp/go.mod 버전 skew 문서화.
+- [x] **gantry → mkot/otlp 전환 완료 (2026-07-02)**. mkot 2198e78 푸시 후: gantry go.mod를
+  mkot/{,otlp,pretty}@v0.0.0-20260702145326-2198e788ed64로 bump, otel.go blank import를
+  `github.com/lesomnus/mkot/otlp`로 교체, `internal/otlp` 삭제(RootCAs 워크어라운드 포함 소멸).
+  gantry.yaml 예시를 mkot/otlp surface에 맞춤(headers는 name/value 리스트, timeout 필드 없음,
+  retry_on_failure 있음). cmd/config의 Build 통합 테스트가 공개 모듈 기준으로 통과.
+- **남은 것**: ① mkot 워킹트리의 `otlp/go.mod` bump(mkot require → 2198e78 pseudo-version)
+  커밋/푸시 — 이거 전까지 `go get github.com/lesomnus/mkot/otlp`만 단독으로 쓰는 소비자는
+  MVS로 root를 함께 올려줘야 컴파일됨(gantry는 이미 그렇게 함). CI에 `GOWORK=off go build`
+  per-module 추가 권장. ② §2.6-3 계측 추가(큐 깊이, jobs-by-state, retention 카운트,
+  health latency)는 미착수. ③ pretty 모듈 테스트는 이 작업 전부터 실패 상태(otx ingress/egress
+  렌더링 WIP) — 무관.
 
 ## 채택하지 않은 것
 

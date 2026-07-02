@@ -5,17 +5,19 @@ greet:
 
 # OpenTelemetry pipeline (mkot-style). Instruments record to a no-op unless an
 # exporter is wired to a provider here — exporting is a deployment opt-in. The
-# `otlp` exporter pushes over OTLP/gRPC (e.g. to a node-local collector). Every
-# provider automatically carries the gantry service resource (service.name).
+# `otlp` exporter (github.com/lesomnus/mkot/otlp) pushes over OTLP/gRPC (e.g.
+# to a node-local collector). Every provider automatically carries the gantry
+# service resource (service.name).
 # otel:
 #   exporters:
 #     otlp:
 #       endpoint: "127.0.0.1:4317"
 #       tls: { insecure: true }    # plaintext; omit for TLS w/ system roots
-#       # headers: { authorization: "Bearer ..." }
-#       # timeout: 10s             # per-export request bound
+#       # headers:
+#       #   - { name: authorization, value: "Bearer ..." }
 #       # interval: 60s            # metric push period
 #       # temporality: delta       # cumulative (default) | delta
+#       # retry_on_failure: { max_elapsed_time: 1m }
 #   providers:
 #     meter:  { exporters: [otlp] }
 #     tracer: { exporters: [otlp] }

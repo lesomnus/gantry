@@ -7,8 +7,8 @@ import (
 	"slices"
 
 	"github.com/lesomnus/gantry/cmd/version"
-	_ "github.com/lesomnus/gantry/internal/otlp" // registers the "otlp" exporter
 	"github.com/lesomnus/mkot"
+	_ "github.com/lesomnus/mkot/otlp" // registers the "otlp" exporter
 	"github.com/lesomnus/mkot/pretty"
 	"github.com/lesomnus/otx"
 	"go.opentelemetry.io/otel/attribute"
