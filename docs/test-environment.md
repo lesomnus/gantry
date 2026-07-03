@@ -6,56 +6,64 @@ gantry를 실제 docker / containerd 데몬에 대해 검증하기 위한 devcon
 
 ## 토폴로지
 
-devcontainer는 두 서비스로 구성된다 ([.devcontainer/docker-compose.yaml](../.devcontainer/docker-compose.yaml)).
+devcontainer는 세 서비스로 구성된다 ([.devcontainer/docker-compose.yaml](../.devcontainer/docker-compose.yaml)).
 
 ```
 ┌───────────────────────────────────┐        ┌─────────────────────────────────────┐
 │ dev (uid 1000)                    │        │ docker  (image: docker:dind)        │
 │  - gantry / go test 실행          │        │  - dockerd  (tcp://0.0.0.0:2375)    │
-│  - DOCKER_HOST=tcp://docker:2375 ─┼──────▶│  - 번들 containerd                  │
-│                                   │        │      /run/docker/containerd/...sock │
-│  /run/docker/containerd/sock ◀━━━┼━shared━┤      (같은 named volume)            │
-│  (named volume: containerd.run)   │ volume │                                     │
-│                                   │        │  [수동 e2e 시] registry:2 → :5000  │
-│  127.0.0.1:5000 ──(local fwd)─────┼──────▶│  127.0.0.1:5000 (dind localhost)    │
-└───────────────────────────────────┘        └─────────────────────────────────────┘
+│  - DOCKER_HOST=tcp://docker:2375 ─┼──────▶│  [수동 e2e 시] registry:2 → :5000  │
+│  - CONTAINERD_ADDRESS=            │        │  127.0.0.1:5000 (dind localhost)    │
+│      /run/containerd/...sock ◀━┐  │        └─────────────────────────────────────┘
+│  127.0.0.1:5000 ──(local fwd)──┼──┼──────▶  (docker:5000)
+│                                │  │        ┌─────────────────────────────────────┐
+│                          shared│  │        │ containerd  (image: docker:dind,    │
+│                          volume└──┼━━━━━━━━┥   command: containerd)              │
+│                                   │        │  - 전용 containerd (namespace 임의)  │
+└───────────────────────────────────┘        │      /run/containerd/...sock        │
+                                              └─────────────────────────────────────┘
 ```
 
 - **`dev`** — 개발/테스트 컨테이너. gantry와 `go test`가 여기서 돈다. uid 1000.
-- **`docker`** — DinD(Docker-in-Docker). `dockerd`가 tcp:2375로 떠 있고, 그 dockerd가
-  내부적으로 **containerd**를 구동한다(소켓 `/run/docker/containerd/containerd.sock`).
+- **`docker`** — DinD(Docker-in-Docker). `dockerd`가 tcp:2375로 떠 있다.
+- **`containerd`** — **전용 containerd 사이드카**. `docker:dind` 이미지에 standalone
+  `containerd` 바이너리(+runc/shim)가 이미 들어있어 별도 이미지 없이 `command: containerd`로
+  띄운다. docker와 독립적이고, pull+unpack만 하는 통합 테스트(retention·anchored-pull)는
+  데몬 + overlayfs 스냅샷터면 충분하다(CNI·runc task 불필요).
+
+> 과거에는 docker(dind)에 번들된 containerd 소켓을 공유했으나(namespace `moby`, chmod 해킹),
+> 전용 사이드카로 분리해 그 결합·해킹을 없앴다.
 
 ### 데몬 엔드포인트 두 개
 
-| 종류       | dev에서의 주소                                                  | 비고                                        |
-| ---------- | --------------------------------------------------------------- | ------------------------------------------- |
-| docker     | `tcp://docker:2375` (`DOCKER_HOST`)                             | 호스트명 `docker`가 dind 컨테이너로 resolve |
-| containerd | `/run/docker/containerd/containerd.sock` (`CONTAINERD_ADDRESS`) | 아래 §소켓 공유로 노출                      |
+| 종류       | dev에서의 주소                                          | 비고                                        |
+| ---------- | ------------------------------------------------------- | ------------------------------------------- |
+| docker     | `tcp://docker:2375` (`DOCKER_HOST`)                    | 호스트명 `docker`가 dind 컨테이너로 resolve |
+| containerd | `/run/containerd/containerd.sock` (`CONTAINERD_ADDRESS`) | 전용 사이드카, 아래 §소켓 공유로 노출       |
 
 이 둘은 gantry가 데몬에게 "pull해라"라고 **명령**하는 제어 채널일 뿐이다 — 어떤 주소든
 무방하며 아래 §insecure 제약과는 무관하다.
 
 ## containerd 소켓 공유
 
-dind의 번들 containerd 소켓은 본래 dind 컨테이너 안에만 있어 dev에서 안 보인다.
-compose에서 다음으로 노출한다:
+전용 `containerd` 사이드카의 소켓은 본래 그 컨테이너 안에만 있어 dev에서 안 보인다.
+compose에서 docker 서비스와 같은 패턴으로 노출한다:
 
-1. **공유 볼륨** `containerd.run`을 `docker`·`dev` 양쪽에 `/run/docker/containerd`로
-   마운트. (유닉스 소켓은 공유 볼륨의 같은 inode로 커널이 cross-container 연결을
-   라우팅하므로 동작한다.)
-2. **권한** — 소켓은 `root:root 0660`, 부모 디렉터리는 `0700`이라 dev의 uid 1000이
-   그대로는 못 쓴다. dev에서 chmod도 불가. 그래서 `docker` 서비스의 `command`에
-   백그라운드 루프를 넣어 dind 쪽에서 `chmod 0711` 디렉터리 + `0666` 소켓으로 열어둔다
-   (`exec dockerd`는 PID 1 유지, containerd가 소켓을 재생성해도 3초마다 복구).
-3. `dev`에 `CONTAINERD_ADDRESS=/run/docker/containerd/containerd.sock` 환경변수.
+1. **공유 볼륨** `containerd.run`을 `containerd`·`dev` 양쪽에 `/run/containerd`로 마운트.
+   (유닉스 소켓은 공유 볼륨의 같은 inode로 커널이 cross-container 연결을 라우팅한다.)
+2. **권한** — 소켓은 `root:root 0660`, 부모 디렉터리는 제한적이라 dev의 uid 1000이 그대로는
+   못 쓴다. 그래서 `containerd` 서비스의 `command`에 백그라운드 루프를 넣어 `chmod 0711`
+   디렉터리 + `0666` 소켓으로 열어둔다(`exec containerd`는 PID 1 유지, 3초마다 복구).
+3. `dev`에 `CONTAINERD_ADDRESS=/run/containerd/containerd.sock` 환경변수.
 
 > 적용은 **devcontainer rebuild** 시점. 확인:
 > ```sh
-> ls -l /run/docker/containerd/containerd.sock   # srw-rw-rw- 여야 함
+> ls -l /run/containerd/containerd.sock   # srw-rw-rw- 여야 함
 > ```
 
-번들 containerd의 이미지 네임스페이스는 **`moby`** 다(k3s의 `k8s.io`가 아님). target
-설정 시 `namespace: "moby"`.
+전용 containerd는 자체 데이터 스토어(`containerd.data`)를 쓰고, 이미지 네임스페이스는
+`CONTAINERD_NAMESPACE`(기본 `gantry`)다. 네임스페이스는 pull 시 지연 생성되므로 임의 이름
+무방하다. target 설정 시 `namespace: "gantry"`.
 
 ## 자동 테스트 (`go test`)
 
@@ -69,7 +77,8 @@ go test -race ./...
   - `internal/down/docker_integration_test.go` → `tcp://docker:2375`에 Ping 후
     `hello-world` 실제 pull.
   - `internal/down/containerd_integration_test.go` → `CONTAINERD_ADDRESS` 소켓이
-    있으면 `moby` 네임스페이스로 실제 pull, 없으면 즉시 skip.
+    있으면 `CONTAINERD_NAMESPACE`(기본 `gantry`)로 실제 pull + digest-anchored pull
+    (retag 후 digest-named 레코드가 안 남는지까지 검증), 없으면 즉시 skip.
 
 ## 전체 루프 수동 검증
 
@@ -105,7 +114,7 @@ serve:
   stores:
     cache:       { kind: "oci", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
     dind-docker: { kind: "docker",     address: "tcp://docker:2375" }
-    dind-ctr:    { kind: "containerd", address: "/run/docker/containerd/containerd.sock", namespace: "moby" }
+    dind-ctr:    { kind: "containerd", address: "/run/containerd/containerd.sock", namespace: "gantry" }
   warm:
     platforms: ["linux/amd64"]
 ```

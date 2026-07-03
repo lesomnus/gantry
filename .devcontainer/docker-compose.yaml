@@ -10,8 +10,11 @@ services:
     environment:
       SHELL: /bin/zsh
       DOCKER_HOST: tcp://docker:2375
-      # docker's bundled containerd, shared from the `docker` service below.
-      CONTAINERD_ADDRESS: /run/docker/containerd/containerd.sock
+      # A dedicated containerd sidecar (below), independent of docker. Its own
+      # namespace, no shared-socket chmod hack, and pull-only integration tests
+      # run against a clean containerd rather than docker's bundled one.
+      CONTAINERD_ADDRESS: /run/containerd/containerd.sock
+      CONTAINERD_NAMESPACE: gantry
 
     volumes:
       - command.history:/commandhistory
@@ -22,8 +25,8 @@ services:
       - ${HOME}/workspaces:/workspaces
       - ${HOME}/.claude:/home/hypnos/.claude
 
-      # containerd socket shared from the `docker` (dind) service.
-      - containerd.run:/run/docker/containerd
+      # Dedicated containerd's socket, shared from the `containerd` service.
+      - containerd.run:/run/containerd
 
     deploy:
       resources:
@@ -56,7 +59,6 @@ services:
 
     volumes:
       - docker.data:/var/lib/docker
-      - containerd.run:/run/docker/containerd
 
     deploy:
       resources:
@@ -67,9 +69,44 @@ services:
           cpus: "4"
           memory: 4G
 
+  # Dedicated containerd, independent of docker. The docker:dind image already
+  # ships a standalone containerd binary (+ runc/shim), so no custom image is
+  # needed — run containerd instead of dockerd. The pull/unpack the retention
+  # and anchored-pull tests exercise need only the daemon + overlayfs snapshotter
+  # (no CNI, no runc tasks). A background loop opens the socket for the dev user
+  # (uid 1000), which cannot chmod it itself, mirroring the docker service.
+  containerd:
+    image: docker:dind
+    command:
+      - sh
+      - -c
+      - |
+        ( while :; do
+            chmod 0711 /run/containerd 2>/dev/null
+            chmod 0666 /run/containerd/containerd.sock 2>/dev/null
+            sleep 3
+          done ) &
+        exec containerd
+
+    privileged: true
+
+    volumes:
+      - containerd.data:/var/lib/containerd
+      - containerd.run:/run/containerd
+
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+        reservations:
+          cpus: "2"
+          memory: 2G
+
 volumes:
   command.history:
   go.cache.mod:
   go.cache.bin:
   docker.data:
+  containerd.data:
   containerd.run:
