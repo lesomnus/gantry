@@ -57,6 +57,20 @@ func (s *recSink) bytesDone() int64 {
 	return n
 }
 
+// progressed reports whether any per-layer progress was observed — bytes moved,
+// or (when the daemon's containerd image store reports state-only on fast local
+// pulls, docker 29+) at least a layer state. Engine byte counts are best-effort.
+func (s *recSink) progressed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range s.layers {
+		if u.Done > 0 || u.State != "" {
+			return true
+		}
+	}
+	return false
+}
+
 type fakeEngine struct{ name string }
 
 func (f *fakeEngine) Name() string                                     { return f.name }
