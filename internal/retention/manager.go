@@ -78,6 +78,7 @@ type Status struct {
 type PolicyStatus struct {
 	MaxAge string   `json:"max_age"`
 	KeepN  int      `json:"keep_n"`
+	MaxN   int      `json:"max_n"`
 	Pins   []string `json:"pins,omitempty"`
 }
 
@@ -105,7 +106,7 @@ func (m *Manager) Status() Status {
 		GraceUntil: m.graceUntilLocked(),
 	}
 	m.mu.Unlock()
-	st.Policy = PolicyStatus{MaxAge: m.policy.MaxAge.String(), KeepN: m.policy.KeepN, Pins: m.policy.Pins}
+	st.Policy = PolicyStatus{MaxAge: m.policy.MaxAge.String(), KeepN: m.policy.KeepN, MaxN: m.policy.MaxN, Pins: m.policy.Pins}
 	st.Schedule = ScheduleStatus{
 		Interval:    m.sched.Interval.String(),
 		MinInterval: m.sched.MinInterval.String(),

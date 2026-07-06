@@ -51,14 +51,15 @@ func NewCmdServe() *xli.Command {
 				defer ix.Close()
 				rc := c.Serve.Retention
 				gc = retention.NewManager(ix, stores.Engines(),
-					retention.Policy{MaxAge: time.Duration(rc.MaxAge), KeepN: rc.KeepN, Pins: rc.Pins},
+					retention.Policy{MaxAge: time.Duration(rc.MaxAge), KeepN: rc.KeepN, MaxN: rc.MaxN, Pins: rc.Pins},
 					retention.Schedule{
 						Interval:    time.Duration(rc.Interval),
 						MinInterval: time.Duration(rc.MinInterval),
 						Grace:       time.Duration(rc.Grace),
 					})
 				log.From(ctx).Info("retention enabled",
-					slog.String("path", rc.Path), slog.String("max_age", time.Duration(rc.MaxAge).String()), slog.Int("keep_n", rc.KeepN))
+					slog.String("path", rc.Path), slog.String("max_age", time.Duration(rc.MaxAge).String()),
+					slog.Int("keep_n", rc.KeepN), slog.Int("max_n", rc.MaxN))
 			}
 
 			hc := health.NewChecker(stores, health.Options{

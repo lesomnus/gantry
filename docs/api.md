@@ -236,6 +236,7 @@ Scheduler observability: when GC last ran and will next wake, whether the post-s
   "policy": {
     "keep_n": 0,
     "max_age": "string",
+    "max_n": 0,
     "pins": [
       "string"
     ]
@@ -287,7 +288,7 @@ curl -X GET /v1/store/{name}/gc \
 
 `GET /v1/store/{name}/gc`
 
-Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
+Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/max_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
 
 > Body parameter
 
@@ -295,6 +296,7 @@ Returns the retention decision (keep/delete) without deleting anything. An optio
 {
   "keep_n": 3,
   "max_age": "720h",
+  "max_n": 20,
   "pins": [
     "docker.io/library/nginx:1.27"
   ]
@@ -362,7 +364,7 @@ curl -X POST /v1/store/{name}/gc \
 
 `POST /v1/store/{name}/gc`
 
-Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
+Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins for this call.
 
 > Body parameter
 
@@ -370,6 +372,7 @@ Applies the deletions and returns the apply result. An optional body overrides t
 {
   "keep_n": 3,
   "max_age": "720h",
+  "max_n": 20,
   "pins": [
     "docker.io/library/nginx:1.27"
   ]
@@ -2018,7 +2021,7 @@ BearerAuth
 |---|---|---|---|---|
 |digest|string|false|none|none|
 |last_used|string|false|none|none|
-|reason|string|false|none|age_exceeded|
+|reason|string|false|none|age_exceeded | max_n_exceeded|
 |ref|string|false|none|none|
 
 <h2 id="tocS_retention.Decision">retention.Decision</h2>
@@ -2114,6 +2117,7 @@ BearerAuth
 {
   "keep_n": 0,
   "max_age": "string",
+  "max_n": 0,
   "pins": [
     "string"
   ]
@@ -2127,6 +2131,7 @@ BearerAuth
 |---|---|---|---|---|
 |keep_n|integer|false|none|none|
 |max_age|string|false|none|none|
+|max_n|integer|false|none|none|
 |pins|[string]|false|none|none|
 
 <h2 id="tocS_retention.Record">retention.Record</h2>
@@ -2203,6 +2208,7 @@ BearerAuth
   "policy": {
     "keep_n": 0,
     "max_age": "string",
+    "max_n": 0,
     "pins": [
       "string"
     ]
@@ -2461,6 +2467,7 @@ BearerAuth
 {
   "keep_n": 3,
   "max_age": "720h",
+  "max_n": 20,
   "pins": [
     "docker.io/library/nginx:1.27"
   ]
@@ -2474,6 +2481,7 @@ BearerAuth
 |---|---|---|---|---|
 |keep_n|integer|false|none|Override how many most-recent tags to keep per repo; 0 disables keep-N.|
 |max_age|string|false|none|Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.|
+|max_n|integer|false|none|Override the per-repo tag cap; 0 disables the cap. Must be >= keep_n.|
 |pins|[string]|false|none|Override the pinned references exempt from GC.|
 
 <h2 id="tocS_server.imageListResponse">server.imageListResponse</h2>

@@ -137,6 +137,11 @@ type RetentionConfig struct {
 	// KeepN keeps the N most-recently-used tags per repository (even if old);
 	// zero disables keep-N.
 	KeepN int `yaml:"keep_n"`
+	// MaxN caps the tags kept per repository: when a repo has more than MaxN
+	// non-protected (not in-use, not pinned) tags, the oldest beyond the cap are
+	// deleted even before they exceed max_age. Zero disables the cap; when both
+	// are set MaxN must be >= keep_n. The cap is deferred during the grace window.
+	MaxN int `yaml:"max_n"`
 	// Pins are never GC'd: exact references, or doublestar patterns matched
 	// against the full ref, its name:tag short form, and the bare tag.
 	Pins []string `yaml:"pins"`

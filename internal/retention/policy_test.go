@@ -138,6 +138,125 @@ func TestDecisionSerializesNextAgeOut(t *testing.T) {
 	}
 }
 
+func TestEvaluateMaxNCapDeletesOldestBeyondCap(t *testing.T) {
+	now := time.Now()
+	mk := func(tag string, agoMin int) Record {
+		return rec("r/a:"+tag, "r/a", now.Add(-time.Duration(agoMin)*time.Minute))
+	}
+	// Five recent (non-stale) tags; MaxN=3 keeps the 3 newest, deletes the 2
+	// oldest even though none exceed max_age.
+	recs := []Record{mk("t1", 1), mk("t2", 2), mk("t3", 3), mk("t4", 4), mk("t5", 5)}
+	d := Evaluate(now, recs, nil, Policy{MaxAge: 1000 * time.Hour, MaxN: 3}, time.Time{})
+	del, keep := decided(d)
+	for _, r := range []string{"r/a:t1", "r/a:t2", "r/a:t3"} {
+		if keep[r] == "" || del[r] != "" {
+			t.Errorf("%s should be kept within cap: del=%v keep=%v", r, del, keep)
+		}
+	}
+	if del["r/a:t4"] != "max_n_exceeded" || del["r/a:t5"] != "max_n_exceeded" {
+		t.Errorf("oldest beyond cap should be max_n_exceeded: del=%v", del)
+	}
+}
+
+func TestEvaluateMaxNIsPerRepo(t *testing.T) {
+	now := time.Now()
+	mk := func(ref, repo string, agoMin int) Record {
+		return rec(ref, repo, now.Add(-time.Duration(agoMin)*time.Minute))
+	}
+	recs := []Record{
+		mk("r/a:1", "r/a", 1), mk("r/a:2", "r/a", 2), mk("r/a:3", "r/a", 3),
+		mk("r/b:1", "r/b", 1), mk("r/b:2", "r/b", 2), mk("r/b:3", "r/b", 3),
+	}
+	d := Evaluate(now, recs, nil, Policy{MaxAge: 1000 * time.Hour, MaxN: 2}, time.Time{})
+	del, _ := decided(d)
+	if del["r/a:3"] != "max_n_exceeded" || del["r/b:3"] != "max_n_exceeded" {
+		t.Errorf("each repo should cap independently: del=%v", del)
+	}
+	if len(del) != 2 {
+		t.Errorf("only the oldest per repo should be deleted: del=%v", del)
+	}
+}
+
+func TestEvaluateMaxNExcludesProtected(t *testing.T) {
+	now := time.Now()
+	recs := []Record{
+		rec("r/a:live", "r/a", now.Add(-1*time.Minute)),
+		{Ref: "r/a:pin", Repo: "r/a", LastUsed: now.Add(-2 * time.Minute), FirstSeen: now, Pinned: true},
+		rec("r/a:new", "r/a", now.Add(-3*time.Minute)),
+		rec("r/a:old", "r/a", now.Add(-4*time.Minute)),
+	}
+	inUse := map[string]bool{"r/a:live": true}
+	// MaxN=1 counts only the 2 non-protected tags (new, old): keep newest, delete
+	// oldest. in-use and pinned are always kept and do not consume the budget.
+	d := Evaluate(now, recs, inUse, Policy{MaxAge: 1000 * time.Hour, MaxN: 1}, time.Time{})
+	del, keep := decided(d)
+	if keep["r/a:live"] != "in_use" || keep["r/a:pin"] != "pinned" {
+		t.Errorf("protected tags must remain: keep=%v", keep)
+	}
+	if del["r/a:new"] != "" {
+		t.Errorf("newest non-protected within cap should be kept: del=%v", del)
+	}
+	if del["r/a:old"] != "max_n_exceeded" {
+		t.Errorf("oldest non-protected beyond cap should be deleted: del=%v", del)
+	}
+}
+
+func TestEvaluateMaxNDeferredDuringGrace(t *testing.T) {
+	now := time.Now()
+	graceUntil := now.Add(time.Hour)
+	mk := func(tag string, agoMin int) Record {
+		return rec("r/a:"+tag, "r/a", now.Add(-time.Duration(agoMin)*time.Minute))
+	}
+	recs := []Record{mk("t1", 1), mk("t2", 2), mk("t3", 3)}
+	d := Evaluate(now, recs, nil, Policy{MaxAge: 1000 * time.Hour, MaxN: 1}, graceUntil)
+	del, _ := decided(d)
+	if len(del) != 0 {
+		t.Errorf("cap should be deferred during grace: del=%v", del)
+	}
+	if !d.NextAgeOut.Equal(graceUntil) {
+		t.Errorf("next age-out should be graceUntil, got %v", d.NextAgeOut)
+	}
+}
+
+func TestEvaluateMaxNComposesWithKeepNAndAge(t *testing.T) {
+	now := time.Now()
+	mk := func(tag string, ago time.Duration) Record {
+		return rec("r/a:"+tag, "r/a", now.Add(-ago))
+	}
+	// Ranked by recency r1..r5. MaxN=3 caps to top 3 (deletes r4,r5); of those,
+	// KeepN=2 protects r1,r2; r3 is stale so age deletes it.
+	recs := []Record{
+		mk("r1", 10*time.Minute),
+		mk("r2", 20*time.Minute),
+		mk("r3", 2*time.Hour),
+		mk("r4", 3*time.Hour),
+		mk("r5", 4*time.Hour),
+	}
+	d := Evaluate(now, recs, nil, Policy{MaxAge: time.Hour, KeepN: 2, MaxN: 3}, time.Time{})
+	del, keep := decided(d)
+	if keep["r/a:r1"] != "keep_n_recent" || keep["r/a:r2"] != "keep_n_recent" {
+		t.Errorf("top keep_n should be protected: keep=%v", keep)
+	}
+	if del["r/a:r3"] != "age_exceeded" {
+		t.Errorf("rank-3 within cap but stale should be age_exceeded: del=%v", del)
+	}
+	if del["r/a:r4"] != "max_n_exceeded" || del["r/a:r5"] != "max_n_exceeded" {
+		t.Errorf("beyond cap should be max_n_exceeded: del=%v", del)
+	}
+}
+
+func TestEvaluateMaxNNoOpAtOrBelowCap(t *testing.T) {
+	now := time.Now()
+	mk := func(tag string, agoMin int) Record {
+		return rec("r/a:"+tag, "r/a", now.Add(-time.Duration(agoMin)*time.Minute))
+	}
+	recs := []Record{mk("t1", 1), mk("t2", 2)}
+	d := Evaluate(now, recs, nil, Policy{MaxAge: 1000 * time.Hour, MaxN: 2}, time.Time{})
+	if del, _ := decided(d); len(del) != 0 {
+		t.Errorf("at cap should delete nothing: del=%v", del)
+	}
+}
+
 func TestMatchPin(t *testing.T) {
 	r := Record{Ref: "cache.local/team/app:stable", Repo: "cache.local/team/app", Tag: "stable"}
 	cases := map[string]bool{

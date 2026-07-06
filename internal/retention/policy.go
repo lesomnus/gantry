@@ -34,6 +34,27 @@ func shortName(r Record) string {
 	return path.Base(r.Repo) + ":" + r.Tag
 }
 
+// groupByRepo buckets records by their keep-N/max-N grouping key (Record.Repo).
+func groupByRepo(recs []Record) map[string][]Record {
+	byRepo := map[string][]Record{}
+	for _, r := range recs {
+		byRepo[r.Repo] = append(byRepo[r.Repo], r)
+	}
+	return byRepo
+}
+
+// sortByRecency orders a repo group most-recently-used first, tie-broken by Ref
+// so the keep/delete boundary is deterministic.
+func sortByRecency(group []Record) {
+	sort.Slice(group, func(i, j int) bool {
+		ti, tj := group[i].effLastUsed(), group[j].effLastUsed()
+		if ti.Equal(tj) {
+			return group[i].Ref < group[j].Ref
+		}
+		return ti.After(tj)
+	})
+}
+
 func pinned(pins []string, r Record) bool {
 	for _, pin := range pins {
 		if matchPin(pin, r) {
@@ -48,8 +69,11 @@ func pinned(pins []string, r Record) bool {
 //  1. in-use   — referenced by a live container (inUse holds refs and digests)
 //  2. pinned   — Record.Pinned, or a policy.Pins entry (exact ref or doublestar
 //     pattern) matches
-//  3. keep-N   — the KeepN most-recently-used tags per repository
-//  4. age      — of the rest, delete those whose last-used age exceeds MaxAge,
+//  3. max-N    — of the rest, keep only the MaxN most-recently-used tags per
+//     repository; delete the oldest beyond the cap even if not yet stale
+//     (deferred during the grace window). in-use/pinned tags do not count.
+//  4. keep-N   — the KeepN most-recently-used tags per repository
+//  5. age      — of the rest, delete those whose last-used age exceeds MaxAge,
 //     unless still within the grace window (now < graceUntil).
 func Evaluate(now time.Time, recs []Record, inUse map[string]bool, p Policy, graceUntil time.Time) Decision {
 	var dec Decision
@@ -65,21 +89,48 @@ func Evaluate(now time.Time, recs []Record, inUse map[string]bool, p Policy, gra
 		}
 	}
 
+	// max-N cap: keep at most MaxN tags per repository, deleting the oldest beyond
+	// the cap regardless of age. Deferred during the grace window, since a just-
+	// restarted node has no usage history and the "oldest" ordering is unreliable.
+	if p.MaxN > 0 {
+		inGrace := now.Before(graceUntil)
+		over := map[string]bool{}
+		for _, group := range groupByRepo(remaining) {
+			if len(group) <= p.MaxN {
+				continue
+			}
+			sortByRecency(group)
+			if inGrace {
+				// Something exceeds the cap but grace holds it: wake at graceUntil.
+				if dec.NextAgeOut.IsZero() || graceUntil.Before(dec.NextAgeOut) {
+					dec.NextAgeOut = graceUntil
+				}
+				continue
+			}
+			for i := p.MaxN; i < len(group); i++ {
+				over[group[i].Ref] = true
+				dec.Delete = append(dec.Delete, Candidate{
+					Ref: group[i].Ref, Digest: group[i].Digest,
+					LastUsed: group[i].effLastUsed(), Reason: "max_n_exceeded",
+				})
+			}
+		}
+		if len(over) > 0 {
+			var rest []Record
+			for _, r := range remaining {
+				if !over[r.Ref] {
+					rest = append(rest, r)
+				}
+			}
+			remaining = rest
+		}
+	}
+
 	// keep-N most-recently-used tags per repository.
 	if p.KeepN > 0 {
-		byRepo := map[string][]Record{}
-		for _, r := range remaining {
-			byRepo[r.Repo] = append(byRepo[r.Repo], r)
-		}
 		protected := map[string]bool{}
-		for _, group := range byRepo {
-			sort.Slice(group, func(i, j int) bool {
-				ti, tj := group[i].effLastUsed(), group[j].effLastUsed()
-				if ti.Equal(tj) {
-					return group[i].Ref < group[j].Ref
-				}
-				return ti.After(tj) // most recent first
-			})
+		for _, group := range groupByRepo(remaining) {
+			sortByRecency(group)
 			for i := 0; i < len(group) && i < p.KeepN; i++ {
 				protected[group[i].Ref] = true
 				dec.Keep = append(dec.Keep, Kept{Ref: group[i].Ref, Reason: "keep_n_recent"})
