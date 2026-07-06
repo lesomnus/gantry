@@ -57,9 +57,7 @@ func TestManagerWatchPlanLive(t *testing.T) {
 	}
 	defer ix.Close()
 
-	m := NewManager(ix, map[string]down.Engine{"docker": eng},
-		Policy{MaxAge: time.Hour, KeepN: 0},
-		Schedule{Interval: time.Hour, MinInterval: time.Second})
+	m := mgr1("docker", eng, ix, Policy{MaxAge: time.Hour, KeepN: 0}, Schedule{Interval: time.Hour, MinInterval: time.Second})
 
 	wctx, wcancel := context.WithCancel(ctx)
 	defer wcancel()
@@ -103,7 +101,7 @@ func TestManagerWatchPlanLive(t *testing.T) {
 	// Stamp it old so age alone wouldn't save it, then make it a candidate.
 	_ = ix.Touch("docker", tmpTag, time.Now().Add(-48*time.Hour))
 
-	dec, err := m.Plan(ctx, "docker", Policy{MaxAge: time.Hour, KeepN: 0})
+	dec, err := m.Plan(ctx, "docker", nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}

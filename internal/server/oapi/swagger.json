@@ -179,7 +179,7 @@
             "retention.Kept": {
                 "properties": {
                     "reason": {
-                        "description": "in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled",
+                        "description": "in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged",
                         "type": "string"
                     },
                     "ref": {
@@ -199,27 +199,6 @@
                     },
                     "value": {
                         "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "retention.PolicyStatus": {
-                "properties": {
-                    "keep_n": {
-                        "type": "integer"
-                    },
-                    "max_age": {
-                        "type": "string"
-                    },
-                    "max_n": {
-                        "type": "integer"
-                    },
-                    "pins": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
                     }
                 },
                 "type": "object"
@@ -259,6 +238,30 @@
                 },
                 "type": "object"
             },
+            "retention.RuleStatus": {
+                "properties": {
+                    "keep_n": {
+                        "type": "integer"
+                    },
+                    "max_age": {
+                        "type": "string"
+                    },
+                    "max_n": {
+                        "type": "integer"
+                    },
+                    "pins": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "repo": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "retention.ScheduleStatus": {
                 "properties": {
                     "grace": {
@@ -276,11 +279,21 @@
             "retention.Status": {
                 "properties": {
                     "enabled": {
-                        "description": "scheduler running (interval \u003e 0)",
+                        "description": "at least one store has scheduling on",
                         "type": "boolean"
                     },
+                    "stores": {
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/retention.StoreStatus"
+                        },
+                        "type": "object"
+                    }
+                },
+                "type": "object"
+            },
+            "retention.StoreStatus": {
+                "properties": {
                     "grace_until": {
-                        "description": "age deletion held off until then",
                         "type": "string"
                     },
                     "last_run": {
@@ -289,11 +302,20 @@
                     "next_wake": {
                         "type": "string"
                     },
-                    "policy": {
-                        "$ref": "#/components/schemas/retention.PolicyStatus"
+                    "pins": {
+                        "type": "integer"
+                    },
+                    "records": {
+                        "type": "integer"
+                    },
+                    "rules": {
+                        "items": {
+                            "$ref": "#/components/schemas/retention.RuleStatus"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     },
                     "running": {
-                        "description": "a GC pass is executing right now",
                         "type": "boolean"
                     },
                     "schedule": {
@@ -301,24 +323,6 @@
                     },
                     "started": {
                         "type": "string"
-                    },
-                    "stores": {
-                        "additionalProperties": {
-                            "$ref": "#/components/schemas/retention.StoreCounts"
-                        },
-                        "description": "per-engine index sizes",
-                        "type": "object"
-                    }
-                },
-                "type": "object"
-            },
-            "retention.StoreCounts": {
-                "properties": {
-                    "pins": {
-                        "type": "integer"
-                    },
-                    "records": {
-                        "type": "integer"
                     }
                 },
                 "type": "object"

@@ -61,7 +61,7 @@ func TestStorePullStampsRetentionIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ix.Close() })
-	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
+	gc := testGCManager(set, ix, retention.Policy{}, retention.Schedule{})
 
 	js := warm.NewMemStore()
 	wmr := warm.NewWarmer(set, js, c.Worker)
@@ -108,7 +108,7 @@ func TestPinAPIPatterns(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ix.Close() })
-	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
+	gc := testGCManager(set, ix, retention.Policy{}, retention.Schedule{})
 	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 
 	do := func(method, body string) *httptest.ResponseRecorder {
@@ -165,7 +165,7 @@ func TestPinAPIRejectsInvalidPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ix.Close() })
-	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
+	gc := testGCManager(set, ix, retention.Policy{}, retention.Schedule{})
 	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 
 	rr := httptest.NewRecorder()

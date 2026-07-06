@@ -49,14 +49,20 @@ func (f *fakeEng) removed() []string {
 	return append([]string(nil), f.rmed...)
 }
 
+// mgr1 builds a single-store Manager whose only rule is a catch-all "**" carrying
+// the given Policy, so the legacy single-policy tests keep working.
+func mgr1(name string, eng down.Engine, ix *Index, p Policy, sch Schedule) *Manager {
+	return NewManager([]Store{{Name: name, Engine: eng, Index: ix, Rules: blanketRules(p), Schedule: sch}})
+}
+
 func TestManagerPlanApply(t *testing.T) {
 	ix := openTemp(t)
 	_ = ix.Touch("d", "r/a:old", time.Now().Add(-100*time.Hour))
 	_ = ix.Touch("d", "r/a:recent", time.Now())
 	eng := &fakeEng{name: "d"}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{MaxAge: time.Hour}, Schedule{})
+	m := mgr1("d", eng, ix, Policy{MaxAge: time.Hour}, Schedule{})
 
-	dec, err := m.Plan(context.Background(), "d", m.policy)
+	dec, err := m.Plan(context.Background(), "d", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +88,7 @@ func TestSchedulerIdlesAndWakesOnEvent(t *testing.T) {
 	ix := openTemp(t)
 	_ = ix.Touch("d", "r/a:1", time.Now()) // recent: won't age out for an hour
 	eng := &fakeEng{name: "d"}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{MaxAge: time.Hour},
-		Schedule{Interval: 10 * time.Second, MinInterval: time.Millisecond})
+	m := mgr1("d", eng, ix, Policy{MaxAge: time.Hour}, Schedule{Interval: 10 * time.Second, MinInterval: time.Millisecond})
 	var runs int32
 	m.onRun = func(Decision) { atomic.AddInt32(&runs, 1) }
 
@@ -107,8 +112,7 @@ func TestSchedulerWakesAtAgeDeadline(t *testing.T) {
 	// ages out ~80ms after start; cap is large so the wake must be deadline-driven.
 	_ = ix.Touch("d", "r/a:1", time.Now().Add(-(200*time.Millisecond - 80*time.Millisecond)))
 	eng := &fakeEng{name: "d"}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{MaxAge: 200 * time.Millisecond},
-		Schedule{Interval: 10 * time.Second, MinInterval: time.Millisecond})
+	m := mgr1("d", eng, ix, Policy{MaxAge: 200 * time.Millisecond}, Schedule{Interval: 10 * time.Second, MinInterval: time.Millisecond})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -132,7 +136,7 @@ func TestWatcherStampsIndex(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{}, Schedule{})
+	m := mgr1("d", eng, ix, Policy{}, Schedule{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m.StartWatchers(ctx)
@@ -155,7 +159,7 @@ func TestWatcherStatusStamps(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{}, Schedule{})
+	m := mgr1("d", eng, ix, Policy{}, Schedule{})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	m.StartWatchers(ctx)
@@ -179,8 +183,7 @@ func TestManagerStatusSchedulerFields(t *testing.T) {
 	ix := openTemp(t)
 	_ = ix.Touch("d", "r/a:1", time.Now())
 	eng := &fakeEng{name: "d"}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{MaxAge: time.Hour},
-		Schedule{Interval: time.Hour, MinInterval: time.Minute, Grace: time.Hour})
+	m := mgr1("d", eng, ix, Policy{MaxAge: time.Hour}, Schedule{Interval: time.Hour, MinInterval: time.Minute, Grace: time.Hour})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go m.StartScheduler(ctx)
@@ -188,15 +191,19 @@ func TestManagerStatusSchedulerFields(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		st := m.Status()
-		if !st.LastRun.IsZero() && !st.NextWake.IsZero() {
+		ss := st.Stores["d"]
+		if !ss.LastRun.IsZero() && !ss.NextWake.IsZero() {
 			if !st.Enabled {
 				t.Error("enabled must be true with a positive interval")
 			}
-			if st.GraceUntil.IsZero() {
+			if ss.GraceUntil.IsZero() {
 				t.Error("grace_until must be set after start")
 			}
-			if st.Schedule.Interval != "1h0m0s" {
-				t.Errorf("schedule.interval = %q", st.Schedule.Interval)
+			if ss.Schedule.Interval != "1h0m0s" {
+				t.Errorf("schedule.interval = %q", ss.Schedule.Interval)
+			}
+			if len(ss.Rules) != 1 || ss.Rules[0].Repo != "**" {
+				t.Errorf("per-store rules not surfaced: %+v", ss.Rules)
 			}
 			return
 		}
@@ -220,11 +227,11 @@ func TestApplyEmitsAuditEvents(t *testing.T) {
 	ix := openTemp(t)
 	_ = ix.Touch("d", "r/a:old", time.Now().Add(-100*time.Hour))
 	eng := &fakeEng{name: "d"}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{MaxAge: time.Hour}, Schedule{})
+	m := mgr1("d", eng, ix, Policy{MaxAge: time.Hour}, Schedule{})
 	rec := &recRecorder{}
 	m.SetRecorder(rec)
 
-	dec, err := m.Plan(context.Background(), "d", m.policy)
+	dec, err := m.Plan(context.Background(), "d", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
