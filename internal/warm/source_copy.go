@@ -2,6 +2,7 @@ package warm
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -18,14 +19,18 @@ import (
 type copySource struct {
 	from config.StoreConfig
 	to   config.StoreConfig
+	// fromRT/toRT are the resolved outbound transports (nil = library default),
+	// built once by NewSource so the TPM device is not reopened per layer.
+	fromRT http.RoundTripper
+	toRT   http.RoundTripper
 }
 
 func (s *copySource) pullOpts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, registryAuth(s.from), s.from.Insecure)
+	return baseOpts(ctx, registryAuth(s.from), s.fromRT)
 }
 
 func (s *copySource) pushOpts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, registryAuth(s.to), s.to.Insecure)
+	return baseOpts(ctx, registryAuth(s.to), s.toRT)
 }
 
 func (s *copySource) Resolve(ctx context.Context, src, _ name.Reference, platforms []string) (*Plan, error) {

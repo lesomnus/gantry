@@ -2,7 +2,6 @@ package verify
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -18,6 +17,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/notaryproject/notation-go"
 	notationregistry "github.com/notaryproject/notation-go/registry"
 	"github.com/notaryproject/notation-go/verifier"
@@ -123,7 +123,10 @@ func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, sr
 
 // repo builds a notation repository over the source registry, matching the
 // ggcr copy path's wiring for that store: basic auth when credentials are set,
-// else the docker keychain; insecure covers plain-HTTP and self-signed.
+// else the docker keychain, and the store's outbound transport (TPM mTLS,
+// private-CA verification, or self-signed skip). Sharing xport.Transport with
+// the copy path is essential: a store fronted by mTLS or a private CA must be
+// reachable for verification too, or admission would reject every job from it.
 func (n *notaryVerifier) repo(from config.StoreConfig, ref name.Reference) (notationregistry.Repository, error) {
 	r, err := remote.NewRepository(ref.Context().Name())
 	if err != nil {
@@ -136,10 +139,14 @@ func (n *notaryVerifier) repo(from config.StoreConfig, ref name.Reference) (nota
 	} else {
 		client.Credential = keychainCredential(ref.Context())
 	}
+	rt, err := xport.Transport(from)
+	if err != nil {
+		return nil, err
+	}
+	if rt != nil {
+		client.Client = &http.Client{Transport: rt}
+	}
 	if from.Insecure {
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		client.Client = &http.Client{Transport: t}
 		r.PlainHTTP = true
 	}
 	r.Client = client

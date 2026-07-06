@@ -3,6 +3,7 @@ package warm
 import (
 	"context"
 	"io"
+	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -15,11 +16,12 @@ import (
 // and persists it from upstream. Every blob is read to EOF (a HEAD or partial
 // read would leave the cache cold).
 type proxySource struct {
-	to config.StoreConfig
+	to   config.StoreConfig
+	toRT http.RoundTripper // resolved outbound transport (nil = library default)
 }
 
 func (s *proxySource) opts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, registryAuth(s.to), s.to.Insecure)
+	return baseOpts(ctx, registryAuth(s.to), s.toRT)
 }
 
 func (s *proxySource) Resolve(ctx context.Context, _, dst name.Reference, platforms []string) (*Plan, error) {

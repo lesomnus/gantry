@@ -18,6 +18,7 @@ import (
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
+	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/otx"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/z"
@@ -208,6 +209,7 @@ func (w *Warmer) Stop() {
 	close(w.stop)
 	close(w.jobs)
 	w.wg.Wait()
+	xport.CloseTPM() // release any TPM devices opened for mTLS transports
 	if w.metrics.gauges != nil {
 		_ = w.metrics.gauges.Unregister()
 	}

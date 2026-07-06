@@ -82,6 +82,12 @@ func (c *Config) Evaluate() error {
 					}
 				}
 			}
+			if err := s.validateTPM(); err != nil {
+				return z.Err(err, "store %q", name)
+			}
+			if s.HasTPM() {
+				z.FallbackP(&s.TPMDevice, "/dev/tpmrm0")
+			}
 		case "docker", "containerd":
 			// engine store; address is validated when the store is dialed
 		default:

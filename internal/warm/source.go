@@ -2,7 +2,6 @@ package warm
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/z"
 )
 
@@ -41,13 +41,27 @@ type Source interface {
 }
 
 // NewSource builds a registry copy/proxy between two registry stores, selected
-// by the destination store's mode.
+// by the destination store's mode. The per-store outbound transport (TPM mTLS or
+// a TLS-skip transport for self-signed registries) is resolved once here and
+// reused for every request the source makes.
 func NewSource(from, to config.StoreConfig) (Source, error) {
 	switch to.Mode {
 	case "", "copy":
-		return &copySource{from: from, to: to}, nil
+		fromRT, err := xport.Transport(from)
+		if err != nil {
+			return nil, z.Err(err, "store %q outbound transport", from.Name)
+		}
+		toRT, err := xport.Transport(to)
+		if err != nil {
+			return nil, z.Err(err, "store %q outbound transport", to.Name)
+		}
+		return &copySource{from: from, to: to, fromRT: fromRT, toRT: toRT}, nil
 	case "proxy":
-		return &proxySource{to: to}, nil
+		toRT, err := xport.Transport(to)
+		if err != nil {
+			return nil, z.Err(err, "store %q outbound transport", to.Name)
+		}
+		return &proxySource{to: to, toRT: toRT}, nil
 	default:
 		return nil, fmt.Errorf("store %q: unknown mode %q", to.Name, to.Mode)
 	}
@@ -62,26 +76,23 @@ func registryAuth(c config.StoreConfig) authn.Authenticator {
 	return nil
 }
 
-// baseOpts builds remote options. A nil auth falls back to the docker keychain
-// (used for upstream pulls); insecure adds a TLS-skip transport for self-signed
-// cache registries (plain HTTP is driven by name.Insecure on the reference).
-func baseOpts(ctx context.Context, auth authn.Authenticator, insecure bool) []remote.Option {
+// baseOpts builds remote options: context, credentials, and an optional custom
+// transport. A nil auth falls back to the docker keychain (used for upstream
+// pulls). rt, when non-nil, is the store's outbound transport (TPM mTLS or a
+// TLS-skip transport for self-signed registries); ggcr dials both the registry
+// and its token endpoint through it. Plain HTTP is driven by name.Insecure on
+// the reference.
+func baseOpts(ctx context.Context, auth authn.Authenticator, rt http.RoundTripper) []remote.Option {
 	opts := []remote.Option{remote.WithContext(ctx)}
 	if auth != nil {
 		opts = append(opts, remote.WithAuth(auth))
 	} else {
 		opts = append(opts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	}
-	if insecure {
-		opts = append(opts, remote.WithTransport(insecureTransport()))
+	if rt != nil {
+		opts = append(opts, remote.WithTransport(rt))
 	}
 	return opts
-}
-
-func insecureTransport() http.RoundTripper {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	return t
 }
 
 // resolvePlan walks ref (image or index) restricted to the selected platforms
