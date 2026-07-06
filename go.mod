@@ -11,6 +11,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-containerregistry v0.21.7
+	github.com/google/go-tpm v0.9.8
 	github.com/lesomnus/mkot v0.0.0-20260702145326-2198e788ed64
 	github.com/lesomnus/mkot/otlp v0.0.0-20260702145326-2198e788ed64
 	github.com/lesomnus/mkot/pretty v0.0.0-20260702145326-2198e788ed64

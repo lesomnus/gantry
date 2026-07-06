@@ -8,7 +8,6 @@ package health
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"net/http"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/store"
+	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/otx"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -55,12 +55,6 @@ type Checker struct {
 	probeT time.Duration
 	ready  []string
 
-	// insecureRT is a single TLS-skipping transport reused across all insecure
-	// registry probes. Sharing it (rather than cloning one per probe) lets the
-	// idle keep-alive connections be pooled and reused instead of piling up
-	// until their 90s idle timeout.
-	insecureRT http.RoundTripper
-
 	now   func() time.Time
 	probe func(ctx context.Context, c config.StoreConfig) error // overridable in tests
 
@@ -85,13 +79,12 @@ type entry struct {
 // NewChecker builds a Checker over the configured stores.
 func NewChecker(stores *store.Set, opts Options) *Checker {
 	ck := &Checker{
-		stores:     stores,
-		ttl:        opts.CacheTTL,
-		probeT:     opts.ProbeTimeout,
-		ready:      opts.ReadyStores,
-		insecureRT: insecureTransport(),
-		now:        time.Now,
-		entries:    make(map[string]*entry),
+		stores:  stores,
+		ttl:     opts.CacheTTL,
+		probeT:  opts.ProbeTimeout,
+		ready:   opts.ReadyStores,
+		now:     time.Now,
+		entries: make(map[string]*entry),
 	}
 	if ck.ttl <= 0 {
 		ck.ttl = 5 * time.Second
@@ -187,7 +180,10 @@ func (ck *Checker) probeStore(ctx context.Context, c config.StoreConfig) error {
 
 // pingRegistry does a GET /v2/ against the registry. A 200 or a 401 auth
 // challenge both count as reachable; any other status or a transport error is
-// unhealthy. Auth is intentionally not attempted — reachability is the signal.
+// unhealthy. Bearer auth is intentionally not attempted — reachability is the
+// signal — but the store's real transport (TPM mTLS, private CA, or self-signed
+// skip) IS used, or an mTLS/private-CA registry would be probed with the wrong
+// transport and reported unhealthy while being perfectly reachable.
 func (ck *Checker) pingRegistry(ctx context.Context, c config.StoreConfig) error {
 	var nopts []name.Option
 	if c.Insecure {
@@ -197,18 +193,15 @@ func (ck *Checker) pingRegistry(ctx context.Context, c config.StoreConfig) error
 	if err != nil {
 		return err
 	}
-	// The shared insecure transport (pooled, reused) for self-signed/HTTP
-	// registries; the shared http.DefaultTransport for secure ones.
-	rt := http.DefaultTransport
-	if c.Insecure {
-		rt = ck.insecureRT
+	// Shared with the copy/verify paths (pooled, reused). nil = the library
+	// default transport for a plain secure registry.
+	rt, err := xport.Transport(c)
+	if err != nil {
+		return err
+	}
+	if rt == nil {
+		rt = http.DefaultTransport
 	}
 	_, err = transport.Ping(ctx, reg, rt)
 	return err
-}
-
-func insecureTransport() http.RoundTripper {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	return t
 }

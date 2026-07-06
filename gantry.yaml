@@ -31,6 +31,20 @@ stores:
   # Source registry (remote). host defaults to the store name when omitted.
   docker.io: { kind: "oci" }
 
+  # Private registry reached with mutual TLS whose client key is sealed in a TPM.
+  # gantry presents the client certificate — and signs the TLS handshake with the
+  # TPM-held key — for every outbound request to this registry, including the
+  # bearer-token exchange. The key never leaves the device.
+  # internal:
+  #   kind: "oci"
+  #   host: "registry.internal"
+  #   tpm: "/dev/tpmrm0"            # TPM device (default; omit to use it)
+  #   tpm_handle: "0x81000001"     # persistent handle of the client key
+  #   tpm_cert: "/etc/gantry/device.crt"  # client cert (leaf + chain), PEM; its
+  #                                        # public key must match the TPM key
+  #   ca_cert: "/etc/gantry/ca.crt"       # verify the registry/token server
+  #                                        # (usable on its own, without TPM)
+
   # Cache registry gantry fills and engines pull from.
   cache:
     kind: "oci"

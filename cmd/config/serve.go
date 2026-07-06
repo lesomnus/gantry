@@ -1,5 +1,11 @@
 package config
 
+import (
+	"strconv"
+
+	"github.com/lesomnus/z"
+)
+
 // ServeConfig configures the `serve` subcommand's HTTP API. The image stores
 // and the worker pool are top-level config sections (Config.Stores, Config.Worker).
 type ServeConfig struct {
@@ -186,6 +192,20 @@ type StoreConfig struct {
 	// source registry (nil = inherit the global default).
 	Verify *StoreVerify `yaml:"verify"`
 
+	// --- mTLS client auth via a TPM-backed key (oci) ---
+	// When TPMHandle is set, gantry authenticates to this registry — and to its
+	// bearer-token endpoint — with a client certificate whose private key never
+	// leaves the TPM. The key is addressed by its persistent handle; the leaf (+
+	// chain) is read from TPMCert and its public key must match the key at the
+	// handle. Applies to every outbound direction this store is used in (pull,
+	// push, and referrer copy).
+	TPMDevice string `yaml:"tpm"`        // TPM device path (default /dev/tpmrm0)
+	TPMHandle string `yaml:"tpm_handle"` // persistent handle, hex e.g. "0x81000001"
+	TPMCert   string `yaml:"tpm_cert"`   // client certificate (leaf + chain), PEM
+	// CACert verifies the registry/token server. Empty uses the system roots (or
+	// is skipped when insecure is set).
+	CACert string `yaml:"ca_cert"`
+
 	// --- engine (docker / containerd) ---
 	Address string `yaml:"address"`
 	// Namespace is the containerd namespace (e.g. "k8s.io" for k3s, "moby" for docker's).
@@ -200,6 +220,47 @@ func (s StoreConfig) IsRegistry() bool { return s.Kind == "oci" }
 
 // IsEngine reports whether the store is a daemon gantry triggers to pull.
 func (s StoreConfig) IsEngine() bool { return s.Kind == "docker" || s.Kind == "containerd" }
+
+// HasTPM reports whether the store authenticates with a TPM-backed client
+// certificate (mTLS).
+func (s StoreConfig) HasTPM() bool { return s.TPMHandle != "" }
+
+// TPMHandleValue parses the persistent handle. It accepts hex ("0x81000001") or
+// decimal; the value must fit in 32 bits, as a TPM handle is a uint32.
+func (s StoreConfig) TPMHandleValue() (uint32, error) {
+	v, err := strconv.ParseUint(s.TPMHandle, 0, 32)
+	if err != nil {
+		return 0, z.Err(err, "tpm_handle %q is not a valid 32-bit integer (use hex, e.g. 0x81000001)", s.TPMHandle)
+	}
+	return uint32(v), nil
+}
+
+// validateTPM checks the TPM mTLS fields are internally consistent. ca_cert is
+// intentionally excluded from the trigger: it configures server verification and
+// is valid on its own (with or without a client certificate). The device and
+// certificate files are validated lazily on first use, so a missing TPM does not
+// block startup for stores that do not use it.
+func (s StoreConfig) validateTPM() error {
+	if s.TPMHandle == "" && s.TPMCert == "" && s.TPMDevice == "" {
+		return nil // no TPM client-certificate auth configured
+	}
+	if s.TPMHandle == "" {
+		return z.Err(nil, "tpm_handle is required when TPM mTLS is configured")
+	}
+	if s.TPMCert == "" {
+		return z.Err(nil, "tpm_cert is required when TPM mTLS is configured")
+	}
+	if s.Insecure {
+		// mTLS requires TLS, but insecure enables plain HTTP on the oras path
+		// (PlainHTTP) — the two are mutually exclusive and would silently drop the
+		// client certificate. To trust a self-signed mTLS server, set ca_cert.
+		return z.Err(nil, "insecure cannot be combined with TPM mTLS; use ca_cert to trust a self-signed server")
+	}
+	if _, err := s.TPMHandleValue(); err != nil {
+		return err
+	}
+	return nil
+}
 
 // WorkerConfig bounds the job worker pool that runs image moves.
 type WorkerConfig struct {

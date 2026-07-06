@@ -2,13 +2,13 @@ package warm
 
 import (
 	"context"
-	"crypto/tls"
 	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/z"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -52,12 +52,19 @@ func orasRepo(c config.StoreConfig, repo name.Repository) (*remote.Repository, e
 	} else {
 		client.Credential = keychainCredential(repo)
 	}
+	// Same outbound transport as the ggcr copy path: TPM mTLS when configured, a
+	// server-verification transport for private-CA/self-signed registries, else
+	// the library default. oras dials the token endpoint through client.Client
+	// too, so the client certificate is presented during token acquisition.
+	rt, err := xport.Transport(c)
+	if err != nil {
+		return nil, err
+	}
+	if rt != nil {
+		client.Client = &http.Client{Transport: rt}
+	}
 	if c.Insecure {
-		// Self-signed TLS parity with the ggcr copy path; plain-HTTP registries
-		// are covered by PlainHTTP.
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		client.Client = &http.Client{Transport: t}
+		// Plain-HTTP registries; self-signed TLS parity is handled by storeTransport.
 		r.PlainHTTP = true
 	}
 	r.Client = client
