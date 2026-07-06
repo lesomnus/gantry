@@ -5,7 +5,7 @@
 <h1 id="gantry-api">gantry API v1.0</h1>
 
 Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.
-A job copies an image `from` an OCI store `to` another; loading it onto a docker/containerd engine is a separate POST /v1/store/{name}/pull.
+A job moves an image `from` an OCI store into `to` — an OCI registry (gantry copies the blobs) or a docker/containerd engine (the daemon pulls it).
 
 # Authentication
 
@@ -951,7 +951,7 @@ curl -X POST /v1/job \
 
 `POST /v1/job`
 
-Copy an image from `from` (oci) into `to` (oci). To load the copied image onto a docker/containerd engine, call POST /v1/store/{name}/pull separately. Idempotent per identical move.
+Move an image from `from` (oci) into `to` — an oci registry (gantry copies the blobs) or a docker/containerd engine (the daemon pulls it). Idempotent per identical move.
 
 > Body parameter
 
@@ -1057,7 +1057,7 @@ curl -X POST /v1/job/plan \
 
 `POST /v1/job/plan`
 
-Resolves the same plan POST /v1/job would — store bindings, the rewritten cache ref, engine pull refs, signature verification with the pinned digest, referrer propagation — without moving bytes or creating a job. `coalesces` names the active job an identical submission would join.
+Resolves the same plan POST /v1/job would — store bindings, the destination-side ref (the rewritten cache ref, or the ref an engine destination is told to pull), the resolved platform(s), signature verification with the pinned digest, referrer propagation — without moving bytes or creating a job. `coalesces` names the active job an identical submission would join.
 
 > Body parameter
 
@@ -1624,6 +1624,7 @@ Tells one engine store to pull a reference, decoupled from the job pipeline (man
 
 ```json
 {
+  "platform": "linux/arm64",
   "ref": "docker.io/library/nginx:1.27"
 }
 ```
@@ -2383,11 +2384,11 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|copy_referrers|boolean|false|none|Copy the source's referrer artifacts (notation signatures) into `to` with<br>the source digest preserved, so the image still verifies against the cache.<br>Requires copying all platforms (the request must not narrow `platforms`).<br>Defaults to true when verification is enabled and `to` is a copy-mode store.|
+|copy_referrers|boolean|false|none|Copy the source's referrer artifacts (notation signatures) into `to` with<br>the source digest preserved, so the image still verifies against the cache.<br>Requires copying all platforms (the request must not narrow `platforms`).<br>Defaults to true when verification is enabled and `to` is a copy-mode store.<br>Registry destinations only.|
 |from|string|false|none|Source registry store name or host; defaults to the ref's registry.|
-|platforms|[string]|false|none|Platforms to move; defaults to the server platform when empty.|
+|platforms|[string]|false|none|Platforms to move. Registry destination: the platforms copied (empty = every<br>platform). Engine destination: the single platform the daemon pulls (empty =<br>the daemon host's platform; more than one is rejected).|
 |ref|string|true|none|Image reference to move (required).|
-|to|string|false|none|Destination registry store to copy into (required).|
+|to|string|false|none|Destination store (required): an oci registry (gantry copies the blobs in)<br>or a docker/containerd engine (the daemon is told to pull the image).|
 
 <h2 id="tocS_server.createJobResponse">server.createJobResponse</h2>
 <!-- backwards compatibility -->
@@ -2796,6 +2797,7 @@ BearerAuth
 
 ```json
 {
+  "platform": "linux/arm64",
   "ref": "docker.io/library/nginx:1.27"
 }
 
@@ -2805,6 +2807,7 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
+|platform|string|false|none|Platform to pull ("os/arch", e.g. "linux/arm64"); empty uses the daemon's<br>default. Passed through as-is — an unavailable platform is the daemon's error.|
 |ref|string|true|none|Image reference the engine store should pull (required).|
 
 <h2 id="tocS_server.storePullResponse">server.storePullResponse</h2>
@@ -3312,9 +3315,9 @@ what this store can do
 |---|---|---|---|---|
 |coalesces|string|false|none|active job an identical submit would join|
 |copy_referrers|boolean|false|none|none|
-|dst_ref|string|false|none|rewritten cache ref|
+|dst_ref|string|false|none|destination-side ref: the rewritten cache ref, or the ref the engine is told to pull|
 |from|string|false|none|none|
-|platforms|[string]|false|none|empty = all platforms|
+|platforms|[string]|false|none|registry dest: empty = all platforms; engine dest: the single platform pulled|
 |ref|string|false|none|none|
 |src_ref|string|false|none|source ref, digest-pinned when verified|
 |to|string|false|none|none|

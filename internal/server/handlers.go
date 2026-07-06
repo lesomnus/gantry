@@ -13,21 +13,27 @@ import (
 )
 
 type createJobRequest struct {
-	Ref       string   `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to move (required).
-	Platforms []string `json:"platforms" example:"linux/amd64,linux/arm64"`                   // Platforms to move; defaults to the server platform when empty.
-	From      string   `json:"from" example:"dockerhub"`                                      // Source registry store name or host; defaults to the ref's registry.
-	To        string   `json:"to" example:"local-cache"`                                      // Destination registry store to copy into (required).
+	Ref string `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to move (required).
+	// Platforms to move. Registry destination: the platforms copied (empty = every
+	// platform). Engine destination: the single platform the daemon pulls (empty =
+	// the daemon host's platform; more than one is rejected).
+	Platforms []string `json:"platforms" example:"linux/amd64,linux/arm64"`
+	From      string   `json:"from" example:"dockerhub"` // Source registry store name or host; defaults to the ref's registry.
+	// Destination store (required): an oci registry (gantry copies the blobs in)
+	// or a docker/containerd engine (the daemon is told to pull the image).
+	To string `json:"to" example:"local-cache"`
 	// Copy the source's referrer artifacts (notation signatures) into `to` with
 	// the source digest preserved, so the image still verifies against the cache.
 	// Requires copying all platforms (the request must not narrow `platforms`).
 	// Defaults to true when verification is enabled and `to` is a copy-mode store.
+	// Registry destinations only.
 	CopyReferrers *bool `json:"copy_referrers,omitempty"`
 }
 
 // handleCreateJob godoc
 //
 //	@Summary	Create a job
-//	@Description	Copy an image from `from` (oci) into `to` (oci). To load the copied image onto a docker/containerd engine, call POST /v1/store/{name}/pull separately. Idempotent per identical move.
+//	@Description	Move an image from `from` (oci) into `to` — an oci registry (gantry copies the blobs) or a docker/containerd engine (the daemon pulls it). Idempotent per identical move.
 //	@Tags		jobs
 //	@Accept		json
 //	@Produce	json
@@ -228,7 +234,7 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 // handlePlanJob godoc
 //
 //	@Summary	Dry-run a job admission
-//	@Description	Resolves the same plan POST /v1/job would — store bindings, the rewritten cache ref, engine pull refs, signature verification with the pinned digest, referrer propagation — without moving bytes or creating a job. `coalesces` names the active job an identical submission would join.
+//	@Description	Resolves the same plan POST /v1/job would — store bindings, the destination-side ref (the rewritten cache ref, or the ref an engine destination is told to pull), the resolved platform(s), signature verification with the pinned digest, referrer propagation — without moving bytes or creating a job. `coalesces` names the active job an identical submission would join.
 //	@Tags		jobs
 //	@Accept		json
 //	@Produce	json

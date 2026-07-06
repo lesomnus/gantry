@@ -101,6 +101,18 @@ func (s *Set) Config(name string) (config.StoreConfig, bool) {
 	return c, ok
 }
 
+// PutEngine registers (or replaces) an engine store with a caller-supplied
+// Engine, bypassing the daemon dial. Intended for tests that need a fake daemon
+// behind the store set.
+func (s *Set) PutEngine(c config.StoreConfig, eng down.Engine) {
+	if _, exists := s.byName[c.Name]; !exists {
+		s.order = append(s.order, c.Name)
+		sort.Strings(s.order)
+	}
+	s.byName[c.Name] = c
+	s.engines[c.Name] = eng
+}
+
 // Engines returns the dialed engine clients keyed by store name (for retention).
 func (s *Set) Engines() map[string]down.Engine {
 	out := make(map[string]down.Engine, len(s.engines))

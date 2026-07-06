@@ -15,7 +15,7 @@ import (
 //	@title			gantry API
 //	@version		1.0
 //	@description	Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.
-//	@description	A job copies an image `from` an OCI store `to` another; loading it onto a docker/containerd engine is a separate POST /v1/store/{name}/pull.
+//	@description	A job moves an image `from` an OCI store into `to` — an OCI registry (gantry copies the blobs) or a docker/containerd engine (the daemon pulls it).
 
 //	@securityDefinitions.apikey	BearerAuth
 //	@in							header

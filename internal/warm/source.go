@@ -95,6 +95,16 @@ func baseOpts(ctx context.Context, auth authn.Authenticator, rt http.RoundTrippe
 	return opts
 }
 
+// upstreamPlan resolves the layer plan for ref directly against its source
+// store — used to estimate an engine pull's size without a copy Source.
+func upstreamPlan(ctx context.Context, from config.StoreConfig, ref name.Reference, platforms []string) (*Plan, error) {
+	rt, err := xport.Transport(from)
+	if err != nil {
+		return nil, err
+	}
+	return resolvePlan(ctx, ref, platforms, baseOpts(ctx, registryAuth(from), rt))
+}
+
 // resolvePlan walks ref (image or index) restricted to the selected platforms
 // and lists every layer + config blob with its compressed size. No blob bytes
 // are downloaded; sizes come from the manifest descriptors.

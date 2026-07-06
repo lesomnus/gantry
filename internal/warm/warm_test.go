@@ -194,7 +194,7 @@ func TestCopyLayersReportsLayerError(t *testing.T) {
 	}
 	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
 	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
-	ex := &jobExec{src: src_ref, dst: dst_ref}
+	ex := &jobExec{src: src_ref, cacheRef: dst_ref}
 	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}, {Digest: "sha256:2"}, {Digest: "sha256:3"}}}
 
 	// The failing layer self-cancels the job ctx while the dispatcher is still

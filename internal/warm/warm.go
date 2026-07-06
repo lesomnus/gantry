@@ -7,14 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"runtime"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/internal/xport"
@@ -54,12 +53,16 @@ func newMetrics(ctx context.Context) *metrics {
 	return &metrics{bytes: bytes, duration: duration, active: active}
 }
 
-// Request is a job submission: copy Ref from store From into store To. From and
-// To are registry stores (a declared name or a bare host). Distributing the
-// copied image onto an engine is a separate, explicit action (POST
-// /v1/store/{name}/pull), not part of a job.
+// Request is a job submission: move Ref from store From into store To. From is
+// a registry store (a declared name or a bare host). To is any declared store —
+// an oci registry (gantry copies the blobs in) or a docker/containerd engine
+// (the daemon is told to pull). The user just "moves" the image; how it lands
+// depends on what the destination can do.
 type Request struct {
-	Ref       string
+	Ref string
+	// Platforms selects what moves. Registry destination: the platforms copied
+	// (empty = every platform). Engine destination: the single platform the
+	// daemon pulls (empty = the daemon host's platform; more than one errors).
 	Platforms []string
 	From      string
 	To        string
@@ -67,18 +70,19 @@ type Request struct {
 	// signatures) into the cache alongside the image, preserving the source
 	// digest so the signatures still verify there. nil defaults to on when
 	// verification is enabled and the destination is a copy-mode cache.
+	// Registry destinations only.
 	CopyReferrers *bool
 }
 
 // jobExec is the resolved plan for a job, computed at submit time.
 type jobExec struct {
 	from          config.StoreConfig
-	to            config.StoreConfig
-	hasCache      bool
+	dst           dest // the destination; pusher or puller by capability
 	copyReferrers bool
-	src           name.Reference
-	dst           name.Reference        // valid only when hasCache
-	cacheIdx      int                   // index of the registry transfer, or -1
+	src           name.Reference        // source ref; digest-pinned when verified
+	cacheRef      name.Reference        // pusher dest: the rewritten in-store ref
+	pullRef       string                // puller dest: the ref the engine is told to pull
+	platform      string                // puller dest: the resolved platform
 	verification  *VerificationSnapshot // admission-time verification, stamped onto the Job
 
 	// committed is the digest the cache copy landed at, set by runCopy.
@@ -96,8 +100,9 @@ type Warmer struct {
 	idgen    func() string
 	srcOpts  []name.Option // parse options for the source ref (tests inject name.Insecure)
 	metrics  *metrics
-	verifier verify.Verifier // source-signature verification (nil = disabled)
-	rec      Recorder        // audit log (nil = disabled)
+	pullHook func(engine, ref string) // notified after a successful engine-destination pull (retention)
+	verifier verify.Verifier          // source-signature verification (nil = disabled)
+	rec      Recorder                 // audit log (nil = disabled)
 
 	base context.Context
 	stop chan struct{} // closed by Stop; ends goroutines not fed by the jobs channel
@@ -119,6 +124,10 @@ func NewWarmer(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Warme
 		stop:    make(chan struct{}),
 	}
 }
+
+// SetPullHook registers a callback invoked (engine name, ref) after a job's
+// engine destination completes its pull — used to stamp the retention index.
+func (w *Warmer) SetPullHook(fn func(engine, ref string)) { w.pullHook = fn }
 
 // SetVerifier enables source-signature verification at job admission. Must be
 // set before Start/Submit.
@@ -230,7 +239,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 		return JobSnapshot{}, false, err
 	}
 
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name)
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name())
 	if snap, ok := w.store.Active(key); ok {
 		return snap, false, nil
 	}
@@ -254,7 +263,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 			if ex.verification != nil {
 				digest = ex.verification.Digest
 			}
-			w.rec.JobAdmitted(req.Ref, ex.from.Name, transferFrom(ex), digest)
+			w.rec.JobAdmitted(req.Ref, ex.from.Name, ex.dst.Name(), digest)
 		}
 		return snap, true, nil
 	default:
@@ -289,8 +298,8 @@ type PlanResult struct {
 	From          string                `json:"from"`
 	To            string                `json:"to,omitempty"`
 	SrcRef        string                `json:"src_ref"`           // source ref, digest-pinned when verified
-	DstRef        string                `json:"dst_ref,omitempty"` // rewritten cache ref
-	Platforms     []string              `json:"platforms"`         // empty = all platforms
+	DstRef        string                `json:"dst_ref,omitempty"` // destination-side ref: the rewritten cache ref, or the ref the engine is told to pull
+	Platforms     []string              `json:"platforms"`         // registry dest: empty = all platforms; engine dest: the single platform pulled
 	CopyReferrers bool                  `json:"copy_referrers"`
 	Verification  *VerificationSnapshot `json:"verification,omitempty"`
 	Coalesces     string                `json:"coalesces,omitempty"` // active job an identical submit would join
@@ -305,33 +314,34 @@ func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
 	out := PlanResult{
 		Ref:           req.Ref,
 		From:          ex.from.Name,
+		To:            ex.dst.Name(),
 		SrcRef:        ex.src.Name(),
 		Platforms:     platforms,
 		CopyReferrers: ex.copyReferrers,
 		Verification:  ex.verification,
 	}
-	if ex.hasCache {
-		out.To = ex.to.Name
-		out.DstRef = ex.dst.Name()
+	switch {
+	case ex.cacheRef != nil:
+		out.DstRef = ex.cacheRef.Name()
+	case ex.pullRef != "":
+		out.DstRef = ex.pullRef
 	}
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name)
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name())
 	if snap, ok := w.store.Active(key); ok {
 		out.Coalesces = snap.ID
 	}
 	return out, nil
 }
 
-// plan resolves the request into an execution plan and the initial transfer rows.
+// plan resolves the request into an execution plan and the initial transfer row.
 func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, []string, error) {
-	platforms := w.platforms(req.Platforms)
-
 	base, err := name.ParseReference(req.Ref, w.srcOpts...)
 	if err != nil {
 		return nil, nil, nil, z.Err(err, "parse ref %q", req.Ref)
 	}
 	repo, id := base.Context().RepositoryStr(), identifier(base)
 
-	ex := &jobExec{cacheIdx: -1}
+	ex := &jobExec{}
 
 	// source (from)
 	fromKey := req.From
@@ -347,30 +357,60 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		return nil, nil, nil, z.Err(err, "source ref")
 	}
 
-	var transfers []*Transfer
+	// destination (to): a registry gantry pushes into, or an engine that pulls.
+	if req.To == "" {
+		return nil, nil, nil, fmt.Errorf("job has nothing to do: set `to`")
+	}
+	ex.dst, err = resolveDest(w.stores, req.To)
+	if err != nil {
+		return nil, nil, nil, z.Err(err, "to")
+	}
 
-	// cache fill (to)
-	if req.To != "" {
-		ex.to, err = w.stores.Registry(req.To)
+	// The destination-side reference is derived from the TAG (before any digest
+	// pinning below), so the destination stays tag-named; only the source pull is
+	// anchored to the verified digest.
+	platforms := req.Platforms
+	var transfers []*Transfer
+	switch d := ex.dst.(type) {
+	case pusher:
+		ex.cacheRef, err = d.dstRef(ex.src)
 		if err != nil {
-			return nil, nil, nil, z.Err(err, "to")
+			return nil, nil, nil, z.Err(err, "rewrite into %q", d.Name())
 		}
-		ex.dst, err = Rewrite(ex.to.Rewrite, ex.to.Host, ex.src, ex.to.Insecure)
-		if err != nil {
-			return nil, nil, nil, z.Err(err, "rewrite into %q", ex.to.Name)
-		}
-		ex.hasCache = true
-		ex.cacheIdx = len(transfers)
 		transfers = append(transfers, &Transfer{
-			Store: ex.to.Name, Kind: "oci", From: ex.from.Name,
-			Ref: ex.dst.Name(), State: "pending",
+			Store: d.Name(), Kind: d.Kind(), From: ex.from.Name,
+			Ref: ex.cacheRef.Name(), State: "pending",
 		})
+	case puller:
+		// An engine pulls exactly one platform; an empty request means the
+		// daemon host's own. The value is handed to the daemon as-is — a
+		// platform the image lacks is the daemon's error, surfaced by the pull.
+		if len(platforms) > 1 {
+			return nil, nil, nil, fmt.Errorf("engine destination %q pulls a single platform; got %d", d.Name(), len(platforms))
+		}
+		if len(platforms) == 0 {
+			p, err := d.hostPlatform(ctx)
+			if err != nil {
+				return nil, nil, nil, z.Err(err, "resolve host platform of %q", d.Name())
+			}
+			platforms = []string{p}
+		}
+		ex.platform = platforms[0]
+		ex.pullRef, err = d.pullRef(ex.src, ex.from)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		transfers = append(transfers, &Transfer{
+			Store: d.Name(), Kind: d.Kind(), From: ex.from.Name,
+			Ref: ex.pullRef, State: "pending",
+		})
+	default:
+		return nil, nil, nil, fmt.Errorf("store %q can neither be pushed to nor pull", ex.dst.Name())
 	}
 
 	// Verify the source signature (fail-closed) before admitting the job, and pin
-	// ex.src to the verified digest so the copy moves exactly what was
-	// verified. Runs after the cache (dst) ref is derived from the tag, so the
-	// cache stays tag-named; only the source pull is pinned to the digest.
+	// ex.src to the verified digest so the move covers exactly what was verified.
+	// Runs after the destination ref is derived from the tag (see above).
 	verified := false
 	if w.verifier != nil {
 		res, err := w.verifier.Verify(ctx, ex.from, ex.src)
@@ -385,8 +425,8 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 			// A proxy-mode cache reads through by tag and ignores the pinned source
 			// digest, so it could fill from a different (unverified) image if the tag
 			// moves after verification. Refuse rather than move unverified bytes.
-			if ex.hasCache && ex.to.Mode == "proxy" {
-				return nil, nil, nil, fmt.Errorf("signature verification requires a copy-mode destination; store %q is proxy", ex.to.Name)
+			if rd, ok := ex.dst.(*registryDest); ok && rd.isProxy() {
+				return nil, nil, nil, fmt.Errorf("signature verification requires a copy-mode destination; store %q is proxy", rd.Name())
 			}
 			ex.src = ex.src.Context().Digest(dg.String())
 			log.From(w.rootCtx()).Info("source signature verified",
@@ -396,49 +436,33 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 
 	// Referrer propagation (signatures travel with the image): copy the source's
 	// referrer artifacts into the cache with the source digest preserved — which
-	// requires copying the image verbatim, i.e. every platform.
-	if req.CopyReferrers != nil && *req.CopyReferrers && !ex.hasCache {
-		return nil, nil, nil, fmt.Errorf("copy_referrers requires a copy-mode destination; set `to`")
+	// requires copying the image verbatim, i.e. every platform. Registry
+	// destinations only: an engine pull has no referrer transport.
+	rd, isRegistry := ex.dst.(*registryDest)
+	if req.CopyReferrers != nil && *req.CopyReferrers && !isRegistry {
+		return nil, nil, nil, fmt.Errorf("copy_referrers requires a registry destination; store %q is an engine", ex.dst.Name())
 	}
-	if ex.hasCache {
+	if isRegistry {
 		if req.CopyReferrers != nil {
 			ex.copyReferrers = *req.CopyReferrers
 		} else {
-			// Default on only when this job actually verified a signature and
-			// neither the request nor the config narrowed the platform set: the
-			// pinned digest still protects a narrowed copy, only signature
-			// propagation is skipped.
-			ex.copyReferrers = verified && ex.to.Mode != "proxy" &&
-				len(req.Platforms) == 0 && len(w.wc.Platforms) == 0
+			// Default on only when this job actually verified a signature and the
+			// request did not narrow the platform set: the pinned digest still
+			// protects a narrowed copy, only signature propagation is skipped.
+			ex.copyReferrers = verified && !rd.isProxy() && len(req.Platforms) == 0
 		}
 		if ex.copyReferrers {
-			if ex.to.Mode == "proxy" {
-				return nil, nil, nil, fmt.Errorf("copy_referrers requires a copy-mode destination; store %q is proxy", ex.to.Name)
+			if rd.isProxy() {
+				return nil, nil, nil, fmt.Errorf("copy_referrers requires a copy-mode destination; store %q is proxy", rd.Name())
 			}
 			if len(req.Platforms) > 0 {
 				return nil, nil, nil, fmt.Errorf("copy_referrers preserves the source image verbatim (all platforms); omit platforms or set copy_referrers to false")
-			}
-			if len(w.wc.Platforms) > 0 {
-				// An explicit opt-in wins over the config narrowing, but widening
-				// the copy to every platform must be observable.
-				log.From(w.rootCtx()).Warn("copy_referrers overrides the configured platform narrowing; copying all platforms",
-					slog.String("ref", req.Ref), slog.String("configured", strings.Join(w.wc.Platforms, ",")))
 			}
 			platforms = nil // the verbatim commit needs every child manifest present
 		}
 	}
 
-	if len(transfers) == 0 {
-		return nil, nil, nil, fmt.Errorf("job has nothing to do: set `to`")
-	}
 	return ex, transfers, platforms, nil
-}
-
-func transferFrom(ex *jobExec) string {
-	if ex.hasCache {
-		return ex.to.Name
-	}
-	return ex.from.Name
 }
 
 func (w *Warmer) worker() {
@@ -498,24 +522,29 @@ func (w *Warmer) execute(ctx context.Context, job *Job) error {
 	})
 	ex := job.exec
 
-	if ex.hasCache {
-		if err := w.runCopy(ctx, job, ex); err != nil {
-			return err
-		}
+	// Dispatch on what the destination can do, not what it is: a pusher is
+	// filled by gantry's copy pipeline, a puller fetches the image itself.
+	switch d := ex.dst.(type) {
+	case pusher:
+		return w.runCopy(ctx, job, ex, d)
+	case puller:
+		return w.runPull(ctx, job, ex, d)
+	default:
+		return fmt.Errorf("store %q can neither be pushed to nor pull", ex.dst.Name())
 	}
-	return nil
 }
 
-// runCopy fills the cache store (the registry transfer). Its failure fails the job.
-func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec) error {
-	t := job.Transfers[ex.cacheIdx]
+// runCopy fills a pusher destination (the registry transfer). Its failure fails
+// the job.
+func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) error {
+	t := job.Transfers[0]
 	w.store.Update(job.ID, func(*Job) { t.State = "running" })
 
-	src, err := NewSource(ex.from, ex.to)
+	src, err := d.newSource(ex.from)
 	if err != nil {
 		return w.failTransfer(job, t, err)
 	}
-	plan, err := src.Resolve(ctx, ex.src, ex.dst, job.Platforms)
+	plan, err := src.Resolve(ctx, ex.src, ex.cacheRef, job.Platforms)
 	if err != nil {
 		return w.failTransfer(job, t, err)
 	}
@@ -528,19 +557,22 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec) error {
 	if err := w.copyLayers(ctx, job, t, src, plan, ex); err != nil {
 		return w.failTransfer(job, t, err)
 	}
-	committed, err := src.Commit(ctx, ex.src, ex.dst, job.Platforms, ex.copyReferrers)
+	committed, err := src.Commit(ctx, ex.src, ex.cacheRef, job.Platforms, ex.copyReferrers)
 	if err != nil {
 		return w.failTransfer(job, t, z.Err(err, "commit"))
 	}
 	ex.committed = committed
 	if ex.copyReferrers {
-		n, err := copyReferrers(ctx, ex.from, ex.to, ex.src, committed, ex.dst.Context())
+		// copy_referrers is only ever planned for a registry destination, and
+		// registryDest is the only pusher; the assertion makes that dependency loud.
+		rd := d.(*registryDest)
+		n, err := copyReferrers(ctx, ex.from, rd.cfg, ex.src, committed, ex.cacheRef.Context())
 		if err != nil {
 			// Fail closed: the signatures are the point of referrer propagation.
 			return w.failTransfer(job, t, z.Err(err, "copy referrers"))
 		}
 		log.From(ctx).Info("referrers copied",
-			slog.Int("count", n), slog.String("subject", committed.String()), slog.String("store", ex.to.Name))
+			slog.Int("count", n), slog.String("subject", committed.String()), slog.String("store", d.Name()))
 	}
 	w.store.Update(job.ID, func(*Job) {
 		if committed != (v1.Hash{}) {
@@ -549,8 +581,105 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec) error {
 		t.State = "done"
 	})
 	log.From(ctx).Info("cache filled",
-		slog.String("store", ex.to.Name), slog.String("ref", ex.dst.Name()), slog.Int64("bytes", t.BytesDone.Load()))
+		slog.String("store", d.Name()), slog.String("ref", ex.cacheRef.Name()), slog.Int64("bytes", t.BytesDone.Load()))
 	return nil
+}
+
+// runPull tells a puller destination (an engine daemon) to fetch the image. The
+// transfer total is estimated upfront from the source manifest (best-effort) and
+// refined by the daemon's own progress reports as they arrive; the daemon's
+// error — including an unavailable platform — fails the job as-is.
+func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) error {
+	t := job.Transfers[0]
+	// Anchor the pull when the source is digest-pinned (a verified job, or a
+	// digest ref): the daemon pulls repo@digest and tags it as the ref.
+	digest := ""
+	if dg, ok := ex.src.(name.Digest); ok {
+		digest = dg.DigestStr()
+	}
+	w.store.Update(job.ID, func(*Job) {
+		t.State = "running"
+		t.Digest = digest
+	})
+
+	// Size estimate from the source manifest; the daemon's layer reports replace
+	// it with actual figures as they arrive.
+	if plan, err := upstreamPlan(ctx, ex.from, ex.src, []string{ex.platform}); err == nil {
+		w.store.Update(job.ID, func(*Job) { t.BytesTotal = plan.Total })
+	} else {
+		log.From(ctx).Debug("pull size estimate unavailable",
+			slog.String("ref", ex.src.Name()), slog.String("error", err.Error()))
+	}
+
+	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
+	if err := d.pull(ctx, ex.pullRef, digest, ex.platform, sink); err != nil {
+		return w.failTransfer(job, t, err)
+	}
+	w.store.Update(job.ID, func(*Job) {
+		var tot int64
+		for _, lp := range t.Layers {
+			if lp.State != "exists" {
+				lp.State = "done"
+				lp.Done.Store(lp.Total)
+			}
+			tot += lp.Total
+		}
+		if len(t.Layers) > 0 {
+			// The daemon's own layer totals supersede the upstream estimate.
+			t.BytesTotal = tot
+		}
+		t.BytesDone.Store(t.BytesTotal)
+		t.State = "done"
+	})
+	if w.pullHook != nil {
+		w.pullHook(d.Name(), ex.pullRef)
+	}
+	log.From(ctx).Info("engine pulled",
+		slog.String("store", d.Name()), slog.String("ref", ex.pullRef), slog.String("platform", ex.platform))
+	return nil
+}
+
+// engineSink folds an engine's per-layer reports into a Transfer, upserting
+// layers by digest and recomputing the transfer totals.
+type engineSink struct {
+	w     *Warmer
+	jobID string
+	t     *Transfer
+	idx   map[string]*LayerProgress
+}
+
+func (s *engineSink) Layer(u down.LayerUpdate) {
+	s.w.store.Update(s.jobID, func(*Job) {
+		lp := s.idx[u.Digest]
+		if lp == nil {
+			lp = &LayerProgress{Digest: u.Digest, State: "pulling"}
+			s.idx[u.Digest] = lp
+			s.t.Layers = append(s.t.Layers, lp)
+		}
+		if u.Total > 0 {
+			lp.Total = u.Total
+		}
+		switch u.State {
+		case "exists":
+			lp.State = "exists"
+			lp.Done.Store(lp.Total)
+		case "done":
+			lp.State = "done"
+			if lp.Total > 0 {
+				lp.Done.Store(lp.Total)
+			}
+		default:
+			lp.State = "pulling"
+			lp.Done.Store(u.Done)
+		}
+		var tot, done int64
+		for _, l := range s.t.Layers {
+			tot += l.Total
+			done += l.Done.Load()
+		}
+		s.t.BytesTotal = tot
+		s.t.BytesDone.Store(done)
+	})
 }
 
 func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Source, plan *Plan, ex *jobExec) error {
@@ -564,7 +693,7 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	var firstErr error
 
 	from := ex.src.Context()
-	to := ex.dst.Context()
+	to := ex.cacheRef.Context()
 	for i := range plan.Layers {
 		select {
 		case sem <- struct{}{}:
@@ -624,16 +753,6 @@ func (w *Warmer) finish(job *Job, err error) {
 		}
 		j.EndedAt = time.Now()
 	})
-}
-
-func (w *Warmer) platforms(req []string) []string {
-	if len(req) > 0 {
-		return req
-	}
-	if len(w.wc.Platforms) > 0 {
-		return w.wc.Platforms
-	}
-	return []string{runtime.GOOS + "/" + runtime.GOARCH}
 }
 
 // refOpts returns name parse options for a registry store (insecure + test opts).

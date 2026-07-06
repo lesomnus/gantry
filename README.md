@@ -2,18 +2,19 @@
 
 Move container images between **stores** — registries and daemon engines — and
 watch the per-layer progress over an HTTP API. A job copies an image from one
-registry into another (e.g. a remote into a local cache); docker / containerd
-engines are then told to pull it with an explicit per-engine request.
+registry into another (e.g. a remote into a local cache) or straight onto a
+docker / containerd engine, which is told to pull it.
 
 ## How it works
 
 A **store** is a registry (gantry reads/writes blobs) or an engine — docker or
-containerd (gantry can trigger a pull). A **job** copies an image between two
-registries:
+containerd (a daemon that pulls). A **job** moves an image from a registry into
+any store:
 
 ```
 POST /v1/job {ref, from, to}
-   from (registry) ──copy──▶ to (registry/cache)
+   from (registry) ──copy──▶ to (registry/cache)     # oci: gantry copies blobs
+   from (registry) ──pull──▶ to (docker/containerd)  # engine: the daemon pulls
         the transfer reports per-layer byte progress
 GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
 ```
@@ -22,9 +23,10 @@ GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
   skipping blobs the destination already has, so progress reflects bytes actually
   moved (**copy** mode). **proxy** mode reads through `to` so a pull-through cache
   self-fills instead.
-- To load a copied image onto a docker/containerd engine, call
-  `POST /v1/store/{name}/pull` — an explicit, per-engine action (the daemon pulls
-  from your cache), decoupled from the copy job.
+- An engine `to` pulls exactly one platform: the request's, or the daemon
+  host's when omitted. The daemon's progress is folded into the same transfer
+  (totals estimated upfront from the source manifest, refined as the daemon
+  reports). `POST /v1/store/{name}/pull` remains for ad-hoc, job-less pulls.
 - Optionally, gantry reclaims space on the engines it feeds: it tracks each
   image's last-used time from the daemon's container events and runs an adaptive,
   policy-driven GC (per-store `retention`). See [Configuration](#configuration).
@@ -55,8 +57,11 @@ $ curl -X POST localhost:8080/v1/job -d '{
     "platforms": ["linux/amd64"]
   }'
 
-# Load the cached image onto the k3s node (the daemon pulls from the cache).
-$ curl -X POST localhost:8080/v1/store/k3s/pull -d '{"ref": "cache/library/redis:7"}'
+# Move the cached image onto the k3s node — same job shape, engine destination.
+# The daemon pulls it; platform defaults to the node's own.
+$ curl -X POST localhost:8080/v1/job -d '{
+    "ref": "library/redis:7", "from": "cache", "to": "k3s"
+  }'
 
 # Watch progress (every transfer carries per-layer bytes).
 $ curl localhost:8080/v1/job/<id>
@@ -121,11 +126,13 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 trusted reverse proxy). `/healthz`, `/readyz`, and `/openapi.*` are always exempt.
 
 A rendered, human-readable reference (every endpoint with parameters, schemas,
-and a `curl` sample) is checked in at [docs/api.md](docs/api.md). For an
+and a `curl` sample) is checked in at [docs/api.md](docs/api.md), and the
+machine-readable spec at [docs/openapi.json](docs/openapi.json). For an
 interactive view, point [Scalar](https://github.com/scalar/scalar),
 [Redoc](https://github.com/Redocly/redoc), or
-[Stoplight Elements](https://github.com/stoplightio/elements) at the live
-`/openapi.json` — the server only ships the contract, not a bundled viewer.
+[Stoplight Elements](https://github.com/stoplightio/elements) at either that
+file or the live `/openapi.json` — the server only ships the contract, not a
+bundled viewer.
 
 ## Configuration
 
@@ -134,8 +141,7 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
 - `stores` (top-level) — the unified store map (keyed by name). `kind: oci` (`host`,
   `mode`, `insecure`, `rewrite`, `downstream_host`) or `kind: docker`/`containerd`
   (`address`, `namespace`, `pull_host`).
-- `worker` (top-level) — `platforms` fallback, `max_concurrent_jobs`/`max_concurrent_layers`
-  pool sizes.
+- `worker` (top-level) — `max_concurrent_jobs`/`max_concurrent_layers` pool sizes.
 - `serve.allow_unknown_stores` — let a job name a bare registry host not declared
   as a store (default false).
 - `serve.health` — per-store health probe cache: `cache_ttl` (default 5s),

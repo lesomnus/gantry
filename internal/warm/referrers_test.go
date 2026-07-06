@@ -191,13 +191,12 @@ func TestPlanCopyReferrersConflicts(t *testing.T) {
 
 func TestCopyReferrersDefault(t *testing.T) {
 	verified_hash := v1.Hash{Algorithm: "sha256", Hex: "0123456789012345678901234567890123456789012345678901234567890123"}
-	plan_exec := func(t *testing.T, wc_platforms []string, verifier *fakeVerifier, req Request) *jobExec {
+	plan_exec := func(t *testing.T, verifier *fakeVerifier, req Request) *jobExec {
 		t.Helper()
 		w, _ := newWarmer(t, []config.StoreConfig{
 			{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 		}, true)
 		w.base = context.Background()
-		w.wc.Platforms = wc_platforms
 		if verifier != nil {
 			w.SetVerifier(verifier)
 		}
@@ -212,27 +211,21 @@ func TestCopyReferrersDefault(t *testing.T) {
 	}
 	base_req := Request{Ref: "a/x:1", From: "r.io", To: "cache"}
 	t.Run("on when verified and nothing narrowed", func(t *testing.T) {
-		ex := plan_exec(t, nil, &fakeVerifier{dg: verified_hash}, base_req)
+		ex := plan_exec(t, &fakeVerifier{dg: verified_hash}, base_req)
 		if !ex.copyReferrers {
 			t.Error("default should be on for a verified copy-mode job")
 		}
 	})
 	t.Run("off when the job did not verify", func(t *testing.T) {
-		ex := plan_exec(t, nil, &fakeVerifier{}, base_req) // zero hash: mode off / unsigned allowed
+		ex := plan_exec(t, &fakeVerifier{}, base_req) // zero hash: mode off / unsigned allowed
 		if ex.copyReferrers {
 			t.Error("default must not fire for an unverified job")
-		}
-	})
-	t.Run("off when the config narrows platforms", func(t *testing.T) {
-		ex := plan_exec(t, []string{"linux/arm64"}, &fakeVerifier{dg: verified_hash}, base_req)
-		if ex.copyReferrers {
-			t.Error("default must respect warm.platforms narrowing")
 		}
 	})
 	t.Run("off when the request narrows platforms", func(t *testing.T) {
 		req := base_req
 		req.Platforms = []string{"linux/arm64"}
-		ex := plan_exec(t, nil, &fakeVerifier{dg: verified_hash}, req)
+		ex := plan_exec(t, &fakeVerifier{dg: verified_hash}, req)
 		if ex.copyReferrers {
 			t.Error("default must respect request platform narrowing")
 		}

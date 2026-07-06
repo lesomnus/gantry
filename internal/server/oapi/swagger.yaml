@@ -258,13 +258,17 @@ components:
             the source digest preserved, so the image still verifies against the cache.
             Requires copying all platforms (the request must not narrow `platforms`).
             Defaults to true when verification is enabled and `to` is a copy-mode store.
+            Registry destinations only.
           type: boolean
         from:
           description: Source registry store name or host; defaults to the ref's registry.
           example: dockerhub
           type: string
         platforms:
-          description: Platforms to move; defaults to the server platform when empty.
+          description: |-
+            Platforms to move. Registry destination: the platforms copied (empty = every
+            platform). Engine destination: the single platform the daemon pulls (empty =
+            the daemon host's platform; more than one is rejected).
           example:
           - linux/amd64
           - linux/arm64
@@ -277,7 +281,9 @@ components:
           example: docker.io/library/nginx:1.27
           type: string
         to:
-          description: Destination registry store to copy into (required).
+          description: |-
+            Destination store (required): an oci registry (gantry copies the blobs in)
+            or a docker/containerd engine (the daemon is told to pull the image).
           example: local-cache
           type: string
       required:
@@ -429,6 +435,12 @@ components:
       type: object
     server.storePullRequest:
       properties:
+        platform:
+          description: |-
+            Platform to pull ("os/arch", e.g. "linux/arm64"); empty uses the daemon's
+            default. Passed through as-is — an unavailable platform is the daemon's error.
+          example: linux/arm64
+          type: string
         ref:
           description: Image reference the engine store should pull (required).
           example: docker.io/library/nginx:1.27
@@ -684,12 +696,14 @@ components:
         copy_referrers:
           type: boolean
         dst_ref:
-          description: rewritten cache ref
+          description: 'destination-side ref: the rewritten cache ref, or the ref
+            the engine is told to pull'
           type: string
         from:
           type: string
         platforms:
-          description: empty = all platforms
+          description: 'registry dest: empty = all platforms; engine dest: the single
+            platform pulled'
           items:
             type: string
           type: array
@@ -770,7 +784,7 @@ externalDocs:
 info:
   description: |-
     Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.
-    A job copies an image `from` an OCI store `to` another; loading it onto a docker/containerd engine is a separate POST /v1/store/{name}/pull.
+    A job moves an image `from` an OCI store into `to` — an OCI registry (gantry copies the blobs) or a docker/containerd engine (the daemon pulls it).
   title: gantry API
   version: "1.0"
 openapi: 3.1.0
@@ -949,9 +963,9 @@ paths:
       tags:
       - jobs
     post:
-      description: Copy an image from `from` (oci) into `to` (oci). To load the copied
-        image onto a docker/containerd engine, call POST /v1/store/{name}/pull separately.
-        Idempotent per identical move.
+      description: Move an image from `from` (oci) into `to` — an oci registry (gantry
+        copies the blobs) or a docker/containerd engine (the daemon pulls it). Idempotent
+        per identical move.
       requestBody:
         content:
           application/json:
@@ -1184,9 +1198,10 @@ paths:
   /v1/job/plan:
     post:
       description: Resolves the same plan POST /v1/job would — store bindings, the
-        rewritten cache ref, engine pull refs, signature verification with the pinned
-        digest, referrer propagation — without moving bytes or creating a job. `coalesces`
-        names the active job an identical submission would join.
+        destination-side ref (the rewritten cache ref, or the ref an engine destination
+        is told to pull), the resolved platform(s), signature verification with the
+        pinned digest, referrer propagation — without moving bytes or creating a job.
+        `coalesces` names the active job an identical submission would join.
       requestBody:
         content:
           application/json:

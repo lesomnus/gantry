@@ -330,9 +330,6 @@ func (s StoreConfig) validateTPM() error {
 
 // WorkerConfig bounds the job worker pool that runs image moves.
 type WorkerConfig struct {
-	// Platforms is the fallback platform set when a request omits it; empty
-	// means the host GOOS/GOARCH only.
-	Platforms []string `yaml:"platforms"`
 	// MaxConcurrentJobs caps how many jobs run at once (tier-1 worker pool).
 	MaxConcurrentJobs int `yaml:"max_concurrent_jobs"`
 	// MaxConcurrentLayers caps how many layers one transfer moves at once (tier-2).

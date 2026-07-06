@@ -47,7 +47,12 @@ type Engine interface {
 	// Pull makes the engine pull ref. A non-empty digest anchors the pull: the
 	// engine pulls repo@digest and then tags it as ref locally, so a mutable tag
 	// re-resolved by a pull-through cache cannot substitute different bytes.
-	Pull(ctx context.Context, ref string, digest string, sink Sink) error
+	// platform ("os/arch", OCI form) selects the platform to pull; empty means
+	// the daemon's default. The value is passed through as-is — if the image has
+	// no such platform, the daemon's error is returned.
+	Pull(ctx context.Context, ref string, digest string, platform string, sink Sink) error
+	// Platform reports the daemon host's platform in OCI form ("linux/amd64").
+	Platform(ctx context.Context) (string, error)
 
 	// InUse returns the references and image IDs currently held by live containers.
 	InUse(ctx context.Context) (map[string]bool, error)
