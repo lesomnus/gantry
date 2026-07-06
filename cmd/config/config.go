@@ -81,16 +81,18 @@ func (c *Config) Evaluate() error {
 					}
 				}
 			}
-			if err := s.validateTPM(); err != nil {
-				return z.Err(err, "store %q", name)
-			}
-			if s.HasTPM() {
-				z.FallbackP(&s.TPMDevice, "/dev/tpmrm0")
-			}
 		case "docker", "containerd":
 			// engine store; address is validated when the store is dialed
 		default:
 			return z.Err(nil, "store %q: unknown kind %q", name, s.Kind)
+		}
+		// TPM mTLS applies to both registry (pull/push) and engine (daemon)
+		// connections, so validate and default the device for any store kind.
+		if err := s.validateTPM(); err != nil {
+			return z.Err(err, "store %q", name)
+		}
+		if s.HasTPM() {
+			z.FallbackP(&s.TPMDevice, "/dev/tpmrm0")
 		}
 		if s.Verify != nil && !s.Verify.Mode.Valid() {
 			return z.Err(nil, "store %q: verify.mode %q is not one of off/verify-if-present/require", name, s.Verify.Mode)

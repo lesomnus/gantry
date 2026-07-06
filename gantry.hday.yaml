@@ -26,10 +26,16 @@ stores:
   # List any subset of these under a job's `distribute`.
   dockerd-10-2:
     kind: docker
-    address: "tcp://192.168.10.2:2375"
+    address: "tcp://192.168.10.2:2376"    # daemon TLS port
+    # Connect over mTLS with the TPM device key (fdy). The private key stays in
+    # the TPM; device.crt is presented as the client certificate and ca.crt
+    # verifies the daemon's server certificate.
+    tpm_handle: "0x81666479"              # fdy (device AK persistent handle)
+    tpm_cert: "device.crt"                # client cert (leaf + chain), PEM
+    ca_cert: "ca.crt"                     # CA that signed the daemon's server cert
   dockerd-10-33:
     kind: docker
-    address: "tcp://192.168.10.33:2375"
+    address: "unix:///var/run/docker.sock"   # host docker socket
   dockerd-10-34:
     kind: docker
     address: "tcp://192.168.10.34:2375"

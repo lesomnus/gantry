@@ -123,6 +123,23 @@ func TestNewRejectsNonEngine(t *testing.T) {
 	}
 }
 
+func TestNewDockerEngineTLSWiring(t *testing.T) {
+	// No TLS fields: builds a plain client (transport is nil, daemon dialed as-is).
+	if _, err := newDockerEngine(config.StoreConfig{Name: "plain", Kind: "docker", Address: "tcp://127.0.0.1:2375"}); err != nil {
+		t.Errorf("plain docker engine should build: %v", err)
+	}
+	// insecure: builds a TLS-skip transport (no files needed) and dials https.
+	if _, err := newDockerEngine(config.StoreConfig{Name: "ins", Kind: "docker", Address: "tcp://127.0.0.1:2376", Insecure: true}); err != nil {
+		t.Errorf("insecure docker engine should build: %v", err)
+	}
+	// A bad ca_cert path must surface as an engine build error — proving the
+	// store transport is wired into the docker client.
+	_, err := newDockerEngine(config.StoreConfig{Name: "ca", Kind: "docker", Address: "tcp://127.0.0.1:2376", CACert: "/no/such/ca.crt"})
+	if err == nil {
+		t.Error("a missing ca_cert should fail docker engine construction")
+	}
+}
+
 func TestDigestOf(t *testing.T) {
 	if got := digestOf("layer-sha256:abc"); got != "sha256:abc" {
 		t.Errorf("digestOf = %q", got)

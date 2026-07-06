@@ -257,13 +257,14 @@ type StoreConfig struct {
 	// nil disables GC for the store. See StoreRetention.
 	Retention *StoreRetention `yaml:"retention"`
 
-	// --- mTLS client auth via a TPM-backed key (oci) ---
-	// When TPMHandle is set, gantry authenticates to this registry — and to its
-	// bearer-token endpoint — with a client certificate whose private key never
-	// leaves the TPM. The key is addressed by its persistent handle; the leaf (+
-	// chain) is read from TPMCert and its public key must match the key at the
-	// handle. Applies to every outbound direction this store is used in (pull,
-	// push, and referrer copy).
+	// --- mTLS client auth via a TPM-backed key ---
+	// When TPMHandle is set, gantry authenticates to this store with a client
+	// certificate whose private key never leaves the TPM. The key is addressed by
+	// its persistent handle; the leaf (+ chain) is read from TPMCert and its
+	// public key must match the key at the handle. For an oci registry this
+	// applies to every outbound direction (pull, push, referrer copy) including
+	// the bearer-token endpoint; for a docker engine it is the client certificate
+	// presented to the daemon's TLS port (tcp mTLS).
 	TPMDevice string `yaml:"tpm"`        // TPM device path (default /dev/tpmrm0)
 	TPMHandle string `yaml:"tpm_handle"` // persistent handle, hex e.g. "0x81000001"
 	TPMCert   string `yaml:"tpm_cert"`   // client certificate (leaf + chain), PEM
