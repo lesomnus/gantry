@@ -43,3 +43,9 @@ perl -0pi -e 's/^> Scroll down for code samples.*?\n\n//m' "$tmp"
 } >"$out"
 
 echo "wrote ${out}"
+
+# Publish the machine-readable spec alongside the rendered reference, so docs/
+# is self-contained for API viewers (Scalar/Redoc/Elements) without a running
+# server. Verbatim copy of the embedded spec — the single source of truth.
+cp "$spec" "${__root}/docs/openapi.json"
+echo "wrote ${__root}/docs/openapi.json"
