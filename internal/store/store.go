@@ -83,7 +83,7 @@ func (s *Set) Registry(ref string) (config.StoreConfig, error) {
 	}, nil
 }
 
-// Engine resolves a distribute reference to a declared engine store.
+// Engine resolves a reference to a declared engine store.
 func (s *Set) Engine(name string) (down.Engine, error) {
 	e, ok := s.engines[name]
 	if !ok {

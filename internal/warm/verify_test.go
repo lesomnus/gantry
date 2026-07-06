@@ -96,27 +96,22 @@ func TestVerifyProxyModeRejected(t *testing.T) {
 	}
 }
 
-// TestVerifyPinsDistributeRef: with no cache, a verified digest pins the ref the
-// distribute engine is told to pull (so it fetches exactly what was verified).
-func TestVerifyPinsDistributeRef(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+// TestVerifyPinsSourceRef: a verified digest pins the source ref the copy pulls,
+// so the cache is filled from exactly what was verified (surfaced as Plan.SrcRef).
+func TestVerifyPinsSourceRef(t *testing.T) {
+	w, _ := newWarmer(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: "up.example", Insecure: true},
-		{Name: "eng", Kind: "docker", Address: "tcp://127.0.0.1:1"}, // lazy; not dialed by plan
+		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, false)
 	h, _ := v1.NewHash("sha256:" + strings.Repeat("b", 64))
 	w.SetVerifier(&fakeVerifier{dg: h})
-	w.base = context.Background() // enable Submit without starting workers
+	w.base = context.Background()
 
-	snap, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", Distribute: []string{"eng"}, Platforms: []string{"linux/amd64"}})
+	res, err := w.Plan(context.Background(), Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { js.Delete(snap.ID) })
-	if len(snap.Transfers) == 0 {
-		t.Fatal("no transfers")
-	}
-	ref := snap.Transfers[0].Ref
-	if !strings.Contains(ref, "@sha256:"+strings.Repeat("b", 64)) {
-		t.Errorf("distribute ref = %q, want pinned to the verified digest", ref)
+	if !strings.Contains(res.SrcRef, "@sha256:"+strings.Repeat("b", 64)) {
+		t.Errorf("src ref = %q, want pinned to the verified digest", res.SrcRef)
 	}
 }

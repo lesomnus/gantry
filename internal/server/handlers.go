@@ -13,11 +13,10 @@ import (
 )
 
 type createJobRequest struct {
-	Ref        string   `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to move (required).
-	Platforms  []string `json:"platforms" example:"linux/amd64,linux/arm64"`                   // Platforms to move; defaults to the server platform when empty.
-	From       string   `json:"from" example:"dockerhub"`                                      // Source registry store name or host; defaults to the ref's registry.
-	To         string   `json:"to" example:"local-cache"`                                      // Destination registry store to copy into; empty means engines pull from `from` directly.
-	Distribute []string `json:"distribute" example:"node-a,node-b"`                            // Engine store names that should pull the image afterwards.
+	Ref       string   `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to move (required).
+	Platforms []string `json:"platforms" example:"linux/amd64,linux/arm64"`                   // Platforms to move; defaults to the server platform when empty.
+	From      string   `json:"from" example:"dockerhub"`                                      // Source registry store name or host; defaults to the ref's registry.
+	To        string   `json:"to" example:"local-cache"`                                      // Destination registry store to copy into (required).
 	// Copy the source's referrer artifacts (notation signatures) into `to` with
 	// the source digest preserved, so the image still verifies against the cache.
 	// Requires copying all platforms (the request must not narrow `platforms`).
@@ -28,7 +27,7 @@ type createJobRequest struct {
 // handleCreateJob godoc
 //
 //	@Summary	Create a job
-//	@Description	Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it, anchored to the digest the copy committed. Idempotent per identical move.
+//	@Description	Copy an image from `from` (oci) into `to` (oci). To load the copied image onto a docker/containerd engine, call POST /v1/store/{name}/pull separately. Idempotent per identical move.
 //	@Tags		jobs
 //	@Accept		json
 //	@Produce	json
@@ -66,7 +65,6 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		Platforms:     req.Platforms,
 		From:          req.From,
 		To:            req.To,
-		Distribute:    req.Distribute,
 		CopyReferrers: req.CopyReferrers,
 	})
 	switch {
@@ -255,7 +253,6 @@ func (s *Server) handlePlanJob(w http.ResponseWriter, r *http.Request) {
 		Platforms:     req.Platforms,
 		From:          req.From,
 		To:            req.To,
-		Distribute:    req.Distribute,
 		CopyReferrers: req.CopyReferrers,
 	})
 	switch {

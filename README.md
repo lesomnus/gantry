@@ -2,18 +2,19 @@
 
 Move container images between **stores** — registries and daemon engines — and
 watch the per-layer progress over an HTTP API. A job copies an image from one
-registry into another (e.g. a remote into a local cache), then triggers docker /
-containerd engines to pull it.
+registry into another (e.g. a remote into a local cache); docker / containerd
+engines are then told to pull it with an explicit per-engine request.
 
 ## How it works
 
 A **store** is a registry (gantry reads/writes blobs) or an engine — docker or
-containerd (gantry triggers a pull). A **job** moves an image:
+containerd (gantry can trigger a pull). A **job** copies an image between two
+registries:
 
 ```
-POST /v1/job {ref, from, to, distribute}
-   from (registry) ──copy──▶ to (registry/cache) ──pull──▶ distribute (engines)
-        every step is a Transfer with the same per-layer byte progress
+POST /v1/job {ref, from, to}
+   from (registry) ──copy──▶ to (registry/cache)
+        the transfer reports per-layer byte progress
 GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
 ```
 
@@ -21,16 +22,17 @@ GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
   skipping blobs the destination already has, so progress reflects bytes actually
   moved (**copy** mode). **proxy** mode reads through `to` so a pull-through cache
   self-fills instead.
-- `distribute` engines pull `to` (or `from`, when there is no `to`). Their
-  per-layer progress is reported best-effort from the daemon.
+- To load a copied image onto a docker/containerd engine, call
+  `POST /v1/store/{name}/pull` — an explicit, per-engine action (the daemon pulls
+  from your cache), decoupled from the copy job.
 - Optionally, gantry reclaims space on the engines it feeds: it tracks each
   image's last-used time from the daemon's container events and runs an adaptive,
   policy-driven GC (per-store `retention`). See [Configuration](#configuration).
 - Optionally, gantry verifies the `from` image's signature (Notary Project /
   notation) at job creation and rejects the job on failure — pinning the verified
-  digest so it moves exactly what was verified (`serve.verify`). Engines pull that
-  digest (not the tag), and the signature can travel with the image into the cache
-  (`copy_referrers`), so it still verifies there.
+  digest so it moves exactly what was verified (`serve.verify`). The signature can
+  travel with the image into the cache (`copy_referrers`), so it still verifies
+  there.
 - Optionally, gantry keeps a durable audit log of what it did — jobs, GC,
   pins, manual ops — that survives restarts (`serve.events`), and exports metrics
   and traces over OTLP (`otel`).
@@ -47,11 +49,14 @@ $ gantry serve --addr :8080
 # See the configured stores and their capabilities.
 $ curl localhost:8080/v1/store
 
-# Copy redis from docker.io into the cache, then have k3s pull it.
+# Copy redis from docker.io into the cache.
 $ curl -X POST localhost:8080/v1/job -d '{
     "ref": "library/redis:7", "from": "docker.io", "to": "cache",
-    "distribute": ["k3s"], "platforms": ["linux/amd64"]
+    "platforms": ["linux/amd64"]
   }'
+
+# Load the cached image onto the k3s node (the daemon pulls from the cache).
+$ curl -X POST localhost:8080/v1/store/k3s/pull -d '{"ref": "cache/library/redis:7"}'
 
 # Watch progress (every transfer carries per-layer bytes).
 $ curl localhost:8080/v1/job/<id>
@@ -64,8 +69,8 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/v1/job` | Submit a job (`ref`, `from`, `to`, `distribute`, `platforms`, `copy_referrers`). `202` created / `200` coalesced onto an identical in-flight move; an `Idempotency-Key` header maps a retry back to the same job. `422` if signature verification is enabled and fails. |
-| `POST` | `/v1/job/plan` | Dry-run admission: the resolved store bindings, rewritten cache ref, engine pull refs, and verification outcome — without moving bytes or creating a job. |
+| `POST` | `/v1/job` | Submit a job (`ref`, `from`, `to`, `platforms`, `copy_referrers`). `202` created / `200` coalesced onto an identical in-flight move; an `Idempotency-Key` header maps a retry back to the same job. `422` if signature verification is enabled and fails. |
+| `POST` | `/v1/job/plan` | Dry-run admission: the resolved store bindings, rewritten cache ref, and verification outcome — without moving bytes or creating a job. |
 | `GET` | `/v1/job` | List jobs; filter with `?state=` (validated), `?ref=`, `?since=`, `?limit=`. |
 | `GET` | `/v1/job/{id}` | Job status: a `transfers[]` array (each with per-layer progress) plus the `verification` outcome. |
 | `GET` | `/v1/job/{id}/progress` | SSE progress stream, or `?wait=<dur>` long-poll. |
@@ -130,7 +135,7 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   `mode`, `insecure`, `rewrite`, `downstream_host`) or `kind: docker`/`containerd`
   (`address`, `namespace`, `pull_host`).
 - `worker` (top-level) — `platforms` fallback, `max_concurrent_jobs`/`max_concurrent_layers`
-  pool sizes, `distribute_by_default`.
+  pool sizes.
 - `serve.allow_unknown_stores` — let a job name a bare registry host not declared
   as a store (default false).
 - `serve.health` — per-store health probe cache: `cache_ttl` (default 5s),

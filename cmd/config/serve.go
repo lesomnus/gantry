@@ -341,7 +341,4 @@ type WorkerConfig struct {
 	QueueSize int `yaml:"queue_size"`
 	// JobTTL is how long a finished job record is retained.
 	JobTTL Duration `yaml:"job_ttl"`
-	// DistributeByDefault fans out to all engine stores when a job omits the
-	// distribute list.
-	DistributeByDefault bool `yaml:"distribute_by_default"`
 }

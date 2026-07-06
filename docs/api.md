@@ -5,7 +5,7 @@
 <h1 id="gantry-api">gantry API v1.0</h1>
 
 Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.
-A job copies an image `from` an OCI store `to` another, then `distribute` engines pull it.
+A job copies an image `from` an OCI store `to` another; loading it onto a docker/containerd engine is a separate POST /v1/store/{name}/pull.
 
 # Authentication
 
@@ -459,7 +459,7 @@ curl -X DELETE /v1/store/{name}/image \
 
 `DELETE /v1/store/{name}/image`
 
-Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next distribute. To delete the image itself use /remove.
+Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next pull. To delete the image itself use /remove.
 
 > Body parameter
 
@@ -951,17 +951,13 @@ curl -X POST /v1/job \
 
 `POST /v1/job`
 
-Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it, anchored to the digest the copy committed. Idempotent per identical move.
+Copy an image from `from` (oci) into `to` (oci). To load the copied image onto a docker/containerd engine, call POST /v1/store/{name}/pull separately. Idempotent per identical move.
 
 > Body parameter
 
 ```json
 {
   "copy_referrers": true,
-  "distribute": [
-    "node-a",
-    "node-b"
-  ],
   "from": "dockerhub",
   "platforms": [
     "linux/amd64",
@@ -1068,10 +1064,6 @@ Resolves the same plan POST /v1/job would — store bindings, the rewritten cach
 ```json
 {
   "copy_referrers": true,
-  "distribute": [
-    "node-a",
-    "node-b"
-  ],
   "from": "dockerhub",
   "platforms": [
     "linux/amd64",
@@ -1097,12 +1089,6 @@ Resolves the same plan POST /v1/job would — store bindings, the rewritten cach
   "coalesces": "string",
   "copy_referrers": true,
   "dst_ref": "string",
-  "engines": [
-    {
-      "ref": "string",
-      "store": "string"
-    }
-  ],
   "from": "string",
   "platforms": [
     "string"
@@ -1632,7 +1618,7 @@ curl -X POST /v1/store/{name}/pull \
 
 `POST /v1/store/{name}/pull`
 
-Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile). Stamps the retention index like a job's distribute step, so the pulled image stays eligible for age GC.
+Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile). Stamps the retention index so the pulled image stays eligible for age GC.
 
 > Body parameter
 
@@ -2382,10 +2368,6 @@ BearerAuth
 ```json
 {
   "copy_referrers": true,
-  "distribute": [
-    "node-a",
-    "node-b"
-  ],
   "from": "dockerhub",
   "platforms": [
     "linux/amd64",
@@ -2402,11 +2384,10 @@ BearerAuth
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
 |copy_referrers|boolean|false|none|Copy the source's referrer artifacts (notation signatures) into `to` with<br>the source digest preserved, so the image still verifies against the cache.<br>Requires copying all platforms (the request must not narrow `platforms`).<br>Defaults to true when verification is enabled and `to` is a copy-mode store.|
-|distribute|[string]|false|none|Engine store names that should pull the image afterwards.|
 |from|string|false|none|Source registry store name or host; defaults to the ref's registry.|
 |platforms|[string]|false|none|Platforms to move; defaults to the server platform when empty.|
 |ref|string|true|none|Image reference to move (required).|
-|to|string|false|none|Destination registry store to copy into; empty means engines pull from `from` directly.|
+|to|string|false|none|Destination registry store to copy into (required).|
 
 <h2 id="tocS_server.createJobResponse">server.createJobResponse</h2>
 <!-- backwards compatibility -->
@@ -3166,28 +3147,6 @@ what this store can do
 |trusted_identities|[string]|false|none|none|
 |verification_level|string|false|none|none|
 
-<h2 id="tocS_warm.EnginePull">warm.EnginePull</h2>
-<!-- backwards compatibility -->
-<a id="schemawarm.enginepull"></a>
-<a id="schema_warm.EnginePull"></a>
-<a id="tocSwarm.enginepull"></a>
-<a id="tocswarm.enginepull"></a>
-
-```json
-{
-  "ref": "string",
-  "store": "string"
-}
-
-```
-
-### Properties
-
-|Name|Type|Required|Restrictions|Description|
-|---|---|---|---|---|
-|ref|string|false|none|none|
-|store|string|false|none|none|
-
 <h2 id="tocS_warm.JobSnapshot">warm.JobSnapshot</h2>
 <!-- backwards compatibility -->
 <a id="schemawarm.jobsnapshot"></a>
@@ -3331,12 +3290,6 @@ what this store can do
   "coalesces": "string",
   "copy_referrers": true,
   "dst_ref": "string",
-  "engines": [
-    {
-      "ref": "string",
-      "store": "string"
-    }
-  ],
   "from": "string",
   "platforms": [
     "string"
@@ -3360,7 +3313,6 @@ what this store can do
 |coalesces|string|false|none|active job an identical submit would join|
 |copy_referrers|boolean|false|none|none|
 |dst_ref|string|false|none|rewritten cache ref|
-|engines|[[warm.EnginePull](#schemawarm.enginepull)]|false|none|none|
 |from|string|false|none|none|
 |platforms|[string]|false|none|empty = all platforms|
 |ref|string|false|none|none|

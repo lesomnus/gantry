@@ -425,7 +425,7 @@ func (s *Server) handleStoreImages(w http.ResponseWriter, r *http.Request) {
 // handleStoreImageDelete godoc
 //
 //	@Summary	Delete a retention index record
-//	@Description	Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next distribute. To delete the image itself use /remove.
+//	@Description	Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next pull. To delete the image itself use /remove.
 //	@Tags		retention
 //	@Accept		json
 //	@Param		name	path	string			true	"engine store name"

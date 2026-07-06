@@ -358,18 +358,6 @@
                         "description": "Copy the source's referrer artifacts (notation signatures) into `to` with\nthe source digest preserved, so the image still verifies against the cache.\nRequires copying all platforms (the request must not narrow `platforms`).\nDefaults to true when verification is enabled and `to` is a copy-mode store.",
                         "type": "boolean"
                     },
-                    "distribute": {
-                        "description": "Engine store names that should pull the image afterwards.",
-                        "example": [
-                            "node-a",
-                            "node-b"
-                        ],
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
                     "from": {
                         "description": "Source registry store name or host; defaults to the ref's registry.",
                         "example": "dockerhub",
@@ -393,7 +381,7 @@
                         "type": "string"
                     },
                     "to": {
-                        "description": "Destination registry store to copy into; empty means engines pull from `from` directly.",
+                        "description": "Destination registry store to copy into (required).",
                         "example": "local-cache",
                         "type": "string"
                     }
@@ -868,17 +856,6 @@
                 },
                 "type": "object"
             },
-            "warm.EnginePull": {
-                "properties": {
-                    "ref": {
-                        "type": "string"
-                    },
-                    "store": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
             "warm.JobSnapshot": {
                 "properties": {
                     "created_at": {
@@ -979,13 +956,6 @@
                     "dst_ref": {
                         "description": "rewritten cache ref",
                         "type": "string"
-                    },
-                    "engines": {
-                        "items": {
-                            "$ref": "#/components/schemas/warm.EnginePull"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
                     },
                     "from": {
                         "type": "string"
@@ -1100,7 +1070,7 @@
         }
     },
     "info": {
-        "description": "Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.\nA job copies an image `from` an OCI store `to` another, then `distribute` engines pull it.",
+        "description": "Move container images between stores (OCI registries and docker/containerd engines) and track per-layer progress.\nA job copies an image `from` an OCI store `to` another; loading it onto a docker/containerd engine is a separate POST /v1/store/{name}/pull.",
         "title": "gantry API",
         "version": "1.0"
     },
@@ -1377,7 +1347,7 @@
                 ]
             },
             "post": {
-                "description": "Move an image: copy `from` (oci) into `to` (oci), then have the `distribute` engines pull it, anchored to the digest the copy committed. Idempotent per identical move.",
+                "description": "Copy an image from `from` (oci) into `to` (oci). To load the copied image onto a docker/containerd engine, call POST /v1/store/{name}/pull separately. Idempotent per identical move.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2064,7 +2034,7 @@
         },
         "/v1/store/{name}/image": {
             "delete": {
-                "description": "Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next distribute. To delete the image itself use /remove.",
+                "description": "Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next pull. To delete the image itself use /remove.",
                 "parameters": [
                     {
                         "description": "engine store name",
@@ -2525,7 +2495,7 @@
         },
         "/v1/store/{name}/pull": {
             "post": {
-                "description": "Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile). Stamps the retention index like a job's distribute step, so the pulled image stays eligible for age GC.",
+                "description": "Tells one engine store to pull a reference, decoupled from the job pipeline (manual reconcile). Stamps the retention index so the pulled image stays eligible for age GC.",
                 "parameters": [
                     {
                         "description": "engine store name",
