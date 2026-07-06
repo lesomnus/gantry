@@ -73,13 +73,14 @@ func (s *recSink) progressed() bool {
 
 type fakeEngine struct{ name string }
 
-func (f *fakeEngine) Name() string                                     { return f.name }
-func (f *fakeEngine) Kind() string                                     { return "fake" }
-func (f *fakeEngine) Ready(context.Context) error                      { return nil }
-func (f *fakeEngine) Pull(context.Context, string, string, Sink) error { return nil }
-func (f *fakeEngine) InUse(context.Context) (map[string]bool, error)   { return nil, nil }
-func (f *fakeEngine) SeedUsage(context.Context, UsageSink) error       { return nil }
-func (f *fakeEngine) WatchUsage(context.Context, UsageSink) error      { return nil }
+func (f *fakeEngine) Name() string                                             { return f.name }
+func (f *fakeEngine) Kind() string                                             { return "fake" }
+func (f *fakeEngine) Ready(context.Context) error                              { return nil }
+func (f *fakeEngine) Pull(context.Context, string, string, string, Sink) error { return nil }
+func (f *fakeEngine) Platform(context.Context) (string, error)                 { return "linux/amd64", nil }
+func (f *fakeEngine) InUse(context.Context) (map[string]bool, error)           { return nil, nil }
+func (f *fakeEngine) SeedUsage(context.Context, UsageSink) error               { return nil }
+func (f *fakeEngine) WatchUsage(context.Context, UsageSink) error              { return nil }
 func (f *fakeEngine) Remove(context.Context, string) (RemoveResult, error) {
 	return RemoveResult{}, nil
 }
@@ -137,6 +138,25 @@ func TestNewDockerEngineTLSWiring(t *testing.T) {
 	_, err := newDockerEngine(config.StoreConfig{Name: "ca", Kind: "docker", Address: "tcp://127.0.0.1:2376", CACert: "/no/such/ca.crt"})
 	if err == nil {
 		t.Error("a missing ca_cert should fail docker engine construction")
+	}
+}
+
+func TestOCIPlatformNormalization(t *testing.T) {
+	cases := map[[2]string]string{
+		{"linux", "x86_64"}:  "linux/amd64",
+		{"linux", "aarch64"}: "linux/arm64",
+		{"linux", "amd64"}:   "linux/amd64",
+		{"linux", "armhf"}:   "linux/arm/v7",
+	}
+	for in, want := range cases {
+		got, err := ociPlatform(in[0], in[1])
+		if err != nil {
+			t.Errorf("ociPlatform(%q, %q): %v", in[0], in[1], err)
+			continue
+		}
+		if got != want {
+			t.Errorf("ociPlatform(%q, %q) = %q, want %q", in[0], in[1], got, want)
+		}
 	}
 }
 

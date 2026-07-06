@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/containerd/platforms"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -26,6 +28,9 @@ import (
 type dockerEngine struct {
 	name string
 	cli  *client.Client
+
+	mu   sync.Mutex
+	plat string // cached daemon host platform; only a successful probe is kept
 }
 
 func newDockerEngine(c config.StoreConfig) (*dockerEngine, error) {
@@ -73,9 +78,45 @@ func (e *dockerEngine) Ready(ctx context.Context) error {
 	return err
 }
 
+// Platform reports the daemon host's platform in OCI form, probed from the
+// daemon's Info (its OSType/Architecture, e.g. "linux"/"x86_64"). The first
+// successful probe is cached; failures are retried on the next call.
+func (e *dockerEngine) Platform(ctx context.Context) (string, error) {
+	e.mu.Lock()
+	if e.plat != "" {
+		p := e.plat
+		e.mu.Unlock()
+		return p, nil
+	}
+	e.mu.Unlock()
+
+	info, err := e.cli.Info(ctx)
+	if err != nil {
+		return "", z.Err(err, "docker info")
+	}
+	p, err := ociPlatform(info.OSType, info.Architecture)
+	if err != nil {
+		return "", err
+	}
+	e.mu.Lock()
+	e.plat = p
+	e.mu.Unlock()
+	return p, nil
+}
+
+// ociPlatform normalizes a daemon-reported os/arch pair ("linux"/"x86_64") into
+// the OCI platform form pulls use ("linux/amd64").
+func ociPlatform(osType, arch string) (string, error) {
+	p, err := platforms.Parse(osType + "/" + arch)
+	if err != nil {
+		return "", z.Err(err, "parse daemon platform %q/%q", osType, arch)
+	}
+	return platforms.Format(platforms.Normalize(p)), nil
+}
+
 func (e *dockerEngine) Close() error { return e.cli.Close() }
 
-func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, sink Sink) error {
+func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, platform string, sink Sink) error {
 	pull_ref := ref
 	if digest != "" {
 		var err error
@@ -83,7 +124,9 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, sink
 			return err
 		}
 	}
-	rc, err := e.cli.ImagePull(ctx, pull_ref, image.PullOptions{})
+	// platform is passed through as-is: if the image has no such platform the
+	// daemon's error surfaces through the pull stream below.
+	rc, err := e.cli.ImagePull(ctx, pull_ref, image.PullOptions{Platform: platform})
 	if err != nil {
 		return z.Err(err, "image pull")
 	}

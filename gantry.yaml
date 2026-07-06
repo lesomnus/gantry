@@ -24,9 +24,9 @@ greet:
 
 # Image stores a job can move images between, keyed by name (order does not
 # matter). kind "oci" is an OCI distribution registry gantry reads/writes;
-# kind "docker"/"containerd" is a daemon gantry can trigger to pull (via
-# POST /v1/store/{name}/pull). A job copies `from` (oci) -> `to` (oci); loading
-# the image onto an engine is a separate, explicit pull.
+# kind "docker"/"containerd" is a daemon that pulls. A job moves `from` (oci)
+# -> `to`: an oci registry (gantry copies the blobs in) or an engine (the
+# daemon is told to pull — empty `platforms` uses the daemon host's platform).
 # Top-level: shared by every subcommand, not nested under `serve`.
 stores:
   # Source registry (remote). host defaults to the store name when omitted.
@@ -93,8 +93,6 @@ stores:
 
 # Job worker pool that runs image moves. Top-level, not nested under `serve`.
 worker:
-  # Fallback platforms when a job omits them; empty = host GOOS/GOARCH only.
-  platforms: ["linux/amd64", "linux/arm64"]
   # Max jobs run at once (tier-1 worker pool).
   max_concurrent_jobs: 2
   # Max layers moved at once during a job's registry copy (tier-2).

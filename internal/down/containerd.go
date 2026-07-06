@@ -10,6 +10,7 @@ import (
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/containerd/platforms"
 	"github.com/containerd/typeurl/v2"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/z"
@@ -45,7 +46,15 @@ func (e *containerdEngine) Ready(ctx context.Context) error {
 
 func (e *containerdEngine) Close() error { return e.cli.Close() }
 
-func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, sink Sink) error {
+// Platform reports the daemon host's platform in OCI form. containerd exposes no
+// daemon-host-platform API, so this is the local host's default platform — exact
+// for the unix-socket deployments containerd stores are (the daemon shares the
+// host), an approximation for a remote daemon on a different arch.
+func (e *containerdEngine) Platform(context.Context) (string, error) {
+	return platforms.Format(platforms.DefaultSpec()), nil
+}
+
+func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, platform string, sink Sink) error {
 	ctx = namespaces.WithNamespace(ctx, e.namespace)
 	pull_ref := ref
 	if digest != "" {
@@ -54,9 +63,15 @@ func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, 
 			return err
 		}
 	}
+	opts := []containerd.RemoteOpt{containerd.WithPullUnpack}
+	if platform != "" {
+		// Passed through as-is; a platform the image does not provide surfaces as
+		// the daemon's pull error.
+		opts = append(opts, containerd.WithPlatform(platform))
+	}
 	done := make(chan struct{})
 	go e.poll(ctx, sink, done)
-	img, err := e.cli.Pull(ctx, pull_ref, containerd.WithPullUnpack)
+	img, err := e.cli.Pull(ctx, pull_ref, opts...)
 	close(done)
 	if err != nil {
 		return z.Err(err, "pull")

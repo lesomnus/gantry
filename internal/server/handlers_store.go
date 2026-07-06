@@ -27,6 +27,9 @@ func (s *Server) handleListStores(w http.ResponseWriter, r *http.Request) {
 
 type storePullRequest struct {
 	Ref string `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference the engine store should pull (required).
+	// Platform to pull ("os/arch", e.g. "linux/arm64"); empty uses the daemon's
+	// default. Passed through as-is — an unavailable platform is the daemon's error.
+	Platform string `json:"platform,omitempty" example:"linux/arm64"`
 }
 
 // handleStorePull godoc
@@ -59,7 +62,7 @@ func (s *Server) handleStorePull(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "ref is required")
 		return
 	}
-	if err := eng.Pull(r.Context(), req.Ref, "", nopSink{}); err != nil {
+	if err := eng.Pull(r.Context(), req.Ref, "", req.Platform, nopSink{}); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
