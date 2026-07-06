@@ -15,7 +15,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
-	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/internal/xport"
@@ -55,27 +54,20 @@ func newMetrics(ctx context.Context) *metrics {
 	return &metrics{bytes: bytes, duration: duration, active: active}
 }
 
-// Request is a job submission: move Ref from store From into store To, then have
-// the Distribute engines pull it. From/To are registry stores (name or host);
-// Distribute are engine stores. To may be empty (engines pull from From directly).
+// Request is a job submission: copy Ref from store From into store To. From and
+// To are registry stores (a declared name or a bare host). Distributing the
+// copied image onto an engine is a separate, explicit action (POST
+// /v1/store/{name}/pull), not part of a job.
 type Request struct {
-	Ref        string
-	Platforms  []string
-	From       string
-	To         string
-	Distribute []string
+	Ref       string
+	Platforms []string
+	From      string
+	To        string
 	// CopyReferrers copies the source's referrer artifacts (e.g. notation
 	// signatures) into the cache alongside the image, preserving the source
 	// digest so the signatures still verify there. nil defaults to on when
 	// verification is enabled and the destination is a copy-mode cache.
 	CopyReferrers *bool
-}
-
-// engineStep is one resolved downstream pull.
-type engineStep struct {
-	transfer int // index into Job.Transfers
-	engine   down.Engine
-	ref      string
 }
 
 // jobExec is the resolved plan for a job, computed at submit time.
@@ -85,14 +77,11 @@ type jobExec struct {
 	hasCache      bool
 	copyReferrers bool
 	src           name.Reference
-	dst           name.Reference // valid only when hasCache
-	cacheIdx      int            // index of the registry transfer, or -1
-	engines       []engineStep
+	dst           name.Reference        // valid only when hasCache
+	cacheIdx      int                   // index of the registry transfer, or -1
 	verification  *VerificationSnapshot // admission-time verification, stamped onto the Job
 
-	// committed is the digest the cache copy landed at, set by runCopy; engine
-	// pulls are anchored to it so a mutable tag re-resolved by the cache cannot
-	// substitute different bytes.
+	// committed is the digest the cache copy landed at, set by runCopy.
 	committed v1.Hash
 }
 
@@ -107,9 +96,8 @@ type Warmer struct {
 	idgen    func() string
 	srcOpts  []name.Option // parse options for the source ref (tests inject name.Insecure)
 	metrics  *metrics
-	distHook func(engine, ref string) // notified when an engine pull completes (retention)
-	verifier verify.Verifier          // source-signature verification (nil = disabled)
-	rec      Recorder                 // audit log (nil = disabled)
+	verifier verify.Verifier // source-signature verification (nil = disabled)
+	rec      Recorder        // audit log (nil = disabled)
 
 	base context.Context
 	stop chan struct{} // closed by Stop; ends goroutines not fed by the jobs channel
@@ -131,10 +119,6 @@ func NewWarmer(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Warme
 		stop:    make(chan struct{}),
 	}
 }
-
-// SetDistributeHook registers a callback invoked (engine name, ref) after each
-// successful downstream pull — used to stamp the retention index.
-func (w *Warmer) SetDistributeHook(fn func(engine, ref string)) { w.distHook = fn }
 
 // SetVerifier enables source-signature verification at job admission. Must be
 // set before Start/Submit.
@@ -246,7 +230,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 		return JobSnapshot{}, false, err
 	}
 
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name, req.Distribute)
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name)
 	if snap, ok := w.store.Active(key); ok {
 		return snap, false, nil
 	}
@@ -298,15 +282,8 @@ func (w *Warmer) Retry(id string) (JobSnapshot, bool, error) {
 	return w.Submit(req)
 }
 
-// EnginePull is one resolved downstream pull in a PlanResult.
-type EnginePull struct {
-	Store string `json:"store"`
-	Ref   string `json:"ref"`
-}
-
 // PlanResult is the fully resolved admission plan — store bindings, rewritten
-// refs, engine pull refs, and the verification outcome — without moving bytes
-// or creating a job.
+// refs, and the verification outcome — without moving bytes or creating a job.
 type PlanResult struct {
 	Ref           string                `json:"ref"`
 	From          string                `json:"from"`
@@ -316,7 +293,6 @@ type PlanResult struct {
 	Platforms     []string              `json:"platforms"`         // empty = all platforms
 	CopyReferrers bool                  `json:"copy_referrers"`
 	Verification  *VerificationSnapshot `json:"verification,omitempty"`
-	Engines       []EnginePull          `json:"engines,omitempty"`
 	Coalesces     string                `json:"coalesces,omitempty"` // active job an identical submit would join
 }
 
@@ -338,10 +314,7 @@ func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
 		out.To = ex.to.Name
 		out.DstRef = ex.dst.Name()
 	}
-	for _, step := range ex.engines {
-		out.Engines = append(out.Engines, EnginePull{Store: step.engine.Name(), Ref: step.ref})
-	}
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name, req.Distribute)
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.to.Name)
 	if snap, ok := w.store.Active(key); ok {
 		out.Coalesces = snap.ID
 	}
@@ -395,7 +368,7 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 	}
 
 	// Verify the source signature (fail-closed) before admitting the job, and pin
-	// ex.src to the verified digest so copy/distribute move exactly what was
+	// ex.src to the verified digest so the copy moves exactly what was
 	// verified. Runs after the cache (dst) ref is derived from the tag, so the
 	// cache stays tag-named; only the source pull is pinned to the digest.
 	verified := false
@@ -455,32 +428,8 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		}
 	}
 
-	// distribute targets (engines)
-	names := req.Distribute
-	if names == nil && w.wc.DistributeByDefault {
-		names = w.stores.EngineNames()
-	}
-	pullBase := ex.src
-	if ex.hasCache {
-		pullBase = ex.dst
-	}
-	for _, n := range names {
-		eng, err := w.stores.Engine(n)
-		if err != nil {
-			return nil, nil, nil, z.Err(err, "distribute")
-		}
-		ref, err := w.pullRef(n, pullBase, ex)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		ex.engines = append(ex.engines, engineStep{transfer: len(transfers), engine: eng, ref: ref})
-		transfers = append(transfers, &Transfer{
-			Store: n, Kind: eng.Kind(), From: transferFrom(ex), Ref: ref, State: "pending",
-		})
-	}
-
 	if len(transfers) == 0 {
-		return nil, nil, nil, fmt.Errorf("job has nothing to do: set `to` and/or `distribute`")
+		return nil, nil, nil, fmt.Errorf("job has nothing to do: set `to`")
 	}
 	return ex, transfers, platforms, nil
 }
@@ -490,22 +439,6 @@ func transferFrom(ex *jobExec) string {
 		return ex.to.Name
 	}
 	return ex.from.Name
-}
-
-// pullRef computes the reference an engine is told to pull, applying the engine's
-// pull_host or the cache store's downstream_host override.
-func (w *Warmer) pullRef(engineName string, base name.Reference, ex *jobExec) (string, error) {
-	host := ""
-	if c, ok := w.stores.Config(engineName); ok {
-		host = c.PullHost
-	}
-	if host == "" && ex.hasCache {
-		host = ex.to.DownstreamHost
-	}
-	if host == "" {
-		return base.Name(), nil
-	}
-	return rewriteHost(base, host)
 }
 
 func (w *Warmer) worker() {
@@ -569,9 +502,6 @@ func (w *Warmer) execute(ctx context.Context, job *Job) error {
 		if err := w.runCopy(ctx, job, ex); err != nil {
 			return err
 		}
-	}
-	if len(ex.engines) > 0 {
-		w.runDistribute(ctx, job, ex)
 	}
 	return nil
 }
@@ -667,58 +597,6 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	return firstErr
 }
 
-// runDistribute triggers each engine to pull concurrently. An engine failure
-// marks only its transfer; the job still completes.
-func (w *Warmer) runDistribute(ctx context.Context, job *Job, ex *jobExec) {
-	// Anchor engine pulls to the digest the cache copy committed: a pull-through
-	// cache re-resolves mutable tags upstream, so a tag pull could hand engines
-	// different (unverified) bytes than what was just copied.
-	digest := ""
-	if ex.hasCache && ex.committed != (v1.Hash{}) {
-		digest = ex.committed.String()
-	}
-	var wg sync.WaitGroup
-	for _, step := range ex.engines {
-		wg.Add(1)
-		go func(step engineStep) {
-			defer wg.Done()
-			t := job.Transfers[step.transfer]
-			w.store.Update(job.ID, func(*Job) {
-				t.State = "running"
-				t.Digest = digest
-			})
-			sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
-			err := step.engine.Pull(ctx, step.ref, digest, sink)
-			if err != nil {
-				log.From(ctx).Warn("distribute failed",
-					slog.String("engine", step.engine.Name()), slog.String("ref", step.ref), slog.String("error", err.Error()))
-			} else {
-				log.From(ctx).Info("distributed",
-					slog.String("engine", step.engine.Name()), slog.String("ref", step.ref))
-			}
-			w.store.Update(job.ID, func(*Job) {
-				if err != nil {
-					t.State = "failed"
-					t.Err = err.Error()
-					return
-				}
-				for _, lp := range t.Layers {
-					if lp.State != "exists" {
-						lp.State = "done"
-						lp.Done.Store(lp.Total)
-					}
-				}
-				t.BytesDone.Store(t.BytesTotal)
-				t.State = "done"
-			})
-			if err == nil && w.distHook != nil {
-				w.distHook(step.engine.Name(), step.ref)
-			}
-		}(step)
-	}
-	wg.Wait()
-}
-
 func (w *Warmer) failTransfer(job *Job, t *Transfer, err error) error {
 	w.store.Update(job.ID, func(*Job) {
 		t.State = "failed"
@@ -784,69 +662,11 @@ func (s *layerSink) SetState(state string) {
 	s.w.store.Update(s.jobID, func(*Job) { s.lp.State = state })
 }
 
-// engineSink folds an engine's per-layer reports into a Transfer, upserting
-// layers by digest and recomputing the transfer totals.
-type engineSink struct {
-	w     *Warmer
-	jobID string
-	t     *Transfer
-	idx   map[string]*LayerProgress
-}
-
-func (s *engineSink) Layer(u down.LayerUpdate) {
-	s.w.store.Update(s.jobID, func(*Job) {
-		lp := s.idx[u.Digest]
-		if lp == nil {
-			lp = &LayerProgress{Digest: u.Digest, State: "pulling"}
-			s.idx[u.Digest] = lp
-			s.t.Layers = append(s.t.Layers, lp)
-		}
-		if u.Total > 0 {
-			lp.Total = u.Total
-		}
-		switch u.State {
-		case "exists":
-			lp.State = "exists"
-			lp.Done.Store(lp.Total)
-		case "done":
-			lp.State = "done"
-			if lp.Total > 0 {
-				lp.Done.Store(lp.Total)
-			}
-		default:
-			lp.State = "pulling"
-			lp.Done.Store(u.Done)
-		}
-		var tot, done int64
-		for _, l := range s.t.Layers {
-			tot += l.Total
-			done += l.Done.Load()
-		}
-		s.t.BytesTotal = tot
-		s.t.BytesDone.Store(done)
-	})
-}
-
 func identifier(ref name.Reference) string {
 	if d, ok := ref.(name.Digest); ok {
 		return "@" + d.DigestStr()
 	}
 	return ":" + ref.Identifier()
-}
-
-// rewriteHost replaces the registry host of ref, preserving repo path and tag/digest.
-func rewriteHost(ref name.Reference, host string) (string, error) {
-	repo := ref.Context().RepositoryStr()
-	var out string
-	if d, ok := ref.(name.Digest); ok {
-		out = host + "/" + repo + "@" + d.DigestStr()
-	} else {
-		out = host + "/" + repo + ":" + ref.Identifier()
-	}
-	if _, err := name.ParseReference(out); err != nil {
-		return "", z.Err(err, "invalid downstream ref %q", out)
-	}
-	return out, nil
 }
 
 func jobBytes(job *Job) int64 {

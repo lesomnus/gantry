@@ -100,12 +100,10 @@ func (j *Job) Canceled() bool { return j.canceled.Load() }
 func (j *Job) DedupKey() string { return j.dedup }
 
 // dedupKey collapses identical moves (same image, platforms, route) onto one job.
-func dedupKey(ref string, platforms []string, from, to string, distribute []string) string {
+func dedupKey(ref string, platforms []string, from, to string) string {
 	ps := append([]string(nil), platforms...)
 	sort.Strings(ps)
-	ds := append([]string(nil), distribute...)
-	sort.Strings(ds)
-	return strings.Join([]string{ref, strings.Join(ps, ","), from, to, strings.Join(ds, ",")}, "\x00")
+	return strings.Join([]string{ref, strings.Join(ps, ","), from, to}, "\x00")
 }
 
 // Transfer is one step of a job: moving an image into a store. A registry copy

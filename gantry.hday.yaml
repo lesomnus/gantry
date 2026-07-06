@@ -23,7 +23,7 @@ stores:
       - { "**": "{{.CacheHost}}/{{.Repo}}" }
 
   # Docker daemons gantry triggers to pull the cached image.
-  # List any subset of these under a job's `distribute`.
+  # Load a cached image onto one of these with POST /v1/store/{name}/pull.
   dockerd-10-2:
     kind: docker
     address: "tcp://192.168.10.2:2376"    # daemon TLS port

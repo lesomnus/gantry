@@ -127,7 +127,7 @@ func TestWarmerNothingToDo(t *testing.T) {
 	w, _ := newWarmer(t, nil, true)
 	w.base = context.Background()
 	if _, _, err := w.Submit(Request{Ref: "x/y:1", From: "r.io"}); err == nil {
-		t.Error("expected error when neither to nor distribute is set")
+		t.Error("expected error when `to` is not set")
 	}
 }
 

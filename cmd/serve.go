@@ -116,9 +116,6 @@ func NewCmdServe() *xli.Command {
 			if events != nil {
 				wmr.SetRecorder(event.NewRecorder(events))
 			}
-			if gc != nil {
-				wmr.SetDistributeHook(func(engine, ref string) { gc.Distributed(engine, ref, time.Now()) })
-			}
 			// The interface type matters: a nil *Swappable in a verify.Service
 			// interface is non-nil and would bypass every disabled-guard.
 			var vf verify.Service

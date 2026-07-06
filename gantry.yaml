@@ -24,8 +24,9 @@ greet:
 
 # Image stores a job can move images between, keyed by name (order does not
 # matter). kind "oci" is an OCI distribution registry gantry reads/writes;
-# kind "docker"/"containerd" is a daemon gantry triggers to pull. A job copies
-# `from` (oci) -> `to` (oci), then the `distribute` engines pull it.
+# kind "docker"/"containerd" is a daemon gantry can trigger to pull (via
+# POST /v1/store/{name}/pull). A job copies `from` (oci) -> `to` (oci); loading
+# the image onto an engine is a separate, explicit pull.
 # Top-level: shared by every subcommand, not nested under `serve`.
 stores:
   # Source registry (remote). host defaults to the store name when omitted.
@@ -102,8 +103,6 @@ worker:
   queue_size: 256
   # How long a finished job's record is kept before eviction.
   job_ttl: "30m"
-  # When a job omits `distribute`, fan out to all engine stores.
-  distribute_by_default: false
 
 # Server configuration (used by the `serve` subcommand).
 serve:

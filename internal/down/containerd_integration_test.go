@@ -52,7 +52,7 @@ func TestContainerdEngineLive(t *testing.T) {
 	}
 }
 
-// TestContainerdAnchoredPull covers the digest-anchored distribute path: the
+// TestContainerdAnchoredPull covers the digest-anchored pull path: the
 // engine pulls repo@digest, tags it under the requested ref, and — critically —
 // does NOT leave the digest-named record behind (which would root the content
 // forever, defeating retention GC).

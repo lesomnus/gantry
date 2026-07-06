@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
-	"github.com/lesomnus/gantry/internal/down"
 	godigest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -184,7 +182,7 @@ func TestPlanCopyReferrersConflicts(t *testing.T) {
 		}
 	})
 	t.Run("no destination", func(t *testing.T) {
-		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", Distribute: []string{"nope"}, CopyReferrers: &yes})
+		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", CopyReferrers: &yes})
 		if err == nil {
 			t.Error("copy_referrers without `to` must be rejected, not silently ignored")
 		}
@@ -239,52 +237,4 @@ func TestCopyReferrersDefault(t *testing.T) {
 			t.Error("default must respect request platform narrowing")
 		}
 	})
-}
-
-// capturingEngine records the (ref, digest) it was told to pull.
-type capturingEngine struct {
-	ref    string
-	digest string
-}
-
-func (e *capturingEngine) Name() string                                   { return "cap" }
-func (e *capturingEngine) Kind() string                                   { return "docker" }
-func (e *capturingEngine) Ready(context.Context) error                    { return nil }
-func (e *capturingEngine) InUse(context.Context) (map[string]bool, error) { return nil, nil }
-func (e *capturingEngine) SeedUsage(context.Context, down.UsageSink) error {
-	return nil
-}
-func (e *capturingEngine) WatchUsage(context.Context, down.UsageSink) error { return nil }
-func (e *capturingEngine) Remove(context.Context, string) (down.RemoveResult, error) {
-	return down.RemoveResult{}, nil
-}
-func (e *capturingEngine) Close() error { return nil }
-func (e *capturingEngine) Pull(_ context.Context, ref string, digest string, _ down.Sink) error {
-	e.ref, e.digest = ref, digest
-	return nil
-}
-
-func TestRunDistributeAnchorsToCommittedDigest(t *testing.T) {
-	w, js := newWarmer(t, nil, true)
-	job := NewJob("job_d", "a/b:1", nil, time.Now())
-	tr := &Transfer{Store: "cap", Kind: "docker", Ref: "cache.local/a/b:1", State: "pending"}
-	job.Transfers = []*Transfer{tr}
-	if err := js.Add(job); err != nil {
-		t.Fatal(err)
-	}
-	eng := &capturingEngine{}
-	committed := v1.Hash{Algorithm: "sha256", Hex: "0123456789012345678901234567890123456789012345678901234567890123"}
-	ex := &jobExec{
-		hasCache:  true,
-		committed: committed,
-		engines:   []engineStep{{transfer: 0, engine: eng, ref: "cache.local/a/b:1"}},
-	}
-	w.runDistribute(context.Background(), job, ex)
-	if eng.digest != committed.String() {
-		t.Errorf("engine pull digest = %q, want %q", eng.digest, committed)
-	}
-	snap, _ := js.Snapshot("job_d")
-	if snap.Transfers[0].Digest != committed.String() {
-		t.Errorf("transfer digest = %q, want committed digest", snap.Transfers[0].Digest)
-	}
 }
