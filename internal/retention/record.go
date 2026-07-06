@@ -35,7 +35,12 @@ func (r Record) effLastUsed() time.Time {
 type Policy struct {
 	MaxAge time.Duration `json:"max_age"`
 	KeepN  int           `json:"keep_n"`
-	Pins   []string      `json:"pins"` // exact refs
+	// MaxN caps the number of tags kept per repository: when a repo has more than
+	// MaxN non-protected tags, the oldest beyond the cap are deleted even if not
+	// yet past MaxAge. Zero disables the cap. When both are set MaxN must be >=
+	// KeepN. The cap is deferred during the startup grace window, like age GC.
+	MaxN int      `json:"max_n"`
+	Pins []string `json:"pins"` // exact refs
 }
 
 // Candidate is one image marked for deletion.
@@ -43,7 +48,7 @@ type Candidate struct {
 	Ref      string    `json:"ref"`
 	Digest   string    `json:"digest,omitempty"`
 	LastUsed time.Time `json:"last_used"`
-	Reason   string    `json:"reason"` // age_exceeded
+	Reason   string    `json:"reason"` // age_exceeded | max_n_exceeded
 }
 
 // Kept is one image protected from deletion, with the protecting reason.

@@ -117,8 +117,11 @@ serve:
   #   2. pinned         - matches a `pins` entry or an API pin (exact ref, or a
   #                       doublestar pattern tried against the full ref,
   #                       name:tag, and the bare tag)
-  #   3. keep_n_recent  - the N most-recently-used tags *per repository*
-  #   4. within_max_age - last used more recently than `max_age`
+  #   3. max_n cap      - of the rest, only the max_n most-recent tags *per repo*
+  #                       survive; the oldest beyond the cap are deleted (reason
+  #                       max_n_exceeded) even if still within max_age
+  #   4. keep_n_recent  - the N most-recently-used tags *per repository*
+  #   5. within_max_age - last used more recently than `max_age`
   # Anything else is deleted (held only by the post-startup `grace` window).
   # retention:
   #   # bbolt index file (persists last-used + pins across restarts).
@@ -127,6 +130,10 @@ serve:
   #   max_age: "720h"          # 30 days
   #   # Keep the N most-recently-used tags per repo, even if older than max_age.
   #   keep_n: 3
+  #   # Cap the tags kept per repo: when a repo exceeds max_n non-protected (not
+  #   # in-use, not pinned) tags, the oldest beyond the cap are deleted even before
+  #   # max_age. Must be >= keep_n. Deferred during the grace window. 0 disables.
+  #   max_n: 20
   #   # Never collected (in addition to the pin API): exact refs or doublestar
   #   # patterns (e.g. "*:stable" pins every stable tag).
   #   pins:

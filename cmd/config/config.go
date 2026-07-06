@@ -135,6 +135,15 @@ func (c *Config) Evaluate() error {
 				return z.Err(nil, "serve.retention.pins: invalid doublestar pattern %q", pin)
 			}
 		}
+		if c.Serve.Retention.MaxN < 0 {
+			return z.Err(nil, "serve.retention.max_n must not be negative")
+		}
+		// max_n is a ceiling and keep_n a floor; max_n < keep_n is contradictory
+		// (keep at least keep_n, but at most max_n).
+		if c.Serve.Retention.MaxN > 0 && c.Serve.Retention.KeepN > c.Serve.Retention.MaxN {
+			return z.Err(nil, "serve.retention.max_n (%d) must be >= keep_n (%d)",
+				c.Serve.Retention.MaxN, c.Serve.Retention.KeepN)
+		}
 		z.FallbackP((*time.Duration)(&c.Serve.Retention.Interval), time.Hour)
 		z.FallbackP((*time.Duration)(&c.Serve.Retention.MinInterval), time.Minute)
 		// Grace defaults to MaxAge: protect everything for one max-age window after

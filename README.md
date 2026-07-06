@@ -88,7 +88,7 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/v1/gc` | GC scheduler status: last run, next wake, grace window, effective policy, per-engine index counts. |
-| `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`pins`. |
+| `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`max_n`/`pins`. |
 | `GET` · `POST` · `DELETE` | `/v1/store/{name}/pin` | List / add / remove pins (an exact `ref` or a doublestar `pattern`), exempt from GC. |
 | `GET` · `DELETE` | `/v1/store/{name}/image` | List the retention inventory (filters: `?repo=`, `?ref=`, `?pinned=`); `DELETE` purges one orphan record without touching the engine. |
 | `GET` | `/v1/store/{name}/watcher` | Usage-event stream liveness (a dead stream silently degrades age GC). |
@@ -145,7 +145,9 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
 - `serve.retention` — image GC on engine stores (disabled unless `path` is set).
   gantry tracks last-used time from the engine's container events, then keeps
   in-use, `pins` (exact refs or doublestar patterns), the `keep_n` most-recent tags
-  per repo, and anything newer than `max_age`; the rest is reclaimed. The scheduler
+  per repo, and anything newer than `max_age`; the rest is reclaimed. `max_n` caps
+  the tags kept per repo — the oldest beyond the cap are deleted even before
+  `max_age` — so a hot repo cannot pile up tags between age-outs. The scheduler
   is adaptive — it idles up to `interval` and wakes only when a record is about to
   age out or usage changes.
 - `serve.events` — the audit log (disabled unless `path` is set): a bounded bbolt

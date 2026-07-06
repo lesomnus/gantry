@@ -70,13 +70,14 @@ type removeRequest struct {
 type gcRequest struct {
 	MaxAge *config.Duration `json:"max_age,omitempty" swaggertype:"string" example:"720h"` // Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.
 	KeepN  *int             `json:"keep_n,omitempty" example:"3"`                          // Override how many most-recent tags to keep per repo; 0 disables keep-N.
+	MaxN   *int             `json:"max_n,omitempty" example:"20"`                          // Override the per-repo tag cap; 0 disables the cap. Must be >= keep_n.
 	Pins   []string         `json:"pins,omitempty" example:"docker.io/library/nginx:1.27"` // Override the pinned references exempt from GC.
 }
 
 // handleStoreGCPlan godoc
 //
 //	@Summary	Evaluate retention GC for a store (dry-run)
-//	@Description	Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
+//	@Description	Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/max_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
 //	@Tags		retention
 //	@Accept		json
 //	@Produce	json
@@ -94,7 +95,7 @@ func (s *Server) handleStoreGCPlan(w http.ResponseWriter, r *http.Request) { s.h
 // handleStoreGCApply godoc
 //
 //	@Summary	Run retention GC for a store (apply)
-//	@Description	Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/pins for this call.
+//	@Description	Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins for this call.
 //	@Tags		retention
 //	@Accept		json
 //	@Produce	json
@@ -134,6 +135,9 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 		if req.KeepN != nil {
 			p.KeepN = *req.KeepN
 		}
+		if req.MaxN != nil {
+			p.MaxN = *req.MaxN
+		}
 		if req.Pins != nil {
 			for _, pin := range req.Pins {
 				if !doublestar.ValidatePattern(pin) {
@@ -142,6 +146,14 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			p.Pins = req.Pins
+		}
+		if p.MaxN < 0 {
+			writeErr(w, http.StatusBadRequest, "max_n must not be negative")
+			return
+		}
+		if p.MaxN > 0 && p.KeepN > p.MaxN {
+			writeErr(w, http.StatusBadRequest, "max_n must be >= keep_n")
+			return
 		}
 	}
 	dec, err := s.gc.Plan(r.Context(), name, p)

@@ -106,7 +106,7 @@ components:
         last_used:
           type: string
         reason:
-          description: age_exceeded
+          description: age_exceeded | max_n_exceeded
           type: string
         ref:
           type: string
@@ -155,6 +155,8 @@ components:
           type: integer
         max_age:
           type: string
+        max_n:
+          type: integer
         pins:
           items:
             type: string
@@ -345,6 +347,11 @@ components:
             age GC.
           example: 720h
           type: string
+        max_n:
+          description: Override the per-repo tag cap; 0 disables the cap. Must be
+            >= keep_n.
+          example: 20
+          type: integer
         pins:
           description: Override the pinned references exempt from GC.
           example:
@@ -1249,9 +1256,9 @@ paths:
   /v1/store/{name}/gc:
     get:
       description: 'Returns the retention decision (keep/delete) without deleting
-        anything. An optional body overrides the configured max_age/keep_n/pins for
-        this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients,
-        and proxies — to pass overrides reliably, use POST.'
+        anything. An optional body overrides the configured max_age/keep_n/max_n/pins
+        for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP
+        clients, and proxies — to pass overrides reliably, use POST.'
       parameters:
       - description: engine store name
         in: path
@@ -1303,7 +1310,7 @@ paths:
       - retention
     post:
       description: Applies the deletions and returns the apply result. An optional
-        body overrides the configured max_age/keep_n/pins for this call.
+        body overrides the configured max_age/keep_n/max_n/pins for this call.
       parameters:
       - description: engine store name
         in: path
