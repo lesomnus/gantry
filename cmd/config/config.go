@@ -4,7 +4,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 	"github.com/lesomnus/z"
 )
@@ -96,7 +95,23 @@ func (c *Config) Evaluate() error {
 		if s.Verify != nil && !s.Verify.Mode.Valid() {
 			return z.Err(nil, "store %q: verify.mode %q is not one of off/verify-if-present/require", name, s.Verify.Mode)
 		}
+		if err := s.evaluateRetention(); err != nil {
+			return z.Err(err, "store %q", name)
+		}
 		c.Stores[name] = s
+	}
+
+	// Two stores must not share a retention index file: bbolt takes an exclusive
+	// lock, so the second Open would fail with an opaque timeout at startup.
+	retentionPaths := map[string]string{}
+	for name, s := range c.Stores {
+		if !s.Retention.Enabled() {
+			continue
+		}
+		if other, dup := retentionPaths[s.Retention.Path]; dup {
+			return z.Err(nil, "stores %q and %q share retention.path %q; each store needs its own index file", other, name, s.Retention.Path)
+		}
+		retentionPaths[s.Retention.Path] = name
 	}
 
 	z.FallbackP((*time.Duration)(&c.Serve.Health.CacheTTL), 5*time.Second)
@@ -126,30 +141,6 @@ func (c *Config) Evaluate() error {
 			// (authenticity) checks to log-only, so a job would be admitted even
 			// for a signature that does not chain to the trust store.
 			return z.Err(nil, "serve.verify.level %q is not one of strict/permissive", c.Serve.Verify.Level)
-		}
-	}
-
-	if c.Serve.Retention.Enabled() {
-		for _, pin := range c.Serve.Retention.Pins {
-			if !doublestar.ValidatePattern(pin) {
-				return z.Err(nil, "serve.retention.pins: invalid doublestar pattern %q", pin)
-			}
-		}
-		if c.Serve.Retention.MaxN < 0 {
-			return z.Err(nil, "serve.retention.max_n must not be negative")
-		}
-		// max_n is a ceiling and keep_n a floor; max_n < keep_n is contradictory
-		// (keep at least keep_n, but at most max_n).
-		if c.Serve.Retention.MaxN > 0 && c.Serve.Retention.KeepN > c.Serve.Retention.MaxN {
-			return z.Err(nil, "serve.retention.max_n (%d) must be >= keep_n (%d)",
-				c.Serve.Retention.MaxN, c.Serve.Retention.KeepN)
-		}
-		z.FallbackP((*time.Duration)(&c.Serve.Retention.Interval), time.Hour)
-		z.FallbackP((*time.Duration)(&c.Serve.Retention.MinInterval), time.Minute)
-		// Grace defaults to MaxAge: protect everything for one max-age window after
-		// startup so the downtime gap can't trigger wrongful deletion.
-		if c.Serve.Retention.Grace == 0 {
-			c.Serve.Retention.Grace = c.Serve.Retention.MaxAge
 		}
 	}
 

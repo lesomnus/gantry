@@ -31,16 +31,29 @@ func (r Record) effLastUsed() time.Time {
 	}
 }
 
-// Policy is the retention policy applied at GC time.
+// Policy is the retention policy resolved for a single repository and applied at
+// GC time (the cascade of the store's matching Rules — see resolvePolicy).
 type Policy struct {
 	MaxAge time.Duration `json:"max_age"`
 	KeepN  int           `json:"keep_n"`
-	// MaxN caps the number of tags kept per repository: when a repo has more than
+	// MaxN caps the number of tags kept in the repository: when it has more than
 	// MaxN non-protected tags, the oldest beyond the cap are deleted even if not
 	// yet past MaxAge. Zero disables the cap. When both are set MaxN must be >=
 	// KeepN. The cap is deferred during the startup grace window, like age GC.
 	MaxN int      `json:"max_n"`
-	Pins []string `json:"pins"` // exact refs
+	Pins []string `json:"pins"`
+}
+
+// Rule is one per-repo retention rule (the retention-package mirror of
+// config.RetentionRule). Repo is a doublestar pattern; scalar fields are pointers
+// so an unset field (inherit from a less specific matching rule) is distinct from
+// an explicit zero. resolvePolicy cascades a store's rules into a Policy per repo.
+type Rule struct {
+	Repo   string
+	MaxAge *time.Duration
+	KeepN  *int
+	MaxN   *int
+	Pins   []string
 }
 
 // Candidate is one image marked for deletion.
@@ -54,7 +67,7 @@ type Candidate struct {
 // Kept is one image protected from deletion, with the protecting reason.
 type Kept struct {
 	Ref    string `json:"ref"`
-	Reason string `json:"reason"` // in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled
+	Reason string `json:"reason"` // in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged
 }
 
 // Decision is the result of evaluating the policy over a store's records.

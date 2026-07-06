@@ -230,32 +230,56 @@ Scheduler observability: when GC last ran and will next wake, whether the post-s
 ```json
 {
   "enabled": true,
-  "grace_until": "string",
-  "last_run": "string",
-  "next_wake": "string",
-  "policy": {
-    "keep_n": 0,
-    "max_age": "string",
-    "max_n": 0,
-    "pins": [
-      "string"
-    ]
-  },
-  "running": true,
-  "schedule": {
-    "grace": "string",
-    "interval": "string",
-    "min_interval": "string"
-  },
-  "started": "string",
   "stores": {
     "property1": {
+      "grace_until": "string",
+      "last_run": "string",
+      "next_wake": "string",
       "pins": 0,
-      "records": 0
+      "records": 0,
+      "rules": [
+        {
+          "keep_n": 0,
+          "max_age": "string",
+          "max_n": 0,
+          "pins": [
+            "string"
+          ],
+          "repo": "string"
+        }
+      ],
+      "running": true,
+      "schedule": {
+        "grace": "string",
+        "interval": "string",
+        "min_interval": "string"
+      },
+      "started": "string"
     },
     "property2": {
+      "grace_until": "string",
+      "last_run": "string",
+      "next_wake": "string",
       "pins": 0,
-      "records": 0
+      "records": 0,
+      "rules": [
+        {
+          "keep_n": 0,
+          "max_age": "string",
+          "max_n": 0,
+          "pins": [
+            "string"
+          ],
+          "repo": "string"
+        }
+      ],
+      "running": true,
+      "schedule": {
+        "grace": "string",
+        "interval": "string",
+        "min_interval": "string"
+      },
+      "started": "string"
     }
   }
 }
@@ -2079,7 +2103,7 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|reason|string|false|none|in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled|
+|reason|string|false|none|in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged|
 |ref|string|false|none|none|
 
 <h2 id="tocS_retention.PinEntry">retention.PinEntry</h2>
@@ -2105,34 +2129,6 @@ BearerAuth
 |pattern|boolean|false|none|none|
 |pinned_at|string|false|none|zero for pins stored before entries carried a timestamp|
 |value|string|false|none|none|
-
-<h2 id="tocS_retention.PolicyStatus">retention.PolicyStatus</h2>
-<!-- backwards compatibility -->
-<a id="schemaretention.policystatus"></a>
-<a id="schema_retention.PolicyStatus"></a>
-<a id="tocSretention.policystatus"></a>
-<a id="tocsretention.policystatus"></a>
-
-```json
-{
-  "keep_n": 0,
-  "max_age": "string",
-  "max_n": 0,
-  "pins": [
-    "string"
-  ]
-}
-
-```
-
-### Properties
-
-|Name|Type|Required|Restrictions|Description|
-|---|---|---|---|---|
-|keep_n|integer|false|none|none|
-|max_age|string|false|none|none|
-|max_n|integer|false|none|none|
-|pins|[string]|false|none|none|
 
 <h2 id="tocS_retention.Record">retention.Record</h2>
 <!-- backwards compatibility -->
@@ -2168,6 +2164,36 @@ BearerAuth
 |repo|string|false|none|RepositoryStr(); the keep-N grouping key|
 |tag|string|false|none|tag portion; "" for digest refs|
 
+<h2 id="tocS_retention.RuleStatus">retention.RuleStatus</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.rulestatus"></a>
+<a id="schema_retention.RuleStatus"></a>
+<a id="tocSretention.rulestatus"></a>
+<a id="tocsretention.rulestatus"></a>
+
+```json
+{
+  "keep_n": 0,
+  "max_age": "string",
+  "max_n": 0,
+  "pins": [
+    "string"
+  ],
+  "repo": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|keep_n|integer|false|none|none|
+|max_age|string|false|none|none|
+|max_n|integer|false|none|none|
+|pins|[string]|false|none|none|
+|repo|string|false|none|none|
+
 <h2 id="tocS_retention.ScheduleStatus">retention.ScheduleStatus</h2>
 <!-- backwards compatibility -->
 <a id="schemaretention.schedulestatus"></a>
@@ -2202,32 +2228,56 @@ BearerAuth
 ```json
 {
   "enabled": true,
-  "grace_until": "string",
-  "last_run": "string",
-  "next_wake": "string",
-  "policy": {
-    "keep_n": 0,
-    "max_age": "string",
-    "max_n": 0,
-    "pins": [
-      "string"
-    ]
-  },
-  "running": true,
-  "schedule": {
-    "grace": "string",
-    "interval": "string",
-    "min_interval": "string"
-  },
-  "started": "string",
   "stores": {
     "property1": {
+      "grace_until": "string",
+      "last_run": "string",
+      "next_wake": "string",
       "pins": 0,
-      "records": 0
+      "records": 0,
+      "rules": [
+        {
+          "keep_n": 0,
+          "max_age": "string",
+          "max_n": 0,
+          "pins": [
+            "string"
+          ],
+          "repo": "string"
+        }
+      ],
+      "running": true,
+      "schedule": {
+        "grace": "string",
+        "interval": "string",
+        "min_interval": "string"
+      },
+      "started": "string"
     },
     "property2": {
+      "grace_until": "string",
+      "last_run": "string",
+      "next_wake": "string",
       "pins": 0,
-      "records": 0
+      "records": 0,
+      "rules": [
+        {
+          "keep_n": 0,
+          "max_age": "string",
+          "max_n": 0,
+          "pins": [
+            "string"
+          ],
+          "repo": "string"
+        }
+      ],
+      "running": true,
+      "schedule": {
+        "grace": "string",
+        "interval": "string",
+        "min_interval": "string"
+      },
+      "started": "string"
     }
   }
 }
@@ -2238,28 +2288,42 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|enabled|boolean|false|none|scheduler running (interval > 0)|
-|grace_until|string|false|none|age deletion held off until then|
-|last_run|string|false|none|none|
-|next_wake|string|false|none|none|
-|policy|[retention.PolicyStatus](#schemaretention.policystatus)|false|none|none|
-|running|boolean|false|none|a GC pass is executing right now|
-|schedule|[retention.ScheduleStatus](#schemaretention.schedulestatus)|false|none|none|
-|started|string|false|none|none|
-|stores|object|false|none|per-engine index sizes|
-|» **additionalProperties**|[retention.StoreCounts](#schemaretention.storecounts)|false|none|none|
+|enabled|boolean|false|none|at least one store has scheduling on|
+|stores|object|false|none|none|
+|» **additionalProperties**|[retention.StoreStatus](#schemaretention.storestatus)|false|none|none|
 
-<h2 id="tocS_retention.StoreCounts">retention.StoreCounts</h2>
+<h2 id="tocS_retention.StoreStatus">retention.StoreStatus</h2>
 <!-- backwards compatibility -->
-<a id="schemaretention.storecounts"></a>
-<a id="schema_retention.StoreCounts"></a>
-<a id="tocSretention.storecounts"></a>
-<a id="tocsretention.storecounts"></a>
+<a id="schemaretention.storestatus"></a>
+<a id="schema_retention.StoreStatus"></a>
+<a id="tocSretention.storestatus"></a>
+<a id="tocsretention.storestatus"></a>
 
 ```json
 {
+  "grace_until": "string",
+  "last_run": "string",
+  "next_wake": "string",
   "pins": 0,
-  "records": 0
+  "records": 0,
+  "rules": [
+    {
+      "keep_n": 0,
+      "max_age": "string",
+      "max_n": 0,
+      "pins": [
+        "string"
+      ],
+      "repo": "string"
+    }
+  ],
+  "running": true,
+  "schedule": {
+    "grace": "string",
+    "interval": "string",
+    "min_interval": "string"
+  },
+  "started": "string"
 }
 
 ```
@@ -2268,8 +2332,15 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
+|grace_until|string|false|none|none|
+|last_run|string|false|none|none|
+|next_wake|string|false|none|none|
 |pins|integer|false|none|none|
 |records|integer|false|none|none|
+|rules|[[retention.RuleStatus](#schemaretention.rulestatus)]|false|none|none|
+|running|boolean|false|none|none|
+|schedule|[retention.ScheduleStatus](#schemaretention.schedulestatus)|false|none|none|
+|started|string|false|none|none|
 
 <h2 id="tocS_retention.WatcherStatus">retention.WatcherStatus</h2>
 <!-- backwards compatibility -->

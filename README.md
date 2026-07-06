@@ -25,7 +25,7 @@ GET /v1/job/{id}  ·  GET /v1/job/{id}/progress (SSE)
   per-layer progress is reported best-effort from the daemon.
 - Optionally, gantry reclaims space on the engines it feeds: it tracks each
   image's last-used time from the daemon's container events and runs an adaptive,
-  policy-driven GC (`serve.retention`). See [Configuration](#configuration).
+  policy-driven GC (per-store `retention`). See [Configuration](#configuration).
 - Optionally, gantry verifies the `from` image's signature (Notary Project /
   notation) at job creation and rejects the job on failure — pinning the verified
   digest so it moves exactly what was verified (`serve.verify`). Engines pull that
@@ -83,11 +83,11 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 | `POST` | `/v1/store/{name}/pull` | Trigger one engine store to pull a reference (stamps the retention index). |
 | `POST` | `/v1/store/{name}/remove` | Delete one image from an engine store (syncs the retention index). |
 
-**Retention** (require `serve.retention`)
+**Retention** (require a store's `retention`)
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/gc` | GC scheduler status: last run, next wake, grace window, effective policy, per-engine index counts. |
+| `GET` | `/v1/gc` | GC scheduler status per engine store: last run, next wake, grace window, the store's per-repo rules, and index counts. |
 | `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`max_n`/`pins`. |
 | `GET` · `POST` · `DELETE` | `/v1/store/{name}/pin` | List / add / remove pins (an exact `ref` or a doublestar `pattern`), exempt from GC. |
 | `GET` · `DELETE` | `/v1/store/{name}/image` | List the retention inventory (filters: `?repo=`, `?ref=`, `?pinned=`); `DELETE` purges one orphan record without touching the engine. |
@@ -142,14 +142,16 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   refuses to start), an optional notation `trust_policy`, and `level`. A verified
   image is pinned to its digest for the copy/pull. Per-source-registry `verify.mode`
   overrides the global default.
-- `serve.retention` — image GC on engine stores (disabled unless `path` is set).
-  gantry tracks last-used time from the engine's container events, then keeps
-  in-use, `pins` (exact refs or doublestar patterns), the `keep_n` most-recent tags
-  per repo, and anything newer than `max_age`; the rest is reclaimed. `max_n` caps
-  the tags kept per repo — the oldest beyond the cap are deleted even before
-  `max_age` — so a hot repo cannot pile up tags between age-outs. The scheduler
-  is adaptive — it idles up to `interval` and wakes only when a record is about to
-  age out or usage changes.
+- `stores.<name>.retention` — image GC, configured **per engine store** (there is
+  no global policy). Each store has its own `path` (usage index), scheduler
+  cadence, `grace`, and per-repo `rules`. gantry tracks last-used time from the
+  engine's container events, then keeps in-use, pinned, the `keep_n` most-recent
+  tags per repo, and anything newer than `max_age`; `max_n` caps the tags kept per
+  repo (oldest beyond the cap deleted even before `max_age`). Each rule's `repo`
+  is a doublestar pattern; for a repo the matching rules cascade field-by-field
+  (the longest-prefix match wins each field, pins are unioned), and a repo that
+  matches no rule is left untouched. The scheduler is adaptive — it idles up to
+  `interval` and wakes only when a record is about to age out or usage changes.
 - `serve.events` — the audit log (disabled unless `path` is set): a bounded bbolt
   ring (`cap` entries) of jobs, GC, pins, and manual ops, queryable at `/v1/event`.
 - `serve.auth` — `tokens` (env-expanded), `client_ca`, and server `tls_cert`/`tls_key`.
@@ -176,7 +178,7 @@ Implemented and tested (unit + live docker/containerd integration; `go test -rac
 
 - **Image movement** — the store/transfer model, `copy`/`proxy` fill, the engine
   pull seam, SSE/long-poll progress. Verified end-to-end against real daemons.
-- **Retention / GC** (`serve.retention`) — usage tracking from container events,
+- **Retention / GC** (per-store `retention`) — usage tracking from container events,
   keep-N-per-repo, exact and pattern pins, the adaptive scheduler, and the
   inventory / status / watcher APIs.
 - **Signature verification** (`serve.verify`, Notary Project / notation) — verified

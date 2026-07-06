@@ -62,7 +62,33 @@ stores:
   # Engine stores (daemons triggered to pull). Optional pull_host overrides the
   # cache host in the reference this engine pulls.
   # nomad: { kind: "docker", address: "/var/run/docker.sock" }
-  # k3s: { kind: "containerd", address: "/run/k3s/containerd/containerd.sock", namespace: "k8s.io", pull_host: "cache.cr.com" }
+  # k3s:
+  #   kind: "containerd"
+  #   address: "/run/k3s/containerd/containerd.sock"
+  #   namespace: "k8s.io"
+  #   pull_host: "cache.cr.com"
+  #   # Image GC for THIS engine store (retention is per-store; there is no global
+  #   # retention policy). gantry tracks last-used time from container events and
+  #   # reclaims images per the rules below.
+  #   retention:
+  #     path: "/var/lib/gantry/k3s.db"  # this store's bbolt index (required)
+  #     interval: "1h"                  # scheduler idle cap (default 1h)
+  #     min_interval: "1m"              # debounce between GC runs (default 1m)
+  #     grace: "1h"                     # hold off deletion after startup (default 1h)
+  #     # Per-repo rules. For a repo, the matching patterns are resolved field by
+  #     # field: each field takes the value from the most specific matching rule
+  #     # that sets it (longest literal prefix wins); pins are the union of all
+  #     # matching rules. A repo matching no rule is left unmanaged (never GC'd).
+  #     rules:
+  #       - repo: "**"                       # catch-all defaults (least specific)
+  #         max_age: "168h"                  # delete if unused for 7d
+  #         keep_n: 2                        # keep the 2 most-recent tags per repo
+  #         max_n: 10                        # cap at 10 tags per repo (oldest deleted)
+  #       - repo: "cache.cr.com/prod/**"     # prod: overrides only what it sets
+  #         max_age: "2160h"                 # 90d; keep_n/max_n inherited from **
+  #         pins: ["*:stable"]               # never GC stable tags here
+  #       - repo: "cache.cr.com/prod/critical"  # most specific: exact repo
+  #         keep_n: 20
 
 # Job worker pool that runs image moves. Top-level, not nested under `serve`.
 worker:
@@ -107,46 +133,21 @@ serve:
     # readiness — remote upstreams should stay out so WAN blips don't flap it.
     # ready_stores: ["cache"]
 
-  # Image retention / garbage collection on engine stores. Disabled unless
-  # `path` is set. gantry tracks each image's last-used time from the engine's
-  # own container events (plus a cold-start seed and a distribute fallback),
-  # persists it to the bbolt index at `path`, and reclaims space on a schedule.
-  #
-  # Eviction order (a record is kept by the first rule that matches):
+  # Image retention / garbage collection is configured PER ENGINE STORE, under
+  # stores.<name>.retention (see the k3s example above) — there is no global
+  # retention policy. Within a store, rules are matched per repo; for each repo
+  # the eviction order is:
   #   1. in_use         - an image a running container references
-  #   2. pinned         - matches a `pins` entry or an API pin (exact ref, or a
-  #                       doublestar pattern tried against the full ref,
+  #   2. pinned         - matches a rule `pins` entry or an API pin (exact ref, or
+  #                       a doublestar pattern tried against the full ref,
   #                       name:tag, and the bare tag)
-  #   3. max_n cap      - of the rest, only the max_n most-recent tags *per repo*
-  #                       survive; the oldest beyond the cap are deleted (reason
-  #                       max_n_exceeded) even if still within max_age
-  #   4. keep_n_recent  - the N most-recently-used tags *per repository*
+  #   3. max_n cap      - keep only the max_n most-recent tags in the repo; the
+  #                       oldest beyond the cap are deleted (reason max_n_exceeded)
+  #                       even if still within max_age
+  #   4. keep_n_recent  - the keep_n most-recently-used tags
   #   5. within_max_age - last used more recently than `max_age`
-  # Anything else is deleted (held only by the post-startup `grace` window).
-  # retention:
-  #   # bbolt index file (persists last-used + pins across restarts).
-  #   path: "/var/lib/gantry/retention.db"
-  #   # Delete images whose last-used age exceeds this; omit/0 disables age GC.
-  #   max_age: "720h"          # 30 days
-  #   # Keep the N most-recently-used tags per repo, even if older than max_age.
-  #   keep_n: 3
-  #   # Cap the tags kept per repo: when a repo exceeds max_n non-protected (not
-  #   # in-use, not pinned) tags, the oldest beyond the cap are deleted even before
-  #   # max_age. Must be >= keep_n. Deferred during the grace window. 0 disables.
-  #   max_n: 20
-  #   # Never collected (in addition to the pin API): exact refs or doublestar
-  #   # patterns (e.g. "*:stable" pins every stable tag).
-  #   pins:
-  #     - "registry.cache.local/lesomnus/a:stable"
-  #   # Scheduler idle cap: the longest gantry waits between GC checks. It wakes
-  #   # earlier when a record is about to age out or a usage event arrives, and
-  #   # stays idle here when nothing is on an age path. Default 1h.
-  #   interval: "1h"
-  #   # Debounce floor between GC runs (absorbs event bursts). Default 1m.
-  #   min_interval: "1m"
-  #   # Hold off age-based deletion this long after startup (usage history is lost
-  #   # during downtime). Defaults to max_age.
-  #   grace: "1h"
+  # A repo matching no rule is left unmanaged (never deleted); anything else is
+  # deleted (held only by the store's post-startup `grace` window).
 
   # Audit log (GET /v1/event): an append-only ring of operationally significant
   # events (jobs admitted/finished, GC applied, manual pull/remove, pins) that

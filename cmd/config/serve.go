@@ -2,7 +2,9 @@ package config
 
 import (
 	"strconv"
+	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/lesomnus/z"
 )
 
@@ -15,11 +17,10 @@ type ServeConfig struct {
 	// AllowUnknownStores permits a job to reference a registry by a bare host
 	// that is not a declared store. Engine stores (docker/containerd) must always
 	// be declared. Default false: only declared stores may be used.
-	AllowUnknownStores bool            `yaml:"allow_unknown_stores"`
-	Retention          RetentionConfig `yaml:"retention"`
-	Health             HealthConfig    `yaml:"health"`
-	Verify             VerifyConfig    `yaml:"verify"`
-	Events             EventsConfig    `yaml:"events"`
+	AllowUnknownStores bool         `yaml:"allow_unknown_stores"`
+	Health             HealthConfig `yaml:"health"`
+	Verify             VerifyConfig `yaml:"verify"`
+	Events             EventsConfig `yaml:"events"`
 }
 
 // EventsConfig governs the audit log (GET /v1/event). An empty Path disables it.
@@ -127,37 +128,92 @@ type HealthConfig struct {
 	ReadyStores []string `yaml:"ready_stores"`
 }
 
-// RetentionConfig governs image GC on engine stores. An empty Path disables
-// retention entirely (no usage watcher, no GC capability).
-type RetentionConfig struct {
-	// Path is the bbolt file for the last-used / pin index. Empty disables GC.
+// StoreRetention configures image GC for one engine store. It is set per-store
+// (stores.<name>.retention); there is no global retention policy. Each store has
+// its own usage index, scheduler cadence, grace window, and per-repo rules.
+type StoreRetention struct {
+	// Path is the bbolt file for this store's last-used / pin index. Required.
 	Path string `yaml:"path"`
-	// MaxAge deletes an image whose last-used age exceeds it; zero disables age GC.
-	MaxAge Duration `yaml:"max_age"`
-	// KeepN keeps the N most-recently-used tags per repository (even if old);
-	// zero disables keep-N.
-	KeepN int `yaml:"keep_n"`
-	// MaxN caps the tags kept per repository: when a repo has more than MaxN
-	// non-protected (not in-use, not pinned) tags, the oldest beyond the cap are
-	// deleted even before they exceed max_age. Zero disables the cap; when both
-	// are set MaxN must be >= keep_n. The cap is deferred during the grace window.
-	MaxN int `yaml:"max_n"`
-	// Pins are never GC'd: exact references, or doublestar patterns matched
-	// against the full ref, its name:tag short form, and the bare tag.
-	Pins []string `yaml:"pins"`
 	// Interval is the scheduler's safety/idle cadence — the longest it waits
-	// between GC checks. The scheduler wakes earlier when a record is about to
-	// age out or a usage event arrives.
+	// between GC checks. It wakes earlier when a record is about to age out or a
+	// usage event arrives. Default 1h.
 	Interval Duration `yaml:"interval"`
-	// MinInterval rate-limits GC runs (debounce for event bursts).
+	// MinInterval rate-limits GC runs (debounce for event bursts). Default 1m.
 	MinInterval Duration `yaml:"min_interval"`
-	// Grace holds off age-based deletion for this long after startup, since the
-	// usage index has no history for the downtime. Defaults to MaxAge.
+	// Grace holds off deletion this long after startup, since the usage index has
+	// no history for the downtime. Default 1h.
 	Grace Duration `yaml:"grace"`
+	// Rules are per-repo retention policies. For a given repo, the matching rules
+	// (doublestar patterns) are resolved field-by-field: each field takes the
+	// value from the most specific matching rule that sets it (longest literal
+	// prefix wins); pins are the union of all matching rules. A repo that matches
+	// no rule is left unmanaged (never GC'd). Order is not significant.
+	Rules []RetentionRule `yaml:"rules"`
 }
 
-// Enabled reports whether retention/GC is configured.
-func (c RetentionConfig) Enabled() bool { return c.Path != "" }
+// RetentionRule is one per-repo retention policy. Scalar fields are pointers so
+// an unset field (inherit from a less specific rule) is distinct from an explicit
+// zero (disable that dimension: max_age 0 = no age GC, max_n 0 = no cap).
+type RetentionRule struct {
+	// Repo is a doublestar pattern matched against the repository name (no tag),
+	// e.g. "registry.internal/prod/**" or "**".
+	Repo string `yaml:"repo"`
+	// MaxAge deletes an image whose last-used age exceeds it.
+	MaxAge *Duration `yaml:"max_age"`
+	// KeepN keeps the N most-recently-used tags in the repo, even if old.
+	KeepN *int `yaml:"keep_n"`
+	// MaxN caps the tags kept: the oldest beyond the cap are deleted even before
+	// max_age. When both are set MaxN must be >= KeepN.
+	MaxN *int `yaml:"max_n"`
+	// Pins are never GC'd within a matching repo: exact refs or doublestar
+	// patterns matched against the full ref, its name:tag short form, and the tag.
+	Pins []string `yaml:"pins"`
+}
+
+// Enabled reports whether retention/GC is configured for this store.
+func (c *StoreRetention) Enabled() bool { return c != nil && c.Path != "" }
+
+// evaluateRetention applies defaults and validates the store's retention config.
+// Retention is only supported on engine stores.
+func (s *StoreConfig) evaluateRetention() error {
+	r := s.Retention
+	if r == nil {
+		return nil
+	}
+	if !s.IsEngine() {
+		return z.Err(nil, "retention is only supported on engine stores (docker/containerd), not kind %q", s.Kind)
+	}
+	if r.Path == "" {
+		return z.Err(nil, "retention.path is required")
+	}
+	z.FallbackP((*time.Duration)(&r.Interval), time.Hour)
+	z.FallbackP((*time.Duration)(&r.MinInterval), time.Minute)
+	z.FallbackP((*time.Duration)(&r.Grace), time.Hour)
+	for i := range r.Rules {
+		rule := &r.Rules[i]
+		if rule.Repo == "" {
+			return z.Err(nil, "retention.rules[%d]: repo pattern is required", i)
+		}
+		if !doublestar.ValidatePattern(rule.Repo) {
+			return z.Err(nil, "retention.rules[%d]: invalid repo pattern %q", i, rule.Repo)
+		}
+		for j, pin := range rule.Pins {
+			if !doublestar.ValidatePattern(pin) {
+				return z.Err(nil, "retention.rules[%d].pins[%d]: invalid pattern %q", i, j, pin)
+			}
+		}
+		if rule.KeepN != nil && *rule.KeepN < 0 {
+			return z.Err(nil, "retention.rules[%d]: keep_n must not be negative", i)
+		}
+		if rule.MaxN != nil && *rule.MaxN < 0 {
+			return z.Err(nil, "retention.rules[%d]: max_n must not be negative", i)
+		}
+		if rule.MaxN != nil && *rule.MaxN > 0 && rule.KeepN != nil && *rule.KeepN > *rule.MaxN {
+			return z.Err(nil, "retention.rules[%d]: max_n (%d) must be >= keep_n (%d)", i, *rule.MaxN, *rule.KeepN)
+		}
+	}
+	return nil
+}
 
 // AuthConfig guards /v1/* (/healthz is always exempt).
 type AuthConfig struct {
@@ -196,6 +252,10 @@ type StoreConfig struct {
 	// Verify overrides the global serve.verify.mode for images pulled from this
 	// source registry (nil = inherit the global default).
 	Verify *StoreVerify `yaml:"verify"`
+
+	// Retention configures per-repo image GC for this store (engine stores only).
+	// nil disables GC for the store. See StoreRetention.
+	Retention *StoreRetention `yaml:"retention"`
 
 	// --- mTLS client auth via a TPM-backed key (oci) ---
 	// When TPMHandle is set, gantry authenticates to this registry — and to its

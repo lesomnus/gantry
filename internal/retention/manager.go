@@ -14,11 +14,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// Schedule controls the adaptive GC scheduler.
+// Schedule controls one store's adaptive GC scheduler.
 type Schedule struct {
 	Interval    time.Duration // safety/idle cap on sleep between GC checks
 	MinInterval time.Duration // debounce floor between GC runs
-	Grace       time.Duration // hold off age-deletion this long after start
+	Grace       time.Duration // hold off deletion this long after start
 }
 
 // ApplyResult reports a GC apply outcome.
@@ -29,57 +29,97 @@ type ApplyResult struct {
 	Evaluated int      `json:"evaluated"`        // number of records considered (delete+keep)
 }
 
-// Manager ties the index, the engines, the usage watchers, and the adaptive GC
-// scheduler together.
+// Store describes one engine store's retention setup, passed to NewManager. Each
+// store owns its own usage index, per-repo rules, and scheduler cadence.
+type Store struct {
+	Name     string
+	Engine   down.Engine
+	Index    *Index
+	Rules    []Rule
+	Schedule Schedule
+}
+
+// Manager runs per-store retention: every store has its own index, rules, grace
+// window, adaptive scheduler, and usage watcher — fully independent of the
+// others. There is no global retention policy.
 type Manager struct {
-	ix      *Index
-	engines map[string]down.Engine
-	policy  Policy
-	sched   Schedule
+	units map[string]*unit
 
-	now    func() time.Time
+	now   func() time.Time
+	rec   Recorder       // audit log (nil = disabled)
+	onRun func(Decision) // test hook, fired after each store's GC pass
+}
+
+// unit is one engine store's retention state.
+type unit struct {
+	m      *Manager
+	name   string
+	engine down.Engine
+	ix     *Index
+	rules  []Rule
+	sched  Schedule
+
 	signal chan struct{}
-	onRun  func(Decision) // test hook
-	rec    Recorder       // audit log (nil = disabled)
 
-	// mu guards the scheduler/watcher state read by Status/Watcher from the API.
-	mu       sync.Mutex
-	started  time.Time
-	lastRun  time.Time
-	wakeAt   time.Time
-	running  bool
-	watchers map[string]*WatcherStatus
+	mu      sync.Mutex
+	started time.Time
+	lastRun time.Time
+	wakeAt  time.Time
+	running bool
+	watcher WatcherStatus
 }
 
-func NewManager(ix *Index, engines map[string]down.Engine, policy Policy, sched Schedule) *Manager {
-	return &Manager{
-		ix: ix, engines: engines, policy: policy, sched: sched,
-		now: time.Now, signal: make(chan struct{}, 1),
-		watchers: make(map[string]*WatcherStatus, len(engines)),
+func NewManager(stores []Store) *Manager {
+	m := &Manager{units: make(map[string]*unit, len(stores)), now: time.Now}
+	for _, s := range stores {
+		m.units[s.Name] = &unit{
+			m: m, name: s.Name, engine: s.Engine, ix: s.Index,
+			rules: s.Rules, sched: s.Schedule, signal: make(chan struct{}, 1),
+		}
 	}
+	return m
 }
 
-// Status is a snapshot of the GC scheduler: the otherwise-invisible answers to
-// "when will GC next run, under what policy, and why is it holding off".
+// Recorder receives GC-apply and manual pin/remove audit events.
+type Recorder interface {
+	GCApplied(store string, deleted, untagged, errs int)
+	ImageRemoved(store, ref string)
+	Pinned(store, value string, unpin bool)
+}
+
+// SetRecorder wires the audit log. Set before Start.
+func (m *Manager) SetRecorder(r Recorder) { m.rec = r }
+
+// Close releases every store's index. Call at shutdown.
+func (m *Manager) Close() error {
+	var err error
+	for _, u := range m.units {
+		if e := u.ix.Close(); e != nil && err == nil {
+			err = e
+		}
+	}
+	return err
+}
+
+// --- status ---
+
+// Status is a snapshot of every store's GC scheduler.
 type Status struct {
-	Enabled bool `json:"enabled"` // scheduler running (interval > 0)
-	Running bool `json:"running"` // a GC pass is executing right now
-
-	Started    time.Time `json:"started,omitzero"`
-	LastRun    time.Time `json:"last_run,omitzero"`
-	NextWake   time.Time `json:"next_wake,omitzero"`
-	GraceUntil time.Time `json:"grace_until,omitzero"` // age deletion held off until then
-
-	Policy   PolicyStatus           `json:"policy"`
-	Schedule ScheduleStatus         `json:"schedule"`
-	Stores   map[string]StoreCounts `json:"stores"` // per-engine index sizes
+	Enabled bool                   `json:"enabled"` // at least one store has scheduling on
+	Stores  map[string]StoreStatus `json:"stores"`
 }
 
-type PolicyStatus struct {
-	MaxAge string   `json:"max_age"`
-	KeepN  int      `json:"keep_n"`
-	MaxN   int      `json:"max_n"`
-	Pins   []string `json:"pins,omitempty"`
+// StoreStatus is one store's scheduler state, rules, and index counts.
+type StoreStatus struct {
+	Running    bool           `json:"running"`
+	Started    time.Time      `json:"started,omitzero"`
+	LastRun    time.Time      `json:"last_run,omitzero"`
+	NextWake   time.Time      `json:"next_wake,omitzero"`
+	GraceUntil time.Time      `json:"grace_until,omitzero"`
+	Schedule   ScheduleStatus `json:"schedule"`
+	Rules      []RuleStatus   `json:"rules"`
+	Records    int            `json:"records"`
+	Pins       int            `json:"pins"`
 }
 
 type ScheduleStatus struct {
@@ -88,39 +128,56 @@ type ScheduleStatus struct {
 	Grace       string `json:"grace"`
 }
 
-type StoreCounts struct {
-	Records int `json:"records"`
-	Pins    int `json:"pins"`
+// RuleStatus mirrors a per-repo rule for the API; unset fields are omitted.
+type RuleStatus struct {
+	Repo   string   `json:"repo"`
+	MaxAge string   `json:"max_age,omitempty"`
+	KeepN  *int     `json:"keep_n,omitempty"`
+	MaxN   *int     `json:"max_n,omitempty"`
+	Pins   []string `json:"pins,omitempty"`
 }
 
-// Status snapshots the scheduler state and cheap per-engine index counts. It
-// never probes live daemons.
+// Status snapshots each store's scheduler state and cheap index counts. It never
+// probes live daemons.
 func (m *Manager) Status() Status {
-	m.mu.Lock()
-	st := Status{
-		Enabled:    m.sched.Interval > 0,
-		Running:    m.running,
-		Started:    m.started,
-		LastRun:    m.lastRun,
-		NextWake:   m.wakeAt,
-		GraceUntil: m.graceUntilLocked(),
-	}
-	m.mu.Unlock()
-	st.Policy = PolicyStatus{MaxAge: m.policy.MaxAge.String(), KeepN: m.policy.KeepN, MaxN: m.policy.MaxN, Pins: m.policy.Pins}
-	st.Schedule = ScheduleStatus{
-		Interval:    m.sched.Interval.String(),
-		MinInterval: m.sched.MinInterval.String(),
-		Grace:       m.sched.Grace.String(),
-	}
-	st.Stores = make(map[string]StoreCounts, len(m.engines))
-	for name := range m.engines {
-		records, pins, err := m.ix.Counts(name)
-		if err != nil {
-			continue
+	st := Status{Stores: make(map[string]StoreStatus, len(m.units))}
+	for name, u := range m.units {
+		u.mu.Lock()
+		ss := StoreStatus{
+			Running:    u.running,
+			Started:    u.started,
+			LastRun:    u.lastRun,
+			NextWake:   u.wakeAt,
+			GraceUntil: u.graceUntilLocked(),
 		}
-		st.Stores[name] = StoreCounts{Records: records, Pins: pins}
+		u.mu.Unlock()
+		if u.sched.Interval > 0 {
+			st.Enabled = true
+		}
+		ss.Schedule = ScheduleStatus{
+			Interval:    u.sched.Interval.String(),
+			MinInterval: u.sched.MinInterval.String(),
+			Grace:       u.sched.Grace.String(),
+		}
+		ss.Rules = ruleStatuses(u.rules)
+		if nrec, npin, err := u.ix.Counts(name); err == nil {
+			ss.Records, ss.Pins = nrec, npin
+		}
+		st.Stores[name] = ss
 	}
 	return st
+}
+
+func ruleStatuses(rules []Rule) []RuleStatus {
+	out := make([]RuleStatus, 0, len(rules))
+	for _, r := range rules {
+		rs := RuleStatus{Repo: r.Repo, KeepN: r.KeepN, MaxN: r.MaxN, Pins: r.Pins}
+		if r.MaxAge != nil {
+			rs.MaxAge = r.MaxAge.String()
+		}
+		out = append(out, rs)
+	}
+	return out
 }
 
 // WatcherStatus is one engine's usage-watcher health. A dead event stream
@@ -136,49 +193,51 @@ type WatcherStatus struct {
 }
 
 // Watcher reports an engine's usage-watcher status; ok is false for a store
-// with no retention watcher.
+// with no retention.
 func (m *Manager) Watcher(engine string) (WatcherStatus, bool) {
-	if _, tracked := m.engines[engine]; !tracked {
+	u, ok := m.units[engine]
+	if !ok {
 		return WatcherStatus{}, false
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if ws := m.watchers[engine]; ws != nil {
-		return *ws, true
-	}
-	return WatcherStatus{}, true // engine tracked, watcher not started yet
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.watcher, true
 }
 
-func (m *Manager) Index() *Index { return m.ix }
+// --- index dispatch (per store) ---
 
-// Recorder receives GC-apply and manual pin/remove audit events.
-type Recorder interface {
-	GCApplied(store string, deleted, untagged, errs int)
-	ImageRemoved(store, ref string)
-	Pinned(store, value string, unpin bool)
+// List returns a store's retention records.
+func (m *Manager) List(engine string) ([]Record, error) {
+	u, ok := m.units[engine]
+	if !ok {
+		return nil, fmt.Errorf("store %q has no retention", engine)
+	}
+	return u.ix.List(engine)
 }
 
-// SetRecorder wires the audit log. Set before Start.
-func (m *Manager) SetRecorder(r Recorder) { m.rec = r }
-
-// DefaultPolicy is the configured policy used by the scheduler and as the API default.
-func (m *Manager) DefaultPolicy() Policy { return m.policy }
-
-func (m *Manager) poke() {
-	select {
-	case m.signal <- struct{}{}:
-	default:
+// DeleteRecord removes one record from a store's index (does not touch the engine).
+func (m *Manager) DeleteRecord(engine, ref string) (bool, error) {
+	u, ok := m.units[engine]
+	if !ok {
+		return false, fmt.Errorf("store %q has no retention", engine)
 	}
+	return u.ix.Delete(engine, ref)
 }
 
 // Distributed records a gantry push to an engine (a usage fallback signal).
 func (m *Manager) Distributed(engine, ref string, t time.Time) {
-	_ = m.ix.Distributed(engine, ref, t)
-	m.poke()
+	if u, ok := m.units[engine]; ok {
+		_ = u.ix.Distributed(engine, ref, t)
+		u.poke()
+	}
 }
 
 func (m *Manager) Pin(engine, ref string, pattern bool) error {
-	err := m.ix.Pin(engine, ref, pattern)
+	u, ok := m.units[engine]
+	if !ok {
+		return fmt.Errorf("store %q has no retention", engine)
+	}
+	err := u.ix.Pin(engine, ref, pattern)
 	if err == nil && m.rec != nil {
 		m.rec.Pinned(engine, ref, false)
 	}
@@ -186,26 +245,37 @@ func (m *Manager) Pin(engine, ref string, pattern bool) error {
 }
 
 func (m *Manager) Unpin(engine, ref string) error {
-	err := m.ix.Unpin(engine, ref)
+	u, ok := m.units[engine]
+	if !ok {
+		return fmt.Errorf("store %q has no retention", engine)
+	}
+	err := u.ix.Unpin(engine, ref)
 	if err == nil && m.rec != nil {
 		m.rec.Pinned(engine, ref, true)
 	}
 	return err
 }
-func (m *Manager) Pins(engine string) ([]PinEntry, error) { return m.ix.Pins(engine) }
+
+func (m *Manager) Pins(engine string) ([]PinEntry, error) {
+	u, ok := m.units[engine]
+	if !ok {
+		return nil, fmt.Errorf("store %q has no retention", engine)
+	}
+	return u.ix.Pins(engine)
+}
 
 // --- usage watchers ---
 
-// StartWatchers launches one usage watcher per engine: cold-start seed, then a
-// reconnecting WatchUsage loop that stamps the index.
+// StartWatchers launches one usage watcher per store: cold-start seed, then a
+// reconnecting WatchUsage loop that stamps the store's index.
 func (m *Manager) StartWatchers(ctx context.Context) {
 	m.registerGauges(ctx)
-	for name, eng := range m.engines {
-		go m.watch(ctx, name, eng)
+	for _, u := range m.units {
+		go u.watch(ctx)
 	}
 }
 
-// registerGauges observes per-engine retention index sizes (records and pins).
+// registerGauges observes per-store retention index sizes (records and pins).
 func (m *Manager) registerGauges(ctx context.Context) {
 	mt := otx.Meter(ctx)
 	records, _ := mt.Int64ObservableGauge("gantry.retention.records",
@@ -213,8 +283,8 @@ func (m *Manager) registerGauges(ctx context.Context) {
 	pins, _ := mt.Int64ObservableGauge("gantry.retention.pins",
 		metric.WithDescription("pinned references per engine store"))
 	_, _ = mt.RegisterCallback(func(_ context.Context, o metric.Observer) error {
-		for name := range m.engines {
-			nrec, npin, err := m.ix.Counts(name)
+		for name, u := range m.units {
+			nrec, npin, err := u.ix.Counts(name)
 			if err != nil {
 				continue
 			}
@@ -226,49 +296,43 @@ func (m *Manager) registerGauges(ctx context.Context) {
 	}, records, pins)
 }
 
-func (m *Manager) watch(ctx context.Context, name string, eng down.Engine) {
-	ws := &WatcherStatus{}
-	m.mu.Lock()
-	m.watchers[name] = ws
-	m.mu.Unlock()
+func (u *unit) watch(ctx context.Context) {
+	name, eng := u.name, u.engine
 	seed := func() bool {
-		err := eng.SeedUsage(ctx, func(ref string, at time.Time) { _ = m.ix.Seed(name, ref, at) })
-		m.mu.Lock()
-		ws.LastSeedAt = m.now()
+		err := eng.SeedUsage(ctx, func(ref string, at time.Time) { _ = u.ix.Seed(name, ref, at) })
+		u.mu.Lock()
+		u.watcher.LastSeedAt = u.m.now()
 		if err != nil {
-			ws.LastError = err.Error()
+			u.watcher.LastError = err.Error()
 		}
-		m.mu.Unlock()
+		u.mu.Unlock()
 		return err == nil
 	}
 	log.From(ctx).Info("usage watcher started", slog.String("engine", name))
 	reachable := seed()
 	for ctx.Err() == nil {
-		// Only claim connected when the preceding seed proved the daemon is
-		// reachable — an optimistic stamp would report a healthy stream while
-		// WatchUsage fails in a tight reconnect loop.
 		if reachable {
-			m.mu.Lock()
-			ws.Connected = true
-			if ws.Since.IsZero() {
-				ws.Since = m.now()
+			u.mu.Lock()
+			u.watcher.Connected = true
+			if u.watcher.Since.IsZero() {
+				u.watcher.Since = u.m.now()
 			}
-			m.mu.Unlock()
+			u.mu.Unlock()
 		}
 		err := eng.WatchUsage(ctx, func(ref string, at time.Time) {
-			_ = m.ix.Touch(name, ref, at)
-			m.mu.Lock()
-			ws.LastEventAt = m.now()
-			m.mu.Unlock()
-			m.poke()
+			_ = u.ix.Touch(name, ref, at)
+			u.mu.Lock()
+			u.watcher.LastEventAt = u.m.now()
+			u.mu.Unlock()
+			u.poke()
 		})
-		m.mu.Lock()
-		ws.Connected = false
-		ws.Reconnects++
+		u.mu.Lock()
+		u.watcher.Connected = false
+		u.watcher.Reconnects++
 		if err != nil {
-			ws.LastError = err.Error()
+			u.watcher.LastError = err.Error()
 		}
-		m.mu.Unlock()
+		u.mu.Unlock()
 		if ctx.Err() != nil {
 			return
 		}
@@ -284,120 +348,136 @@ func (m *Manager) watch(ctx context.Context, name string, eng down.Engine) {
 
 // --- GC ---
 
-// Plan evaluates the policy for one engine without deleting anything.
-func (m *Manager) Plan(ctx context.Context, engine string, p Policy) (Decision, error) {
-	eng, ok := m.engines[engine]
+// Plan evaluates a store's rules without deleting. A non-nil override replaces
+// the configured per-repo rules with a single blanket policy for every repo (used
+// by the /gc endpoint's optional body).
+func (m *Manager) Plan(ctx context.Context, engine string, override *Policy) (Decision, error) {
+	u, ok := m.units[engine]
 	if !ok {
 		return Decision{}, fmt.Errorf("store %q has no retention", engine)
 	}
-	return m.plan(ctx, engine, eng, p)
-}
-
-func (m *Manager) plan(ctx context.Context, name string, eng down.Engine, p Policy) (Decision, error) {
-	recs, err := m.ix.List(name)
-	if err != nil {
-		return Decision{}, err
+	rules := u.rules
+	if override != nil {
+		rules = blanketRules(*override)
 	}
-	inUse, err := eng.InUse(ctx)
-	if err != nil {
-		return Decision{}, err
-	}
-	return Evaluate(m.now(), recs, inUse, p, m.graceUntil()), nil
+	return u.plan(ctx, rules)
 }
 
 // Apply executes the deletions in a decision and syncs the index.
 func (m *Manager) Apply(ctx context.Context, engine string, dec Decision) (ApplyResult, error) {
-	eng, ok := m.engines[engine]
+	u, ok := m.units[engine]
 	if !ok {
 		return ApplyResult{}, fmt.Errorf("store %q has no retention", engine)
 	}
-	return m.apply(ctx, engine, eng, dec), nil
+	return u.apply(ctx, dec), nil
 }
 
-func (m *Manager) apply(ctx context.Context, name string, eng down.Engine, dec Decision) ApplyResult {
+// blanketRules wraps a Policy as a single catch-all rule applied to every repo.
+func blanketRules(p Policy) []Rule {
+	return []Rule{{Repo: "**", MaxAge: &p.MaxAge, KeepN: &p.KeepN, MaxN: &p.MaxN, Pins: p.Pins}}
+}
+
+func (u *unit) plan(ctx context.Context, rules []Rule) (Decision, error) {
+	recs, err := u.ix.List(u.name)
+	if err != nil {
+		return Decision{}, err
+	}
+	inUse, err := u.engine.InUse(ctx)
+	if err != nil {
+		return Decision{}, err
+	}
+	return Evaluate(u.m.now(), recs, inUse, rules, u.graceUntil()), nil
+}
+
+func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 	res := ApplyResult{Evaluated: len(dec.Delete) + len(dec.Keep)}
 	for _, c := range dec.Delete {
-		rr, err := eng.Remove(ctx, c.Ref)
+		rr, err := u.engine.Remove(ctx, c.Ref)
 		if err != nil {
 			res.Errors = append(res.Errors, c.Ref+": "+err.Error())
 			continue
 		}
 		res.Deleted = append(res.Deleted, rr.Deleted...)
 		res.Untagged = append(res.Untagged, rr.Untagged...)
-		_, _ = m.ix.Delete(name, c.Ref)
-		if m.rec != nil {
-			m.rec.ImageRemoved(name, c.Ref)
+		_, _ = u.ix.Delete(u.name, c.Ref)
+		if u.m.rec != nil {
+			u.m.rec.ImageRemoved(u.name, c.Ref)
 		}
 	}
 	if len(res.Deleted)+len(res.Untagged) > 0 {
-		log.From(ctx).Info("gc collected", slog.String("store", name),
+		log.From(ctx).Info("gc collected", slog.String("store", u.name),
 			slog.Int("deleted", len(res.Deleted)), slog.Int("untagged", len(res.Untagged)), slog.Int("evaluated", res.Evaluated))
-		if m.rec != nil {
-			m.rec.GCApplied(name, len(res.Deleted), len(res.Untagged), len(res.Errors))
+		if u.m.rec != nil {
+			u.m.rec.GCApplied(u.name, len(res.Deleted), len(res.Untagged), len(res.Errors))
 		}
 	}
 	if len(res.Errors) > 0 {
-		log.From(ctx).Warn("gc removal errors", slog.String("store", name), slog.Int("count", len(res.Errors)))
+		log.From(ctx).Warn("gc removal errors", slog.String("store", u.name), slog.Int("count", len(res.Errors)))
 	}
 	return res
 }
 
-func (m *Manager) graceUntil() time.Time {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.graceUntilLocked()
+func (u *unit) graceUntil() time.Time {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.graceUntilLocked()
 }
 
-func (m *Manager) graceUntilLocked() time.Time {
-	if m.started.IsZero() || m.sched.Grace <= 0 {
+func (u *unit) graceUntilLocked() time.Time {
+	if u.started.IsZero() || u.sched.Grace <= 0 {
 		return time.Time{}
 	}
-	return m.started.Add(m.sched.Grace)
+	return u.started.Add(u.sched.Grace)
 }
 
-// --- adaptive scheduler ---
+// --- adaptive scheduler (one per store) ---
 
-// StartScheduler runs GC and then sleeps until the soonest record could age out
-// (capped at Interval), waking early when a usage/distribute event arrives. With
-// no deletable-by-age records it idles at Interval — it does not busy-tick.
+// StartScheduler launches each store's GC loop: run GC, then sleep until the
+// soonest record could age out (capped at Interval), waking early when a
+// usage/distribute event arrives. Stores with Interval<=0 run manual GC only.
 func (m *Manager) StartScheduler(ctx context.Context) {
-	if m.sched.Interval <= 0 {
+	for _, u := range m.units {
+		go u.runScheduler(ctx)
+	}
+}
+
+func (u *unit) runScheduler(ctx context.Context) {
+	if u.sched.Interval <= 0 {
 		return // scheduling disabled; manual GC only
 	}
-	m.mu.Lock()
-	m.started = m.now()
-	m.mu.Unlock()
+	u.mu.Lock()
+	u.started = u.m.now()
+	u.mu.Unlock()
 	for {
-		m.mu.Lock()
-		m.running = true
-		m.mu.Unlock()
-		dec := m.gcAll(ctx)
-		m.mu.Lock()
-		m.running = false
-		m.mu.Unlock()
-		if m.onRun != nil {
-			m.onRun(dec)
+		u.mu.Lock()
+		u.running = true
+		u.mu.Unlock()
+		dec := u.gcOnce(ctx)
+		u.mu.Lock()
+		u.running = false
+		u.mu.Unlock()
+		if u.m.onRun != nil {
+			u.m.onRun(dec)
 		}
-		d := m.nextWake(dec)
-		m.mu.Lock()
-		m.wakeAt = m.now().Add(d)
-		m.mu.Unlock()
+		d := u.nextWake(dec)
+		u.mu.Lock()
+		u.wakeAt = u.m.now().Add(d)
+		u.mu.Unlock()
 		timer := time.NewTimer(d)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
 		case <-timer.C:
-		case <-m.signal:
+		case <-u.signal:
 			timer.Stop()
-			d := m.sched.MinInterval - m.now().Sub(m.lastRunAt())
+			d := u.sched.MinInterval - u.m.now().Sub(u.lastRunAt())
 			if d < 0 {
 				d = 0
 			}
-			// The poke short-circuits the armed timer; keep next_wake honest.
-			m.mu.Lock()
-			m.wakeAt = m.now().Add(d)
-			m.mu.Unlock()
+			u.mu.Lock()
+			u.wakeAt = u.m.now().Add(d)
+			u.mu.Unlock()
 			if d > 0 {
 				deb := time.NewTimer(d)
 				select {
@@ -411,42 +491,41 @@ func (m *Manager) StartScheduler(ctx context.Context) {
 	}
 }
 
-func (m *Manager) gcAll(ctx context.Context) Decision {
-	var merged Decision
-	for name, eng := range m.engines {
-		dec, err := m.plan(ctx, name, eng, m.policy)
-		if err != nil {
-			log.From(ctx).Warn("gc plan failed", slog.String("store", name), slog.String("error", err.Error()))
-			continue
-		}
-		m.apply(ctx, name, eng, dec)
-		merged.Delete = append(merged.Delete, dec.Delete...)
-		merged.Keep = append(merged.Keep, dec.Keep...)
-		if !dec.NextAgeOut.IsZero() && (merged.NextAgeOut.IsZero() || dec.NextAgeOut.Before(merged.NextAgeOut)) {
-			merged.NextAgeOut = dec.NextAgeOut
-		}
+func (u *unit) gcOnce(ctx context.Context) Decision {
+	dec, err := u.plan(ctx, u.rules)
+	if err != nil {
+		log.From(ctx).Warn("gc plan failed", slog.String("store", u.name), slog.String("error", err.Error()))
+		return Decision{}
 	}
-	m.mu.Lock()
-	m.lastRun = m.now()
-	m.mu.Unlock()
-	return merged
+	u.apply(ctx, dec)
+	u.mu.Lock()
+	u.lastRun = u.m.now()
+	u.mu.Unlock()
+	return dec
 }
 
-func (m *Manager) lastRunAt() time.Time {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.lastRun
+func (u *unit) lastRunAt() time.Time {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.lastRun
 }
 
-func (m *Manager) nextWake(dec Decision) time.Duration {
-	cap := m.sched.Interval
+func (u *unit) poke() {
+	select {
+	case u.signal <- struct{}{}:
+	default:
+	}
+}
+
+func (u *unit) nextWake(dec Decision) time.Duration {
+	cap := u.sched.Interval
 	next := dec.NextAgeOut
 	if next.IsZero() {
 		return cap // nothing aging -> idle until Interval (or an event pokes)
 	}
-	d := next.Sub(m.now())
-	if d < m.sched.MinInterval {
-		d = m.sched.MinInterval
+	d := next.Sub(u.m.now())
+	if d < u.sched.MinInterval {
+		d = u.sched.MinInterval
 	}
 	if d > cap {
 		d = cap

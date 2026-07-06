@@ -42,24 +42,52 @@ func NewCmdServe() *xli.Command {
 			}
 			defer stores.Close()
 
+			// Retention is per-store: each engine store with a retention block gets
+			// its own index, rules, and scheduler. There is no global policy.
 			var gc *retention.Manager
-			if c.Serve.Retention.Enabled() {
-				ix, err := retention.Open(c.Serve.Retention.Path)
-				if err != nil {
-					return z.Err(err, "open retention index")
-				}
-				defer ix.Close()
-				rc := c.Serve.Retention
-				gc = retention.NewManager(ix, stores.Engines(),
-					retention.Policy{MaxAge: time.Duration(rc.MaxAge), KeepN: rc.KeepN, MaxN: rc.MaxN, Pins: rc.Pins},
-					retention.Schedule{
-						Interval:    time.Duration(rc.Interval),
-						MinInterval: time.Duration(rc.MinInterval),
-						Grace:       time.Duration(rc.Grace),
+			{
+				var gcStores []retention.Store
+				for name, sc := range c.Stores {
+					if !sc.Retention.Enabled() {
+						continue
+					}
+					eng, err := stores.Engine(name)
+					if err != nil {
+						return z.Err(err, "retention store %q", name)
+					}
+					rc := sc.Retention
+					ix, err := retention.Open(rc.Path)
+					if err != nil {
+						return z.Err(err, "open retention index for %q", name)
+					}
+					rules := make([]retention.Rule, len(rc.Rules))
+					for i, rr := range rc.Rules {
+						rules[i] = retention.Rule{
+							Repo:   rr.Repo,
+							MaxAge: (*time.Duration)(rr.MaxAge),
+							KeepN:  rr.KeepN,
+							MaxN:   rr.MaxN,
+							Pins:   rr.Pins,
+						}
+					}
+					gcStores = append(gcStores, retention.Store{
+						Name:   name,
+						Engine: eng,
+						Index:  ix,
+						Rules:  rules,
+						Schedule: retention.Schedule{
+							Interval:    time.Duration(rc.Interval),
+							MinInterval: time.Duration(rc.MinInterval),
+							Grace:       time.Duration(rc.Grace),
+						},
 					})
-				log.From(ctx).Info("retention enabled",
-					slog.String("path", rc.Path), slog.String("max_age", time.Duration(rc.MaxAge).String()),
-					slog.Int("keep_n", rc.KeepN), slog.Int("max_n", rc.MaxN))
+					log.From(ctx).Info("retention enabled",
+						slog.String("store", name), slog.String("path", rc.Path), slog.Int("rules", len(rc.Rules)))
+				}
+				if len(gcStores) > 0 {
+					gc = retention.NewManager(gcStores)
+					defer gc.Close()
+				}
 			}
 
 			hc := health.NewChecker(stores, health.Options{
@@ -116,7 +144,7 @@ func NewCmdServe() *xli.Command {
 			wmr.Start(ctx)
 			if gc != nil {
 				gc.StartWatchers(ctx)
-				go gc.StartScheduler(ctx)
+				gc.StartScheduler(ctx)
 			}
 
 			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc, hc, vf, events))

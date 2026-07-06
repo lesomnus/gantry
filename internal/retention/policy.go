@@ -34,7 +34,7 @@ func shortName(r Record) string {
 	return path.Base(r.Repo) + ":" + r.Tag
 }
 
-// groupByRepo buckets records by their keep-N/max-N grouping key (Record.Repo).
+// groupByRepo buckets records by their per-repo grouping key (Record.Repo).
 func groupByRepo(recs []Record) map[string][]Record {
 	byRepo := map[string][]Record{}
 	for _, r := range recs {
@@ -64,21 +64,128 @@ func pinned(pins []string, r Record) bool {
 	return false
 }
 
-// Evaluate applies the retention policy and returns the delete/keep decision.
-// Protection order (a protected image is never deleted):
+// resolvePolicy resolves the retention policy for a repository from a store's
+// rules. Among rules whose pattern matches the repo, each scalar field takes the
+// value from the most specific matching rule that sets it, and pins are the union
+// of every matching rule ("cascade"). Specificity: longest literal prefix wins,
+// then most literal characters, then lexicographic order for determinism.
+// managed is false when no rule matches — the repo is then left untouched.
+func resolvePolicy(repo string, rules []Rule) (p Policy, managed bool) {
+	var matched []Rule
+	for _, r := range rules {
+		if ok, err := doublestar.Match(r.Repo, repo); err == nil && ok {
+			matched = append(matched, r)
+		}
+	}
+	if len(matched) == 0 {
+		return Policy{}, false
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		return moreSpecific(matched[i].Repo, matched[j].Repo)
+	})
+
+	var age *time.Duration
+	var keepN, maxN *int
+	for _, r := range matched { // most specific first; first setter of each field wins
+		if age == nil {
+			age = r.MaxAge
+		}
+		if keepN == nil {
+			keepN = r.KeepN
+		}
+		if maxN == nil {
+			maxN = r.MaxN
+		}
+		p.Pins = append(p.Pins, r.Pins...)
+	}
+	if age != nil {
+		p.MaxAge = *age
+	}
+	if keepN != nil {
+		p.KeepN = *keepN
+	}
+	if maxN != nil {
+		p.MaxN = *maxN
+	}
+	return p, true
+}
+
+// moreSpecific reports whether pattern a is more specific than b: longer literal
+// prefix (leading characters before the first wildcard) wins; ties are broken by
+// more literal characters overall, then lexicographically.
+func moreSpecific(a, b string) bool {
+	if pa, pb := literalPrefixLen(a), literalPrefixLen(b); pa != pb {
+		return pa > pb
+	}
+	if la, lb := literalCount(a), literalCount(b); la != lb {
+		return la > lb
+	}
+	return a < b
+}
+
+// literalPrefixLen is the number of leading bytes before the first wildcard
+// metacharacter (*, ?, [, {).
+func literalPrefixLen(pattern string) int {
+	for i, c := range pattern {
+		if isWildcardMeta(c) {
+			return i
+		}
+	}
+	return len(pattern)
+}
+
+// literalCount is the number of non-wildcard-metacharacter runes in the pattern.
+func literalCount(pattern string) int {
+	n := 0
+	for _, c := range pattern {
+		if !isWildcardMeta(c) {
+			n++
+		}
+	}
+	return n
+}
+
+func isWildcardMeta(c rune) bool {
+	switch c {
+	case '*', '?', '[', ']', '{', '}':
+		return true
+	}
+	return false
+}
+
+// Evaluate applies a store's per-repo retention rules and returns the delete/keep
+// decision. Records are grouped by repository; for each repo the matching rules
+// are resolved into one Policy (see resolvePolicy) and applied. A repo that
+// matches no rule is left unmanaged — kept, never deleted.
+//
+// Within a managed repo the protection order is:
 //  1. in-use   — referenced by a live container (inUse holds refs and digests)
-//  2. pinned   — Record.Pinned, or a policy.Pins entry (exact ref or doublestar
-//     pattern) matches
-//  3. max-N    — of the rest, keep only the MaxN most-recently-used tags per
-//     repository; delete the oldest beyond the cap even if not yet stale
-//     (deferred during the grace window). in-use/pinned tags do not count.
-//  4. keep-N   — the KeepN most-recently-used tags per repository
-//  5. age      — of the rest, delete those whose last-used age exceeds MaxAge,
-//     unless still within the grace window (now < graceUntil).
-func Evaluate(now time.Time, recs []Record, inUse map[string]bool, p Policy, graceUntil time.Time) Decision {
+//  2. pinned   — Record.Pinned, or a resolved pin pattern matches
+//  3. max-N    — keep only the MaxN most-recently-used tags; delete the oldest
+//     beyond the cap even if not yet stale (deferred during the grace window)
+//  4. keep-N   — the KeepN most-recently-used tags
+//  5. age      — delete those whose last-used age exceeds MaxAge (deferred during
+//     the grace window)
+func Evaluate(now time.Time, recs []Record, inUse map[string]bool, rules []Rule, graceUntil time.Time) Decision {
 	var dec Decision
+	for repo, group := range groupByRepo(recs) {
+		p, managed := resolvePolicy(repo, rules)
+		if !managed {
+			for _, r := range group {
+				dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: "unmanaged"})
+			}
+			continue
+		}
+		evalGroup(now, group, inUse, p, graceUntil, &dec)
+	}
+	return dec
+}
+
+// evalGroup evaluates one repository's records against its resolved policy,
+// appending to dec.
+func evalGroup(now time.Time, group []Record, inUse map[string]bool, p Policy, graceUntil time.Time, dec *Decision) {
 	var remaining []Record
-	for _, r := range recs {
+	for _, r := range group {
 		switch {
 		case inUse[r.Ref] || (r.Digest != "" && inUse[r.Digest]):
 			dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: "in_use"})
@@ -89,60 +196,36 @@ func Evaluate(now time.Time, recs []Record, inUse map[string]bool, p Policy, gra
 		}
 	}
 
-	// max-N cap: keep at most MaxN tags per repository, deleting the oldest beyond
-	// the cap regardless of age. Deferred during the grace window, since a just-
-	// restarted node has no usage history and the "oldest" ordering is unreliable.
-	if p.MaxN > 0 {
-		inGrace := now.Before(graceUntil)
-		over := map[string]bool{}
-		for _, group := range groupByRepo(remaining) {
-			if len(group) <= p.MaxN {
-				continue
+	// max-N cap: keep at most MaxN tags, deleting the oldest beyond the cap
+	// regardless of age. Deferred during the grace window, since a just-restarted
+	// node has no usage history and the "oldest" ordering is unreliable.
+	if p.MaxN > 0 && len(remaining) > p.MaxN {
+		sortByRecency(remaining)
+		if now.Before(graceUntil) {
+			if dec.NextAgeOut.IsZero() || graceUntil.Before(dec.NextAgeOut) {
+				dec.NextAgeOut = graceUntil
 			}
-			sortByRecency(group)
-			if inGrace {
-				// Something exceeds the cap but grace holds it: wake at graceUntil.
-				if dec.NextAgeOut.IsZero() || graceUntil.Before(dec.NextAgeOut) {
-					dec.NextAgeOut = graceUntil
-				}
-				continue
-			}
-			for i := p.MaxN; i < len(group); i++ {
-				over[group[i].Ref] = true
+		} else {
+			for _, r := range remaining[p.MaxN:] {
 				dec.Delete = append(dec.Delete, Candidate{
-					Ref: group[i].Ref, Digest: group[i].Digest,
-					LastUsed: group[i].effLastUsed(), Reason: "max_n_exceeded",
+					Ref: r.Ref, Digest: r.Digest, LastUsed: r.effLastUsed(), Reason: "max_n_exceeded",
 				})
 			}
-		}
-		if len(over) > 0 {
-			var rest []Record
-			for _, r := range remaining {
-				if !over[r.Ref] {
-					rest = append(rest, r)
-				}
-			}
-			remaining = rest
+			remaining = remaining[:p.MaxN]
 		}
 	}
 
-	// keep-N most-recently-used tags per repository.
-	if p.KeepN > 0 {
-		protected := map[string]bool{}
-		for _, group := range groupByRepo(remaining) {
-			sortByRecency(group)
-			for i := 0; i < len(group) && i < p.KeepN; i++ {
-				protected[group[i].Ref] = true
-				dec.Keep = append(dec.Keep, Kept{Ref: group[i].Ref, Reason: "keep_n_recent"})
-			}
+	// keep-N most-recently-used tags.
+	if p.KeepN > 0 && len(remaining) > 0 {
+		sortByRecency(remaining)
+		n := p.KeepN
+		if n > len(remaining) {
+			n = len(remaining)
 		}
-		var rest []Record
-		for _, r := range remaining {
-			if !protected[r.Ref] {
-				rest = append(rest, r)
-			}
+		for _, r := range remaining[:n] {
+			dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: "keep_n_recent"})
 		}
-		remaining = rest
+		remaining = remaining[n:]
 	}
 
 	// age-based deletion (held off during the grace window).
@@ -171,5 +254,4 @@ func Evaluate(now time.Time, recs []Record, inUse map[string]bool, p Policy, gra
 			dec.NextAgeOut = deletableAt
 		}
 	}
-	return dec
 }

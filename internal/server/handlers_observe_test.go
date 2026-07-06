@@ -40,9 +40,23 @@ func newGCServer(t *testing.T) (http.Handler, *retention.Index) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ix.Close() })
-	gc := retention.NewManager(ix, set.Engines(), retention.Policy{KeepN: 2}, retention.Schedule{})
+	gc := testGCManager(set, ix, retention.Policy{KeepN: 2}, retention.Schedule{})
 	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 	return h, ix
+}
+
+// testGCManager builds a per-store retention Manager over a store set with a
+// single catch-all "**" rule carrying p, mirroring the old single-policy setup.
+func testGCManager(set *store.Set, ix *retention.Index, p retention.Policy, sch retention.Schedule) *retention.Manager {
+	var stores []retention.Store
+	for name, eng := range set.Engines() {
+		stores = append(stores, retention.Store{
+			Name: name, Engine: eng, Index: ix,
+			Rules:    []retention.Rule{{Repo: "**", MaxAge: &p.MaxAge, KeepN: &p.KeepN, MaxN: &p.MaxN, Pins: p.Pins}},
+			Schedule: sch,
+		})
+	}
+	return retention.NewManager(stores)
 }
 
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -93,8 +107,8 @@ func TestGCStatusEndpoint(t *testing.T) {
 		if st.Enabled {
 			t.Error("scheduler with zero interval must report enabled=false (manual GC only)")
 		}
-		if st.Policy.KeepN != 2 {
-			t.Errorf("policy.keep_n = %d, want 2", st.Policy.KeepN)
+		if ss := st.Stores["eng"]; len(ss.Rules) != 1 || ss.Rules[0].KeepN == nil || *ss.Rules[0].KeepN != 2 {
+			t.Errorf("stores[eng].rules keep_n not surfaced: %+v", ss.Rules)
 		}
 		if got := st.Stores["eng"]; got.Records != 1 || got.Pins != 1 {
 			t.Errorf("stores[eng] = %+v, want 1 record / 1 pin", got)
@@ -298,7 +312,7 @@ func TestEventLogEndpoint(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { ix.Close() })
-		gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
+		gc := testGCManager(set, ix, retention.Policy{}, retention.Schedule{})
 		ev, err := event.Open(filepath.Join(t.TempDir(), "evt.db"), 100)
 		if err != nil {
 			t.Fatal(err)

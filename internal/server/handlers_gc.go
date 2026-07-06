@@ -50,7 +50,7 @@ func (s *Server) handleStoreRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.gc != nil {
-		_, _ = s.gc.Index().Delete(name, req.Ref)
+		_, _ = s.gc.DeleteRecord(name, req.Ref)
 	}
 	s.rec.ImageRemoved(name, req.Ref)
 	log.From(r.Context()).Info("image removed",
@@ -64,9 +64,11 @@ type removeRequest struct {
 	Ref string `json:"ref" binding:"required" example:"docker.io/library/nginx:1.27"` // Image reference to delete from the engine store (required).
 }
 
-// gcRequest overrides the configured policy for one /gc call. Fields are
-// pointers so an explicit zero (e.g. keep_n:0 to force keep-N off, or
-// max_age:"0s" to disable age GC) is distinguishable from "not set".
+// gcRequest is an optional /gc body that replaces the store's per-repo rules
+// with a single blanket policy applied to every repo for this one call. Fields
+// are pointers so an explicit zero (e.g. keep_n:0 to force keep-N off, or
+// max_age:"0s" to disable age GC) is distinguishable from "not set"; a field
+// left unset defaults to off for the call.
 type gcRequest struct {
 	MaxAge *config.Duration `json:"max_age,omitempty" swaggertype:"string" example:"720h"` // Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.
 	KeepN  *int             `json:"keep_n,omitempty" example:"3"`                          // Override how many most-recent tags to keep per repo; 0 disables keep-N.
@@ -119,16 +121,20 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.gc == nil {
-		writeErr(w, http.StatusNotImplemented, "retention/gc is not enabled (set serve.retention.path)")
+		writeErr(w, http.StatusNotImplemented, "retention/gc is not enabled (configure stores.<name>.retention for an engine store)")
 		return
 	}
-	p := s.gc.DefaultPolicy()
+	// No body: evaluate the store's configured per-repo rules. A body supplies a
+	// blanket override policy applied to every repo for this call (the per-repo
+	// rules are ignored), useful for ad-hoc GC.
+	var override *retention.Policy
 	if r.ContentLength != 0 {
 		var req gcRequest
 		if err := readJSON(r, &req); err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 			return
 		}
+		var p retention.Policy
 		if req.MaxAge != nil {
 			p.MaxAge = time.Duration(*req.MaxAge)
 		}
@@ -138,15 +144,13 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 		if req.MaxN != nil {
 			p.MaxN = *req.MaxN
 		}
-		if req.Pins != nil {
-			for _, pin := range req.Pins {
-				if !doublestar.ValidatePattern(pin) {
-					writeErr(w, http.StatusBadRequest, "invalid pin pattern "+pin)
-					return
-				}
+		for _, pin := range req.Pins {
+			if !doublestar.ValidatePattern(pin) {
+				writeErr(w, http.StatusBadRequest, "invalid pin pattern "+pin)
+				return
 			}
-			p.Pins = req.Pins
 		}
+		p.Pins = req.Pins
 		if p.MaxN < 0 {
 			writeErr(w, http.StatusBadRequest, "max_n must not be negative")
 			return
@@ -155,8 +159,9 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "max_n must be >= keep_n")
 			return
 		}
+		override = &p
 	}
-	dec, err := s.gc.Plan(r.Context(), name, p)
+	dec, err := s.gc.Plan(r.Context(), name, override)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -310,7 +315,7 @@ func (s *Server) gcReady(w http.ResponseWriter, name string) bool {
 		return false
 	}
 	if s.gc == nil {
-		writeErr(w, http.StatusNotImplemented, "retention/gc is not enabled (set serve.retention.path)")
+		writeErr(w, http.StatusNotImplemented, "retention/gc is not enabled (configure stores.<name>.retention for an engine store)")
 		return false
 	}
 	return true
@@ -328,7 +333,7 @@ func (s *Server) gcReady(w http.ResponseWriter, name string) bool {
 //	@Router		/v1/gc [get]
 func (s *Server) handleGCStatus(w http.ResponseWriter, r *http.Request) {
 	if s.gc == nil {
-		writeErr(w, http.StatusNotImplemented, "retention/gc is not enabled (set serve.retention.path)")
+		writeErr(w, http.StatusNotImplemented, "retention/gc is not enabled (configure stores.<name>.retention for an engine store)")
 		return
 	}
 	writeJSON(w, http.StatusOK, s.gc.Status())
@@ -386,7 +391,7 @@ func (s *Server) handleStoreImages(w http.ResponseWriter, r *http.Request) {
 	if !s.gcReady(w, name) {
 		return
 	}
-	recs, err := s.gc.Index().List(name)
+	recs, err := s.gc.List(name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -446,7 +451,7 @@ func (s *Server) handleStoreImageDelete(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "ref is required")
 		return
 	}
-	existed, err := s.gc.Index().Delete(name, req.Ref)
+	existed, err := s.gc.DeleteRecord(name, req.Ref)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

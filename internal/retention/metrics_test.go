@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/otx"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -24,7 +23,7 @@ func TestManagerGauges(t *testing.T) {
 	_ = ix.Touch("d", "r/a:2", time.Now())
 	_ = ix.Pin("d", "r/a:1", false)
 	eng := &fakeEng{name: "d"}
-	m := NewManager(ix, map[string]down.Engine{"d": eng}, Policy{}, Schedule{})
+	m := mgr1("d", eng, ix, Policy{}, Schedule{})
 	m.StartWatchers(ctx)
 
 	var rm metricdata.ResourceMetrics
