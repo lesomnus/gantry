@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/z"
 )
 
@@ -27,10 +29,24 @@ type dockerEngine struct {
 }
 
 func newDockerEngine(c config.StoreConfig) (*dockerEngine, error) {
-	cli, err := client.NewClientWithOpts(
-		client.WithHost(dockerHost(c.Address)),
-		client.WithAPIVersionNegotiation(),
-	)
+	opts := []client.Opt{client.WithAPIVersionNegotiation()}
+
+	// Optional mTLS to the daemon over tcp: a TPM-backed client certificate,
+	// a private CA to verify the daemon, or a TLS-verify skip — the same store
+	// transport the registry paths use. When set, the docker client detects the
+	// *http.Transport's TLSClientConfig and dials the daemon over https.
+	rt, err := xport.Transport(c)
+	if err != nil {
+		return nil, z.Err(err, "docker client transport")
+	}
+	if rt != nil {
+		// Must precede WithHost: WithHost runs sockets.ConfigureTransport on this
+		// client's transport, so the client has to be installed first.
+		opts = append(opts, client.WithHTTPClient(&http.Client{Transport: rt}))
+	}
+	opts = append(opts, client.WithHost(dockerHost(c.Address)))
+
+	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, z.Err(err, "docker client")
 	}
