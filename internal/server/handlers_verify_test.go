@@ -42,20 +42,20 @@ func (f *fakeVerifyService) Reload() (verify.Description, error) {
 func newVerifyServer(t *testing.T, vf verify.Service) http.Handler {
 	t.Helper()
 	var c config.Config
-	c.Serve.Stores = map[string]config.StoreConfig{
+	c.Stores = map[string]config.StoreConfig{
 		"up":   {Kind: "oci", Host: "up.example", Insecure: true},
 		"open": {Kind: "oci", Host: "open.example", Verify: &config.StoreVerify{Mode: config.VerifyOff}},
 	}
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, false)
+	set, err := store.NewSet(c.Stores, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { set.Close() })
-	return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, health.NewChecker(set, health.Options{}), vf, nil)
+	return New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, nil, health.NewChecker(set, health.Options{}), vf, nil)
 }
 
 func TestVerifyPreflight(t *testing.T) {

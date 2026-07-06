@@ -27,20 +27,20 @@ func TestStoreHealth(t *testing.T) {
 
 	var c config.Config
 	c.Serve.AllowUnknownStores = true
-	c.Serve.Stores = map[string]config.StoreConfig{
+	c.Stores = map[string]config.StoreConfig{
 		"up":   {Kind: "oci", Host: up, Insecure: true},
 		"down": {Kind: "oci", Host: "127.0.0.1:1", Insecure: true}, // nothing listens
 	}
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, c.Serve.AllowUnknownStores)
+	set, err := store.NewSet(c.Stores, c.Serve.AllowUnknownStores)
 	if err != nil {
 		t.Fatal(err)
 	}
 	js := warm.NewMemStore()
-	wmr := warm.NewWarmer(set, js, c.Serve.Warm)
+	wmr := warm.NewWarmer(set, js, c.Worker)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	wmr.Start(ctx)

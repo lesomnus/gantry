@@ -126,13 +126,13 @@ interactive view, point [Scalar](https://github.com/scalar/scalar),
 
 See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
 
-- `serve.stores` — the unified store map (keyed by name). `kind: oci` (`host`,
+- `stores` (top-level) — the unified store map (keyed by name). `kind: oci` (`host`,
   `mode`, `insecure`, `rewrite`, `downstream_host`) or `kind: docker`/`containerd`
   (`address`, `namespace`, `pull_host`).
+- `worker` (top-level) — `platforms` fallback, `max_concurrent_jobs`/`max_concurrent_layers`
+  pool sizes, `distribute_by_default`.
 - `serve.allow_unknown_stores` — let a job name a bare registry host not declared
   as a store (default false).
-- `serve.warm` — `platforms` fallback, `max_concurrent_jobs`/`max_concurrent_layers`
-  pool sizes, `distribute_by_default`.
 - `serve.health` — per-store health probe cache: `cache_ttl` (default 5s),
   `probe_timeout` (default 3s), and `ready_stores` (which stores `GET /readyz`
   gates on; empty = every engine store, so a flaky upstream can't flap the node).

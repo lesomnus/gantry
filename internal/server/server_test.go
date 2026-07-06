@@ -19,17 +19,17 @@ func newTestServer(t *testing.T) (http.Handler, warm.Store) {
 	t.Helper()
 	var c config.Config
 	c.Serve.AllowUnknownStores = true
-	c.Serve.Stores = map[string]config.StoreConfig{"cache": {Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"}}
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	c.Stores = map[string]config.StoreConfig{"cache": {Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"}}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, c.Serve.AllowUnknownStores)
+	set, err := store.NewSet(c.Stores, c.Serve.AllowUnknownStores)
 	if err != nil {
 		t.Fatal(err)
 	}
 	js := warm.NewMemStore()
-	wmr := warm.NewWarmer(set, js, c.Serve.Warm)
+	wmr := warm.NewWarmer(set, js, c.Worker)
 	// Start with an already-canceled context so submitted jobs fail fast without
 	// touching the network — these tests only exercise the HTTP layer.
 	ctx, cancel := context.WithCancel(context.Background())

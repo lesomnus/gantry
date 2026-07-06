@@ -1,7 +1,7 @@
 package config
 
-// ServeConfig configures the `serve` subcommand: the HTTP API, the image stores
-// gantry can move images between, and the warm worker pool.
+// ServeConfig configures the `serve` subcommand's HTTP API. The image stores
+// and the worker pool are top-level config sections (Config.Stores, Config.Worker).
 type ServeConfig struct {
 	Addr          string     `yaml:"addr"`
 	ShutdownGrace Duration   `yaml:"shutdown_grace"`
@@ -9,14 +9,11 @@ type ServeConfig struct {
 	// AllowUnknownStores permits a job to reference a registry by a bare host
 	// that is not a declared store. Engine stores (docker/containerd) must always
 	// be declared. Default false: only declared stores may be used.
-	AllowUnknownStores bool `yaml:"allow_unknown_stores"`
-	// Stores are keyed by name; order is not significant.
-	Stores    map[string]StoreConfig `yaml:"stores"`
-	Warm      WarmConfig             `yaml:"warm"`
-	Retention RetentionConfig        `yaml:"retention"`
-	Health    HealthConfig           `yaml:"health"`
-	Verify    VerifyConfig           `yaml:"verify"`
-	Events    EventsConfig           `yaml:"events"`
+	AllowUnknownStores bool            `yaml:"allow_unknown_stores"`
+	Retention          RetentionConfig `yaml:"retention"`
+	Health             HealthConfig    `yaml:"health"`
+	Verify             VerifyConfig    `yaml:"verify"`
+	Events             EventsConfig    `yaml:"events"`
 }
 
 // EventsConfig governs the audit log (GET /v1/event). An empty Path disables it.
@@ -81,8 +78,8 @@ func (c VerifyConfig) Enabled() bool {
 // VerifyEnabled reports whether verification runs anywhere: the global default
 // is on, or any store overrides its mode to a non-off value. A per-store
 // override must build the verifier even when the global default is off.
-func (c ServeConfig) VerifyEnabled() bool {
-	if c.Verify.Enabled() {
+func (c Config) VerifyEnabled() bool {
+	if c.Serve.Verify.Enabled() {
 		return true
 	}
 	for _, s := range c.Stores {
@@ -204,8 +201,8 @@ func (s StoreConfig) IsRegistry() bool { return s.Kind == "oci" }
 // IsEngine reports whether the store is a daemon gantry triggers to pull.
 func (s StoreConfig) IsEngine() bool { return s.Kind == "docker" || s.Kind == "containerd" }
 
-// WarmConfig bounds the warm worker pool.
-type WarmConfig struct {
+// WorkerConfig bounds the job worker pool that runs image moves.
+type WorkerConfig struct {
 	// Platforms is the fallback platform set when a request omits it; empty
 	// means the host GOOS/GOARCH only.
 	Platforms []string `yaml:"platforms"`

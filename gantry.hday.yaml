@@ -1,0 +1,35 @@
+# gantry store configuration
+#
+#   remote (cr.hday.io) ──copy──▶ local (192.168.10.33:5000) ──pull──▶ docker daemons
+#
+# Run with: gantry serve --config gantry.hday.yaml
+#
+# `stores` is a top-level section (not nested under `serve`).
+stores:
+  # Source registry (remote). Jobs name this as `from`.
+  remote:
+    kind: oci
+    host: cr.hday.io
+
+  # Local cache registry gantry fills and the daemons pull from.
+  # Jobs name this as `to`.
+  local:
+    kind: oci
+    host: "192.168.10.33:5000"
+    insecure: true          # plain-HTTP registry on :5000
+    mode: copy              # push blobs into the cache
+    # source ref -> ref in this registry (first match wins).
+    rewrite:
+      - { "**": "{{.CacheHost}}/{{.Repo}}" }
+
+  # Docker daemons gantry triggers to pull the cached image.
+  # List any subset of these under a job's `distribute`.
+  dockerd-10-2:
+    kind: docker
+    address: "tcp://192.168.10.2:2375"
+  dockerd-10-33:
+    kind: docker
+    address: "tcp://192.168.10.33:2375"
+  dockerd-10-34:
+    kind: docker
+    address: "tcp://192.168.10.34:2375"

@@ -20,18 +20,18 @@ func newWarmer(t *testing.T, stores []config.StoreConfig, allowUnknown bool) (*W
 		m[s.Name] = s
 	}
 	var c config.Config
-	c.Serve.Stores = m
+	c.Stores = m
 	c.Serve.AllowUnknownStores = allowUnknown
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 2, MaxConcurrentLayers: 2, QueueSize: 8}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 2, MaxConcurrentLayers: 2, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, c.Serve.AllowUnknownStores)
+	set, err := store.NewSet(c.Stores, c.Serve.AllowUnknownStores)
 	if err != nil {
 		t.Fatal(err)
 	}
 	js := NewMemStore()
-	w := NewWarmer(set, js, c.Serve.Warm)
+	w := NewWarmer(set, js, c.Worker)
 	w.srcOpts = []name.Option{name.Insecure}
 	return w, js
 }

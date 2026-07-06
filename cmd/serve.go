@@ -36,7 +36,7 @@ func NewCmdServe() *xli.Command {
 			c := use_config.Must(ctx)
 			flg.VisitP(cmd, "addr", &c.Serve.Addr)
 
-			stores, err := store.NewSet(c.Serve.Stores, c.Serve.AllowUnknownStores)
+			stores, err := store.NewSet(c.Stores, c.Serve.AllowUnknownStores)
 			if err != nil {
 				return z.Err(err, "build stores")
 			}
@@ -83,7 +83,7 @@ func NewCmdServe() *xli.Command {
 			}
 
 			jobStore := warm.NewMemStore()
-			wmr := warm.NewWarmer(stores, jobStore, c.Serve.Warm)
+			wmr := warm.NewWarmer(stores, jobStore, c.Worker)
 			if events != nil {
 				wmr.SetRecorder(event.NewRecorder(events))
 			}
@@ -93,7 +93,7 @@ func NewCmdServe() *xli.Command {
 			// The interface type matters: a nil *Swappable in a verify.Service
 			// interface is non-nil and would bypass every disabled-guard.
 			var vf verify.Service
-			if c.Serve.VerifyEnabled() {
+			if c.VerifyEnabled() {
 				v, err := verify.NewSwappable(c.Serve.Verify)
 				if err != nil {
 					return z.Err(err, "signature verification setup") // fail fast: don't serve unsafe
@@ -126,7 +126,7 @@ func NewCmdServe() *xli.Command {
 			}
 
 			l := log.From(ctx)
-			l.Info("serving", slog.String("addr", c.Serve.Addr), slog.Int("stores", len(c.Serve.Stores)))
+			l.Info("serving", slog.String("addr", c.Serve.Addr), slog.Int("stores", len(c.Stores)))
 
 			errc := make(chan error, 1)
 			go func() {

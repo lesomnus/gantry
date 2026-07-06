@@ -16,11 +16,11 @@ func compiledRules(t *testing.T, pairs ...[2]string) []config.RewriteRule {
 		st.Rewrite = append(st.Rewrite, config.RewriteRule{Pattern: p[0], Template: p[1]})
 	}
 	c := config.Config{}
-	c.Serve.Stores = map[string]config.StoreConfig{"cache": st}
+	c.Stores = map[string]config.StoreConfig{"cache": st}
 	if err := c.Evaluate(); err != nil {
 		t.Fatalf("evaluate rules: %v", err)
 	}
-	return c.Serve.Stores["cache"].Rewrite
+	return c.Stores["cache"].Rewrite
 }
 
 func mustRef(t *testing.T, s string) name.Reference {

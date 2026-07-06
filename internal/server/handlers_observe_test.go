@@ -23,14 +23,14 @@ func newGCServer(t *testing.T) (http.Handler, *retention.Index) {
 	t.Helper()
 	daemon := fakeDockerDaemon(t)
 	var c config.Config
-	c.Serve.Stores = map[string]config.StoreConfig{
+	c.Stores = map[string]config.StoreConfig{
 		"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
 	}
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, false)
+	set, err := store.NewSet(c.Stores, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func newGCServer(t *testing.T) (http.Handler, *retention.Index) {
 	}
 	t.Cleanup(func() { ix.Close() })
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{KeepN: 2}, retention.Schedule{})
-	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 	return h, ix
 }
 
@@ -204,20 +204,20 @@ func TestReadyz(t *testing.T) {
 	newH := func(host string, gate []string) http.Handler {
 		t.Helper()
 		var c config.Config
-		c.Serve.Stores = map[string]config.StoreConfig{
+		c.Stores = map[string]config.StoreConfig{
 			"reg": {Kind: "oci", Host: host, Insecure: true},
 		}
-		c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+		c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 		if err := c.Evaluate(); err != nil {
 			t.Fatal(err)
 		}
-		set, err := store.NewSet(c.Serve.Stores, false)
+		set, err := store.NewSet(c.Stores, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { set.Close() })
 		hc := health.NewChecker(set, health.Options{ReadyStores: gate, ProbeTimeout: time.Second})
-		return New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, nil, hc, nil, nil)
+		return New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, nil, hc, nil, nil)
 	}
 	host := strings.TrimPrefix(reg.URL, "http://")
 	t.Run("gated store healthy", func(t *testing.T) {
@@ -281,14 +281,14 @@ func TestEventLogEndpoint(t *testing.T) {
 	t.Run("records manual ops and lists them", func(t *testing.T) {
 		daemon := fakeDockerDaemon(t)
 		var c config.Config
-		c.Serve.Stores = map[string]config.StoreConfig{
+		c.Stores = map[string]config.StoreConfig{
 			"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
 		}
-		c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+		c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 		if err := c.Evaluate(); err != nil {
 			t.Fatal(err)
 		}
-		set, err := store.NewSet(c.Serve.Stores, false)
+		set, err := store.NewSet(c.Stores, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -305,7 +305,7 @@ func TestEventLogEndpoint(t *testing.T) {
 		}
 		t.Cleanup(func() { ev.Close() })
 		gc.SetRecorder(event.NewRecorder(ev))
-		h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, ev)
+		h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, ev)
 
 		// A manual pull and a pin are auditable events.
 		if rr := do(t, h, http.MethodPost, "/v1/store/eng/pull", `{"ref":"cache.local/a:1"}`); rr.Code != http.StatusOK {

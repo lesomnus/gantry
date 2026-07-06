@@ -111,12 +111,12 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/v2/   # 200
 serve:
   addr: "127.0.0.1:18080"
   allow_unknown_stores: true   # let `from: docker.io` resolve to a bare host
-  stores:
-    cache:       { kind: "oci", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
-    dind-docker: { kind: "docker",     address: "tcp://docker:2375" }
-    dind-ctr:    { kind: "containerd", address: "/run/containerd/containerd.sock", namespace: "gantry" }
-  warm:
-    platforms: ["linux/amd64"]
+stores:
+  cache:       { kind: "oci", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
+  dind-docker: { kind: "docker",     address: "tcp://docker:2375" }
+  dind-ctr:    { kind: "containerd", address: "/run/containerd/containerd.sock", namespace: "gantry" }
+worker:
+  platforms: ["linux/amd64"]
 ```
 
 ### 3. job + 확인

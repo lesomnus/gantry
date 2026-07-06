@@ -149,8 +149,8 @@ func TestNewFailFast(t *testing.T) {
 
 func TestVerifyEnabledStoreAware(t *testing.T) {
 	// Global off, but a store overrides to require -> verification must be built.
-	var c config.ServeConfig
-	c.Verify.Mode = config.VerifyOff
+	var c config.Config
+	c.Serve.Verify.Mode = config.VerifyOff
 	c.Stores = map[string]config.StoreConfig{
 		"a": {Kind: "oci", Host: "a"},
 		"b": {Kind: "oci", Host: "b", Verify: &config.StoreVerify{Mode: config.VerifyRequire}},

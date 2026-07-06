@@ -43,14 +43,14 @@ func TestStorePullStampsRetentionIndex(t *testing.T) {
 	daemon := fakeDockerDaemon(t)
 
 	var c config.Config
-	c.Serve.Stores = map[string]config.StoreConfig{
+	c.Stores = map[string]config.StoreConfig{
 		"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
 	}
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, false)
+	set, err := store.NewSet(c.Stores, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestStorePullStampsRetentionIndex(t *testing.T) {
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
 
 	js := warm.NewMemStore()
-	wmr := warm.NewWarmer(set, js, c.Serve.Warm)
+	wmr := warm.NewWarmer(set, js, c.Worker)
 	hc := health.NewChecker(set, health.Options{})
 	h := New(wmr, js, set, gc, hc, nil, nil)
 
@@ -91,14 +91,14 @@ func TestPinAPIPatterns(t *testing.T) {
 	daemon := fakeDockerDaemon(t)
 
 	var c config.Config
-	c.Serve.Stores = map[string]config.StoreConfig{
+	c.Stores = map[string]config.StoreConfig{
 		"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
 	}
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, false)
+	set, err := store.NewSet(c.Stores, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestPinAPIPatterns(t *testing.T) {
 	}
 	t.Cleanup(func() { ix.Close() })
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
-	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 
 	do := func(method, body string) *httptest.ResponseRecorder {
 		rr := httptest.NewRecorder()
@@ -148,14 +148,14 @@ func TestPinAPIRejectsInvalidPattern(t *testing.T) {
 	daemon := fakeDockerDaemon(t)
 
 	var c config.Config
-	c.Serve.Stores = map[string]config.StoreConfig{
+	c.Stores = map[string]config.StoreConfig{
 		"eng": {Kind: "docker", Address: "tcp://" + daemon.Listener.Addr().String()},
 	}
-	c.Serve.Warm = config.WarmConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
+	c.Worker = config.WorkerConfig{MaxConcurrentJobs: 1, MaxConcurrentLayers: 1, QueueSize: 8}
 	if err := c.Evaluate(); err != nil {
 		t.Fatal(err)
 	}
-	set, err := store.NewSet(c.Serve.Stores, false)
+	set, err := store.NewSet(c.Stores, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestPinAPIRejectsInvalidPattern(t *testing.T) {
 	}
 	t.Cleanup(func() { ix.Close() })
 	gc := retention.NewManager(ix, set.Engines(), retention.Policy{}, retention.Schedule{})
-	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Serve.Warm), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
+	h := New(warm.NewWarmer(set, warm.NewMemStore(), c.Worker), warm.NewMemStore(), set, gc, health.NewChecker(set, health.Options{}), nil, nil)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/store/eng/pin", strings.NewReader(`{"pattern":"[unclosed"}`))

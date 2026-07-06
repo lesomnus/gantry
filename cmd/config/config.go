@@ -22,6 +22,14 @@ type Config struct {
 	Otel OtelConfig
 
 	Serve ServeConfig
+
+	// Stores are the image stores gantry can move images between, keyed by name
+	// (order is not significant). A store is an OCI registry (kind "oci") or an
+	// engine daemon (kind "docker"/"containerd").
+	Stores map[string]StoreConfig
+
+	// Worker bounds the job worker pool that runs image moves.
+	Worker WorkerConfig
 }
 
 func ReadFromFile(p string) (*Config, error) {
@@ -48,12 +56,12 @@ func (c *Config) Evaluate() error {
 
 	z.FallbackP(&c.Serve.Addr, ":8080")
 	z.FallbackP((*time.Duration)(&c.Serve.ShutdownGrace), 15*time.Second)
-	z.FallbackP(&c.Serve.Warm.MaxConcurrentJobs, 2)
-	z.FallbackP(&c.Serve.Warm.MaxConcurrentLayers, 4)
-	z.FallbackP(&c.Serve.Warm.QueueSize, 256)
-	z.FallbackP((*time.Duration)(&c.Serve.Warm.JobTTL), 30*time.Minute)
+	z.FallbackP(&c.Worker.MaxConcurrentJobs, 2)
+	z.FallbackP(&c.Worker.MaxConcurrentLayers, 4)
+	z.FallbackP(&c.Worker.QueueSize, 256)
+	z.FallbackP((*time.Duration)(&c.Worker.JobTTL), 30*time.Minute)
 
-	for name, s := range c.Serve.Stores {
+	for name, s := range c.Stores {
 		if name == "" {
 			return z.Err(nil, "a store has an empty name")
 		}
@@ -82,7 +90,7 @@ func (c *Config) Evaluate() error {
 		if s.Verify != nil && !s.Verify.Mode.Valid() {
 			return z.Err(nil, "store %q: verify.mode %q is not one of off/verify-if-present/require", name, s.Verify.Mode)
 		}
-		c.Serve.Stores[name] = s
+		c.Stores[name] = s
 	}
 
 	z.FallbackP((*time.Duration)(&c.Serve.Health.CacheTTL), 5*time.Second)
@@ -90,7 +98,7 @@ func (c *Config) Evaluate() error {
 	for _, n := range c.Serve.Health.ReadyStores {
 		// A typo here would otherwise make the node permanently NotReady with no
 		// startup diagnostic (Check returns unknown-store forever).
-		if _, ok := c.Serve.Stores[n]; !ok {
+		if _, ok := c.Stores[n]; !ok {
 			return z.Err(nil, "serve.health.ready_stores: unknown store %q", n)
 		}
 	}
@@ -98,7 +106,7 @@ func (c *Config) Evaluate() error {
 	if !c.Serve.Verify.Mode.Valid() {
 		return z.Err(nil, "serve.verify.mode %q is not one of off/verify-if-present/require", c.Serve.Verify.Mode)
 	}
-	if c.Serve.VerifyEnabled() {
+	if c.VerifyEnabled() {
 		z.FallbackP(&c.Serve.Verify.Provider, "notation")
 		z.FallbackP(&c.Serve.Verify.Level, "strict")
 		z.FallbackP((*time.Duration)(&c.Serve.Verify.Timeout), 15*time.Second)

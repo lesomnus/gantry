@@ -18,10 +18,10 @@ func TestEvaluateDefaults(t *testing.T) {
 	if got := time.Duration(c.Serve.ShutdownGrace); got != 15*time.Second {
 		t.Errorf("shutdown_grace = %v, want 15s", got)
 	}
-	if c.Serve.Warm.MaxConcurrentJobs != 2 || c.Serve.Warm.MaxConcurrentLayers != 4 || c.Serve.Warm.QueueSize != 256 {
-		t.Errorf("warm pool = %+v, want jobs=2 layers=4 queue=256", c.Serve.Warm)
+	if c.Worker.MaxConcurrentJobs != 2 || c.Worker.MaxConcurrentLayers != 4 || c.Worker.QueueSize != 256 {
+		t.Errorf("warm pool = %+v, want jobs=2 layers=4 queue=256", c.Worker)
 	}
-	if got := time.Duration(c.Serve.Warm.JobTTL); got != 30*time.Minute {
+	if got := time.Duration(c.Worker.JobTTL); got != 30*time.Minute {
 		t.Errorf("job_ttl = %v, want 30m", got)
 	}
 	if got := time.Duration(c.Serve.Health.CacheTTL); got != 5*time.Second {
@@ -39,18 +39,18 @@ func TestStoresDecode(t *testing.T) {
 	const src = `
 serve:
   allow_unknown_stores: true
-  stores:
-    dockerhub: { kind: "oci", host: "docker.io" }
-    "ghcr.io": { kind: "oci" }
-    cache:
-      kind: "oci"
-      host: "cache.local:5000"
-      insecure: true
-      downstream_host: "cache.cr.com"
-      rewrite:
-        - { "ghcr.io/**": "{{.CacheHost}}/{{.Repo}}" }
-    k3s: { kind: "containerd", address: "/run/containerd.sock", namespace: "k8s.io" }
-    nomad: { kind: "docker", address: "/var/run/docker.sock" }
+stores:
+  dockerhub: { kind: "oci", host: "docker.io" }
+  "ghcr.io": { kind: "oci" }
+  cache:
+    kind: "oci"
+    host: "cache.local:5000"
+    insecure: true
+    downstream_host: "cache.cr.com"
+    rewrite:
+      - { "ghcr.io/**": "{{.CacheHost}}/{{.Repo}}" }
+  k3s: { kind: "containerd", address: "/run/containerd.sock", namespace: "k8s.io" }
+  nomad: { kind: "docker", address: "/var/run/docker.sock" }
 `
 	var c Config
 	if err := yaml.Unmarshal([]byte(src), &c); err != nil {
@@ -62,10 +62,10 @@ serve:
 	if !c.Serve.AllowUnknownStores {
 		t.Error("allow_unknown_stores = false, want true")
 	}
-	if len(c.Serve.Stores) != 5 {
-		t.Fatalf("stores = %d, want 5", len(c.Serve.Stores))
+	if len(c.Stores) != 5 {
+		t.Fatalf("stores = %d, want 5", len(c.Stores))
 	}
-	ss := c.Serve.Stores
+	ss := c.Stores
 	if dh := ss["dockerhub"]; dh.Name != "dockerhub" || dh.Mode != "copy" || len(dh.Rewrite) != 1 {
 		t.Errorf("dockerhub registry defaults = %+v", dh)
 	}
@@ -86,14 +86,14 @@ serve:
 func TestStoreValidation(t *testing.T) {
 	t.Run("unknown kind", func(t *testing.T) {
 		var c Config
-		c.Serve.Stores = map[string]StoreConfig{"x": {Kind: "bogus"}}
+		c.Stores = map[string]StoreConfig{"x": {Kind: "bogus"}}
 		if err := c.Evaluate(); err == nil {
 			t.Error("expected unknown-kind error")
 		}
 	})
 	t.Run("empty name key", func(t *testing.T) {
 		var c Config
-		c.Serve.Stores = map[string]StoreConfig{"": {Kind: "oci"}}
+		c.Stores = map[string]StoreConfig{"": {Kind: "oci"}}
 		if err := c.Evaluate(); err == nil {
 			t.Error("expected empty-name error")
 		}
@@ -134,13 +134,12 @@ func TestRewriteRuleRender(t *testing.T) {
 
 func TestRewriteRuleDecodeRejectsMultiKey(t *testing.T) {
 	const src = `
-serve:
-  stores:
-    cache:
-      kind: "oci"
-      host: "cache.local"
-      rewrite:
-        - { "a/**": "x", "b/**": "y" }
+stores:
+  cache:
+    kind: "oci"
+    host: "cache.local"
+    rewrite:
+      - { "a/**": "x", "b/**": "y" }
 `
 	var c Config
 	if err := yaml.Unmarshal([]byte(src), &c); err == nil {

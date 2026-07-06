@@ -100,7 +100,7 @@ type jobExec struct {
 type Warmer struct {
 	stores *store.Set
 	store  Store
-	wc     config.WarmConfig
+	wc     config.WorkerConfig
 
 	jobs     chan *Job
 	idgen    func() string
@@ -115,7 +115,7 @@ type Warmer struct {
 	wg   sync.WaitGroup
 }
 
-func NewWarmer(stores *store.Set, jobStore Store, wc config.WarmConfig) *Warmer {
+func NewWarmer(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Warmer {
 	q := wc.QueueSize
 	if q < 1 {
 		q = 1
