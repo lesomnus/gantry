@@ -140,11 +140,12 @@ func (s *Set) EngineNames() []string {
 
 // Caps is the capability set reported per store.
 type Caps struct {
-	Read   bool `json:"read,omitempty"`   // registry: pull blobs
-	Write  bool `json:"write,omitempty"`  // registry: push blobs
-	Pull   bool `json:"pull,omitempty"`   // engine can be triggered to pull
-	Verify bool `json:"verify,omitempty"` // engine can verify signatures (phase 2)
-	GC     bool `json:"gc,omitempty"`     // engine supports image GC (phase 2)
+	Read      bool `json:"read,omitempty"`      // registry: pull blobs
+	Write     bool `json:"write,omitempty"`     // registry: push blobs
+	Pull      bool `json:"pull,omitempty"`      // engine can be triggered to pull
+	Verify    bool `json:"verify,omitempty"`    // engine can verify signatures (phase 2)
+	GC        bool `json:"gc,omitempty"`        // engine supports image GC (phase 2)
+	Reconcile bool `json:"reconcile,omitempty"` // engine supports inventory scans / untagged reaping (phase 2)
 }
 
 // Status is one GET /v1/store row.
@@ -178,7 +179,7 @@ func (s *Set) StoreStatuses(ctx context.Context) []Status {
 			st.Namespace = c.Namespace
 			eng := s.engines[c.Name]
 			caps := down.Capabilities(eng)
-			st.Capabilities = Caps{Pull: caps.Pull, Verify: caps.Verify, GC: caps.GC}
+			st.Capabilities = Caps{Pull: caps.Pull, Verify: caps.Verify, GC: caps.GC, Reconcile: caps.Reconcile}
 			if err := eng.Ready(ctx); err != nil {
 				st.Error = err.Error()
 			} else {

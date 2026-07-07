@@ -113,14 +113,14 @@ func TestRecorderNilSafe(t *testing.T) {
 	var r *Recorder
 	r.JobAdmitted("a", "b", "c", "d") // must not panic
 	r = NewRecorder(nil)
-	r.GCApplied("eng", 1, 2, 3) // nil log, no panic
+	r.GCApplied("eng", 1, 2, 3, 0) // nil log, no panic
 }
 
 func TestRecorderEmits(t *testing.T) {
 	l := openTemp(t, 100)
 	r := NewRecorder(l)
 	r.JobAdmitted("a:1", "up", "cache", "sha256:x")
-	r.GCApplied("eng", 2, 1, 0)
+	r.GCApplied("eng", 2, 1, 1, 0)
 	r.Pinned("eng", "*:stable", false)
 	r.ImagePulled("eng", "b:1")
 

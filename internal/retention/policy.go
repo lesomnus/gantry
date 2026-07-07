@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/lesomnus/gantry/internal/down"
 )
 
 // matchPin reports whether a pin (an exact reference or a doublestar pattern)
@@ -179,6 +180,121 @@ func Evaluate(now time.Time, recs []Record, inUse map[string]bool, rules []Rule,
 		evalGroup(now, group, inUse, p, graceUntil, &dec)
 	}
 	return dec
+}
+
+// UntaggedInput is one store's inventory-scan state fed to EvaluateUntagged.
+type UntaggedInput struct {
+	Images    []down.UntaggedImage // live scan: images with no tags
+	FirstSeen map[string]time.Time // image ID -> first observed untagged (missing => treated as now)
+	Records   []Record             // live index records, for digest-ref ownership
+	InUse     map[string]bool      // running containers' refs and image IDs
+	Pins      []PinEntry           // API pins plus rule pins (rule pins wrapped as patterns)
+	After     time.Duration        // reap delay from first observation; <=0 disables
+}
+
+// EvaluateUntagged appends the untagged-image reap decision to dec. Untagged
+// images bypass the per-repo rules — they have no tag for a rule to manage —
+// and are deleted After their first observation with no tags, deferred by the
+// same startup grace window as age GC. Protections, in order:
+//  1. digest_tracked — a live index record exists for one of the image's
+//     repo@digest refs: the image is deliberately digest-pinned (a digest job
+//     or manual digest pull) and the rule engine owns it.
+//  2. in_use — a running container references the image ID or a digest ref.
+//  3. pinned — a pin protects one of the digest refs (or the bare image ID).
+//     Tag-form pins cannot protect an image that lost its tags; pin repo@digest
+//     to protect content.
+func EvaluateUntagged(now time.Time, in UntaggedInput, graceUntil time.Time, dec *Decision) {
+	if in.After <= 0 {
+		return
+	}
+	// The daemon reports familiar names ("nginx@sha256:x") while gantry's refs
+	// are canonical ("index.docker.io/library/nginx@sha256:x"); ownership is
+	// matched on the parseRef-canonical (repo, digest) pair so both spellings
+	// of a Docker Hub reference collide.
+	owned := make(map[string]bool, len(in.Records))
+	for _, r := range in.Records {
+		if r.Digest != "" && r.Tag == "" {
+			owned[r.Repo+"@"+r.Digest] = true
+		}
+	}
+	ownedBy := func(img down.UntaggedImage) bool {
+		for _, d := range img.RepoDigests {
+			if repo, _, dg := parseRef(d); dg != "" && owned[repo+"@"+dg] {
+				return true
+			}
+		}
+		return false
+	}
+	for _, img := range in.Images {
+		keep := func(reason string) {
+			dec.Keep = append(dec.Keep, Kept{Ref: img.ID, Reason: reason})
+		}
+		if ownedBy(img) {
+			keep("digest_tracked")
+			continue
+		}
+		if in.InUse[img.ID] || anyKey(in.InUse, img.RepoDigests) {
+			keep("in_use")
+			continue
+		}
+		if pinnedUntagged(img, in.Pins) {
+			keep("pinned")
+			continue
+		}
+		fs := in.FirstSeen[img.ID]
+		if fs.IsZero() {
+			fs = now // not yet persisted (e.g. a dry-run before the first scheduled scan)
+		}
+		deletableAt := fs.Add(in.After)
+		if graceUntil.After(deletableAt) {
+			deletableAt = graceUntil
+		}
+		if !now.Before(deletableAt) {
+			dec.Delete = append(dec.Delete, Candidate{
+				Ref: img.ID, ImageID: img.ID, LastUsed: fs, Reason: "untagged",
+			})
+			continue
+		}
+		keep("untagged_grace")
+		if dec.NextAgeOut.IsZero() || deletableAt.Before(dec.NextAgeOut) {
+			dec.NextAgeOut = deletableAt
+		}
+	}
+}
+
+func anyKey(m map[string]bool, keys []string) bool {
+	for _, k := range keys {
+		if m[k] {
+			return true
+		}
+	}
+	return false
+}
+
+// pinnedUntagged reports whether any pin protects the untagged image, matched
+// against a synthesized record per repo@digest ref and the bare image ID. Each
+// digest ref is tried in the daemon's spelling and the canonical one, so an
+// exact pin written either way ("nginx@sha256:x" or
+// "index.docker.io/library/nginx@sha256:x") protects.
+func pinnedUntagged(img down.UntaggedImage, pins []PinEntry) bool {
+	recs := make([]Record, 0, 2*len(img.RepoDigests)+1)
+	for _, d := range img.RepoDigests {
+		r := Record{Ref: d}
+		r.Repo, r.Tag, r.Digest = parseRef(d)
+		recs = append(recs, r)
+		if canon := r.Repo + "@" + r.Digest; r.Digest != "" && canon != d {
+			recs = append(recs, Record{Ref: canon, Repo: r.Repo, Digest: r.Digest})
+		}
+	}
+	recs = append(recs, Record{Ref: img.ID})
+	for _, pin := range pins {
+		for _, r := range recs {
+			if pin.protects(r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // evalGroup evaluates one repository's records against its resolved policy,

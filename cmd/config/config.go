@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -48,6 +49,20 @@ func ReadFromFile(p string) (*Config, error) {
 
 func (c *Config) Path() string {
 	return c.path
+}
+
+// engineHost normalizes an engine address the way the docker store dials it
+// (internal/down dockerHost): empty means the default local socket, a bare
+// path gets the unix scheme. Keep the two in sync.
+func engineHost(addr string) string {
+	switch {
+	case addr == "":
+		return "unix:///var/run/docker.sock"
+	case strings.Contains(addr, "://"):
+		return addr
+	default:
+		return "unix://" + addr
+	}
 }
 
 func (c *Config) Evaluate() error {
@@ -114,6 +129,23 @@ func (c *Config) Evaluate() error {
 			return z.Err(nil, "stores %q and %q share retention.path %q; each store needs its own index file", other, name, s.Retention.Path)
 		}
 		retentionPaths[s.Retention.Path] = name
+	}
+
+	// Two docker stores must not reap untagged images on the same daemon: each
+	// would run an independent reap clock and pin set over the same image store,
+	// so one store's reaper deletes what the other believes it protects. The
+	// comparison is by normalized address spelling — symlinked socket paths or
+	// host aliases of one daemon still evade it.
+	reapAddrs := map[string]string{}
+	for name, s := range c.Stores {
+		if s.Kind != "docker" || !s.Retention.Enabled() || s.Retention.UntaggedReapAfter() <= 0 {
+			continue
+		}
+		addr := engineHost(s.Address)
+		if other, dup := reapAddrs[addr]; dup {
+			return z.Err(nil, "stores %q and %q reap untagged images on the same docker daemon (%s); turn one off with retention.untagged_after: \"0s\"", other, name, addr)
+		}
+		reapAddrs[addr] = name
 	}
 
 	z.FallbackP((*time.Duration)(&c.Serve.Health.CacheTTL), 5*time.Second)

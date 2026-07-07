@@ -98,9 +98,9 @@ $ curl -N localhost:8080/v1/job/<id>/progress   # SSE stream
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/v1/gc` | GC scheduler status per engine store: last run, next wake, grace window, the store's per-repo rules, and index counts. |
-| `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`max_n`/`pins`. |
+| `GET` · `POST` | `/v1/store/{name}/gc` | `GET` dry-runs the retention policy (keep/delete decision); `POST` applies it. Optional body overrides `max_age`/`keep_n`/`max_n`/`pins`/`untagged_after`. |
 | `GET` · `POST` · `DELETE` | `/v1/store/{name}/pin` | List / add / remove pins (an exact `ref` or a doublestar `pattern`), exempt from GC. |
-| `GET` · `DELETE` | `/v1/store/{name}/image` | List the retention inventory (filters: `?repo=`, `?ref=`, `?pinned=`); `DELETE` purges one orphan record without touching the engine. |
+| `GET` · `DELETE` | `/v1/store/{name}/image` | List the retention inventory (filters: `?repo=`, `?ref=`, `?pinned=`) plus the tracked untagged images and their reap clocks; `DELETE` purges one orphan record (or reap clock) without touching the engine. |
 | `GET` | `/v1/store/{name}/watcher` | Usage-event stream liveness (a dead stream silently degrades age GC). |
 
 **Verification** (require `serve.verify`)
@@ -163,6 +163,20 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   (the longest-prefix match wins each field, pins are unioned), and a repo that
   matches no rule is left untouched. The scheduler is adaptive — it idles up to
   `interval` and wakes only when a record is about to age out or usage changes.
+- `stores.<name>.retention.untagged_after` (docker stores; **default `1h`, on**) —
+  reap an image this long after gantry first observes it with **no tags** — e.g.
+  the previous image of a tag that was re-pulled, which docker otherwise keeps on
+  disk forever. Every GC pass also takes a full inventory scan of the daemon, so
+  images pulled or untagged while gantry was down (or by a human) still converge
+  on the configured rules: unknown *tagged* refs are seeded into the index
+  (age clock starts at observation; repos matching no rule stay untouched — note
+  a `max_n` cap applies to seeded refs on the next pass once the startup grace
+  ends), and untagged images start a reap clock. Untagged images bypass the per-repo rules
+  (there is no tag to match); running containers, digest-pinned index records
+  (e.g. a digest-ref job), and `repo@digest`/image-ID pins still protect them —
+  tag-form pins cannot, since the tag is gone. Set `"0s"` to turn the reaper off.
+  containerd needs none of this (gantry untracks the digest record after a pull,
+  so containerd's own GC reclaims replaced content) and rejects the knob.
 - `serve.events` — the audit log (disabled unless `path` is set): a bounded bbolt
   ring (`cap` entries) of jobs, GC, pins, and manual ops, queryable at `/v1/event`.
 - `serve.auth` — `tokens` (env-expanded), `client_ca`, and server `tls_cert`/`tls_key`.
@@ -191,7 +205,9 @@ Implemented and tested (unit + live docker/containerd integration; `go test -rac
   pull seam, SSE/long-poll progress. Verified end-to-end against real daemons.
 - **Retention / GC** (per-store `retention`) — usage tracking from container events,
   keep-N-per-repo, exact and pattern pins, the adaptive scheduler, and the
-  inventory / status / watcher APIs.
+  inventory / status / watcher APIs. On docker stores the GC pass also reconciles
+  against a full daemon inventory: unknown tagged images join the index and
+  untagged leftovers are reaped after `untagged_after`.
 - **Signature verification** (`serve.verify`, Notary Project / notation) — verified
   at admission with digest pinning; engine pulls are digest-anchored and signatures
   can be copied into the cache (`copy_referrers`). Preflight, introspection, and

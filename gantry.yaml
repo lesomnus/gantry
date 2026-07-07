@@ -76,6 +76,13 @@ stores:
   #     interval: "1h"                  # scheduler idle cap (default 1h)
   #     min_interval: "1m"              # debounce between GC runs (default 1m)
   #     grace: "1h"                     # hold off deletion after startup (default 1h)
+  #     # docker stores only (containerd reclaims untagged content itself and
+  #     # rejects this key): reap an image this long after it is first observed
+  #     # with NO tags — e.g. the old image of a re-pulled tag. Default "1h",
+  #     # i.e. ON whenever retention is enabled on a docker store; "0s" turns it
+  #     # off. Every GC pass also takes a full inventory scan of the daemon, so
+  #     # images pulled or untagged out-of-band still converge on these rules.
+  #     # untagged_after: "1h"
   #     # Per-repo rules. For a repo, the matching patterns are resolved field by
   #     # field: each field takes the value from the most specific matching rule
   #     # that sets it (longest literal prefix wins); pins are the union of all

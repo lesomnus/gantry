@@ -384,3 +384,37 @@ real daemon이 꼭 필요한 것: 3(stream 소비/seed enumerate), 5(실제 삭�
 - **태그 다수 → 동일 digest**: 두 태그가 같은 content를 가리킬 때 keep-N을 태그 단위로 셀지 digest 단위로 셀지. 디스크 회수는 digest 단위(마지막 태그 제거 시)지만 사용자 의도는 태그 단위 — 현재 태그 단위 카운트.
 - **삭제 원자성/부분 실패**: apply 중 일부 ref 삭제 실패 시 index를 어떻게 둘지(현재: 성공한 것만 `Index.Delete`, 실패는 다음 GC에서 재시도). daemon 삭제는 성공했는데 bbolt Delete가 실패하는 역순 케이스 처리.
 - **in-use를 last-used로 승격하는 reconciler 주기**: event watcher 외에 주기적 in-use 스캔으로 `LastUsed=now`를 찍는 heartbeat를 둘지(돌고 있지만 start event를 놓친 컨테이너 보강). 둔다면 주기는?
+
+### 7b. 후속 결정 — 이름 잃은 이미지(untagged) 리퍼 (2026-07)
+
+docker 엔진에서 같은 태그가 갱신되면 이전 이미지는 태그만 잃고 `repo@digest`
+참조와 함께 디스크에 영구히 남는다(containerd는 gantry가 retag 후 digest record를
+지워 자체 GC가 회수하므로 해당 없음). 이를 다음과 같이 해소했다:
+
+- **관측 시점 시계**: 태그를 잃은 정확한 시각은 알 수 없고 알 필요도 없다.
+  인벤토리 스캔이 태그 없는 이미지를 처음 본 시각(`unt/<engine>/<id>`,
+  write-once `first_seen`)부터 `retention.untagged_after`(docker 전용, 기본 1h,
+  `"0s"`로 끔) 경과 후 삭제. 시작 grace window는 age GC와 동일하게 적용.
+- **스캔은 GC 패스에 편승**: 별도 스케줄러 없이 `gcOnce`가 매 패스
+  `Reconciler.Images`(ImageList)로 전체 인벤토리를 읽는다. 시작 시 1회 +
+  usage/distribute poke + `interval` 유휴 wake로 eventual convergence를 얻는다.
+  모르는 **태그 있는** ref도 이때 `Observe`(FirstSeen=now)로 seed되어 기존
+  rule이 관리하게 된다(rule 없는 repo는 기존대로 unmanaged 보존). `GET /gc`
+  dry-run은 읽기 전용: 스캔은 하되 시계를 기록하지 않는다.
+- **보호 순서**: ① digest record 보유(digest-ref job/수동 digest pull — rule
+  엔진 소유) ② in-use(이미지 ID·digest ref) ③ pin(`repo@digest`·이미지 ID —
+  태그형 핀은 태그가 없으니 보호 불가) ④ 유예 미경과.
+- **삭제 안무는 엔진 캡슐화**(`down.Reconciler.ReapUntagged`): 삭제 직전
+  재-inspect(retag 시 skip), 멈춘 컨테이너 포함 참조 확인(All:true, 매 패스
+  에러 스팸 방지), digest ref를 하나씩 제거(마지막 ref에서 content 해제,
+  multi-repo by-ID force 불요) 후 ref 없는 이미지만 ID 삭제, NotFound=성공.
+- **pull 경합**: job/수동 pull 공통 관문인 `dockerEngine.Pull`에 in-flight
+  레지스트리를 두고, reap이 짧은 뮤텍스 안에서 확인+삭제한다. "Already
+  exists" 직후 `ImageTag` 하려는 롤백 pull을 reap이 지워버리는 초 단위 경합이
+  원천 차단된다(등록은 reap 진행 중에만 잠시 대기). 스캔 자체는 잠금 불요.
+- **동일 데몬 이중 리퍼 금지**: 같은 address의 docker 스토어 둘이 모두 리퍼를
+  켜면 config 검증에서 거부(서로의 pin/시계를 볼 수 없음).
+- **관측 표면**: `Decision`에 `untagged`/`untagged_grace`/`digest_tracked`,
+  `ApplyResult.reaped/skipped`, `gc_applied` detail의 `reaped`, `/v1/gc`의
+  `untagged` 카운트·`untagged_after`, `/image`의 reap 시계 목록,
+  `gantry.retention.untagged` 게이지.

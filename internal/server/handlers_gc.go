@@ -70,16 +70,17 @@ type removeRequest struct {
 // max_age:"0s" to disable age GC) is distinguishable from "not set"; a field
 // left unset defaults to off for the call.
 type gcRequest struct {
-	MaxAge *config.Duration `json:"max_age,omitempty" swaggertype:"string" example:"720h"` // Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.
-	KeepN  *int             `json:"keep_n,omitempty" example:"3"`                          // Override how many most-recent tags to keep per repo; 0 disables keep-N.
-	MaxN   *int             `json:"max_n,omitempty" example:"20"`                          // Override the per-repo tag cap; 0 disables the cap. Must be >= keep_n.
-	Pins   []string         `json:"pins,omitempty" example:"docker.io/library/nginx:1.27"` // Override the pinned references exempt from GC.
+	MaxAge        *config.Duration `json:"max_age,omitempty" swaggertype:"string" example:"720h"`       // Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.
+	KeepN         *int             `json:"keep_n,omitempty" example:"3"`                                // Override how many most-recent tags to keep per repo; 0 disables keep-N.
+	MaxN          *int             `json:"max_n,omitempty" example:"20"`                                // Override the per-repo tag cap; 0 disables the cap. Must be >= keep_n.
+	Pins          []string         `json:"pins,omitempty" example:"docker.io/library/nginx:1.27"`       // Override the pinned references exempt from GC.
+	UntaggedAfter *config.Duration `json:"untagged_after,omitempty" swaggertype:"string" example:"30m"` // Override the untagged-image reap delay (docker stores); unset leaves the reaper off for the call.
 }
 
 // handleStoreGCPlan godoc
 //
 //	@Summary	Evaluate retention GC for a store (dry-run)
-//	@Description	Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/max_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
+//	@Description	Returns the retention decision (keep/delete) without deleting anything (untagged reap clocks are not started either). An optional body overrides the configured max_age/keep_n/max_n/pins/untagged_after for this call — untagged_after left unset disables the reaper for the call, and cannot re-enable a store configured with "0s". NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
 //	@Tags		retention
 //	@Accept		json
 //	@Produce	json
@@ -97,7 +98,7 @@ func (s *Server) handleStoreGCPlan(w http.ResponseWriter, r *http.Request) { s.h
 // handleStoreGCApply godoc
 //
 //	@Summary	Run retention GC for a store (apply)
-//	@Description	Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins for this call.
+//	@Description	Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins/untagged_after for this call — untagged_after left unset disables the reaper for the call, and cannot re-enable a store configured with "0s".
 //	@Tags		retention
 //	@Accept		json
 //	@Produce	json
@@ -151,12 +152,19 @@ func (s *Server) handleStoreGC(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		p.Pins = req.Pins
+		if req.UntaggedAfter != nil {
+			p.UntaggedAfter = time.Duration(*req.UntaggedAfter)
+		}
 		if p.MaxN < 0 {
 			writeErr(w, http.StatusBadRequest, "max_n must not be negative")
 			return
 		}
 		if p.MaxN > 0 && p.KeepN > p.MaxN {
 			writeErr(w, http.StatusBadRequest, "max_n must be >= keep_n")
+			return
+		}
+		if p.UntaggedAfter < 0 {
+			writeErr(w, http.StatusBadRequest, "untagged_after must not be negative")
 			return
 		}
 		override = &p
@@ -367,12 +375,16 @@ func (s *Server) handleStoreWatcher(w http.ResponseWriter, r *http.Request) {
 // imageListResponse is the GET /v1/store/{name}/image body.
 type imageListResponse struct {
 	Items []retention.Record `json:"items"`
+	// Untagged are the images tracked with no tags — their reap clocks. Present
+	// only for engines with the inventory-scan capability (docker), and omitted
+	// when a repo/ref/pinned filter is supplied (entries are IDs, not refs).
+	Untagged []retention.UntaggedEntry `json:"untagged,omitempty"`
 }
 
 // handleStoreImages godoc
 //
 //	@Summary	List a store's image inventory
-//	@Description	The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned).
+//	@Description	The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned) — plus the tracked untagged images awaiting the reaper (first_seen starts the untagged_after clock).
 //	@Tags		retention
 //	@Produce	json
 //	@Param		name	path		string	true	"engine store name"
@@ -419,13 +431,24 @@ func (s *Server) handleStoreImages(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, rec)
 	}
-	writeJSON(w, http.StatusOK, imageListResponse{Items: items})
+	resp := imageListResponse{Items: items}
+	// The untagged list joins unfiltered (entries are IDs, not repo/ref shaped)
+	// unless a repo/ref/pinned filter narrows the response to records only.
+	if q.Get("repo") == "" && q.Get("ref") == "" && pinned == nil {
+		unt, err := s.gc.ListUntagged(name)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		resp.Untagged = unt
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleStoreImageDelete godoc
 //
 //	@Summary	Delete a retention index record
-//	@Description	Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next pull. To delete the image itself use /remove.
+//	@Description	Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A ref that is a tracked untagged image ID purges that reap clock instead. A record (or clock) for an image still present is re-created by the usage watcher, the next pull, or the next inventory scan. To delete the image itself use /remove.
 //	@Tags		retention
 //	@Accept		json
 //	@Param		name	path	string			true	"engine store name"

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
@@ -18,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/z"
@@ -31,6 +33,13 @@ type dockerEngine struct {
 
 	mu   sync.Mutex
 	plat string // cached daemon host platform; only a successful probe is kept
+
+	// pullMu serializes ReapUntagged against pull registration: a pull already
+	// registered makes the reaper skip its image, and a pull registering while a
+	// reap runs waits until the removals finish, so it re-fetches whatever was
+	// deleted instead of racing the removal with ImageTag.
+	pullMu   sync.Mutex
+	inflight map[string]int // pull reference -> active pull count
 }
 
 func newDockerEngine(c config.StoreConfig) (*dockerEngine, error) {
@@ -55,7 +64,7 @@ func newDockerEngine(c config.StoreConfig) (*dockerEngine, error) {
 	if err != nil {
 		return nil, z.Err(err, "docker client")
 	}
-	return &dockerEngine{name: c.Name, cli: cli}, nil
+	return &dockerEngine{name: c.Name, cli: cli, inflight: map[string]int{}}, nil
 }
 
 // dockerHost normalizes a configured address into an engine host.
@@ -124,6 +133,7 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 			return err
 		}
 	}
+	defer e.trackPull(pull_ref)()
 	// platform is passed through as-is: if the image has no such platform the
 	// daemon's error surfaces through the pull stream below.
 	rc, err := e.cli.ImagePull(ctx, pull_ref, image.PullOptions{Platform: platform})
@@ -154,13 +164,17 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		// The digest pull leaves the image untagged; give it the tag callers,
 		// containers, and the retention index know it by.
 		if err := e.cli.ImageTag(ctx, pull_ref, ref); err != nil {
-			// Best-effort: an untagged image is invisible to the retention index
-			// and would never be reclaimed. Untagging the canonical ref is safe —
-			// content held by other tags stays. The pull context may already be
-			// canceled (a likely cause of the failure), so detach from it.
-			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_, _ = e.cli.ImageRemove(dctx, pull_ref, image.RemoveOptions{})
+			// Best-effort fast cleanup (the untagged reaper is the eventual
+			// backstop, but it can be configured off). Untagging the canonical ref
+			// is safe — content held by other tags stays — unless another pull of
+			// the same reference is in flight and about to tag it. The pull
+			// context may already be canceled (a likely cause of the failure), so
+			// detach from it.
+			if e.pullCount(pull_ref) == 1 { // this pull is the sole registrant
+				dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				_, _ = e.cli.ImageRemove(dctx, pull_ref, image.RemoveOptions{})
+			}
 			return z.Err(err, "tag %q", ref)
 		}
 	}
@@ -219,16 +233,24 @@ func (e *dockerEngine) WatchUsage(ctx context.Context, sink UsageSink) error {
 }
 
 func (e *dockerEngine) Remove(ctx context.Context, ref string) (RemoveResult, error) {
+	var rr RemoveResult
+	if err := e.remove(ctx, ref, &rr); err != nil {
+		return RemoveResult{}, z.Err(err, "image remove")
+	}
+	return rr, nil
+}
+
+// remove deletes one reference, accumulating what the daemon reports into rr.
+// A reference already gone (removed out-of-band, e.g. `docker rmi`) is success,
+// so callers sync their retention index instead of erroring forever.
+func (e *dockerEngine) remove(ctx context.Context, ref string, rr *RemoveResult) error {
 	resp, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{PruneChildren: true})
 	if err != nil {
 		if client.IsErrNotFound(err) {
-			// Already gone (removed out-of-band, e.g. `docker rmi`). Report success
-			// so the caller syncs its retention index instead of erroring forever.
-			return RemoveResult{}, nil
+			return nil
 		}
-		return RemoveResult{}, z.Err(err, "image remove")
+		return err
 	}
-	var rr RemoveResult
 	for _, d := range resp {
 		if d.Untagged != "" {
 			rr.Untagged = append(rr.Untagged, d.Untagged)
@@ -237,7 +259,167 @@ func (e *dockerEngine) Remove(ctx context.Context, ref string) (RemoveResult, er
 			rr.Deleted = append(rr.Deleted, d.Deleted)
 		}
 	}
-	return rr, nil
+	return nil
+}
+
+// canonRef normalizes a reference to one canonical spelling, so gantry-side
+// refs ("index.docker.io/library/nginx@sha256:x") and the daemon's familiar
+// forms ("nginx@sha256:x") compare equal. An unparseable ref (e.g. a bare
+// image ID) passes through unchanged.
+func canonRef(ref string) string {
+	r, err := name.ParseReference(ref)
+	if err != nil {
+		return ref
+	}
+	switch t := r.(type) {
+	case name.Digest:
+		return t.Context().Name() + "@" + t.DigestStr()
+	case name.Tag:
+		return t.Context().Name() + ":" + t.TagStr()
+	}
+	return ref
+}
+
+// trackPull registers an in-flight pull of ref so ReapUntagged will not delete
+// the image the pull is about to (re)reference; the returned func deregisters.
+// Registration blocks while a reap is mid-removal (see pullMu), never for the
+// duration of another pull.
+func (e *dockerEngine) trackPull(ref string) func() {
+	key := canonRef(ref)
+	e.pullMu.Lock()
+	if e.inflight == nil {
+		e.inflight = map[string]int{}
+	}
+	e.inflight[key]++
+	e.pullMu.Unlock()
+	return func() {
+		e.pullMu.Lock()
+		if e.inflight[key]--; e.inflight[key] <= 0 {
+			delete(e.inflight, key)
+		}
+		e.pullMu.Unlock()
+	}
+}
+
+// pullCount reports how many pulls of ref are currently registered.
+func (e *dockerEngine) pullCount(ref string) int {
+	e.pullMu.Lock()
+	defer e.pullMu.Unlock()
+	return e.inflight[canonRef(ref)]
+}
+
+// Images snapshots the daemon's image store for inventory reconciliation.
+func (e *dockerEngine) Images(ctx context.Context) (Inventory, error) {
+	imgs, err := e.cli.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return Inventory{}, z.Err(err, "image list")
+	}
+	var inv Inventory
+	for _, s := range imgs {
+		if tags := realRefs(s.RepoTags); len(tags) > 0 {
+			inv.Refs = append(inv.Refs, tags...)
+			continue
+		}
+		inv.Untagged = append(inv.Untagged, UntaggedImage{ID: s.ID, RepoDigests: realRefs(s.RepoDigests)})
+	}
+	return inv, nil
+}
+
+// realRefs drops the "<none>:<none>" / "<none>@<none>" placeholders older
+// daemon API versions (< 1.43) report instead of an empty list.
+func realRefs(refs []string) []string {
+	out := make([]string, 0, len(refs))
+	for _, r := range refs {
+		if !strings.HasPrefix(r, "<none>") {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ReapUntagged deletes one untagged image, re-checking the daemon first. The
+// digest references are removed one at a time — the daemon frees content when
+// the last one goes and never demands force the way a multi-repo by-ID delete
+// does; only an image with no references at all is deleted by bare ID.
+func (e *dockerEngine) ReapUntagged(ctx context.Context, id string) (RemoveResult, bool, error) {
+	// pullMu is held for the whole reap so a pull registering mid-removal waits
+	// and then re-fetches whatever was deleted. Bound the daemon calls so a
+	// wedged daemon cannot hold pull registration hostage.
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	e.pullMu.Lock()
+	defer e.pullMu.Unlock()
+
+	var rr RemoveResult
+	ins, err := e.cli.ImageInspect(ctx, id)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return rr, true, nil // already gone: converged
+		}
+		return rr, false, z.Err(err, "image inspect")
+	}
+	if len(realRefs(ins.RepoTags)) > 0 {
+		return rr, false, nil // re-tagged since the scan (e.g. a manual rollback)
+	}
+	digests := realRefs(ins.RepoDigests)
+	for _, d := range digests {
+		if e.inflight[canonRef(d)] > 0 {
+			return rr, false, nil // a pull is about to re-reference it
+		}
+	}
+	// A stopped container blocks the delete without force; skip instead of
+	// erroring every pass. (Running containers were kept at plan time already —
+	// InUse — but re-check here since plan and apply are not atomic.)
+	cs, err := e.cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return rr, false, z.Err(err, "container list")
+	}
+	for _, c := range cs {
+		if c.ImageID == id || c.Image == id {
+			return rr, false, nil
+		}
+	}
+	// remove maps a daemon conflict (dependent child images, a container created
+	// since the check above) to a transient skip: retry next pass, converge when
+	// the conflict clears.
+	remove := func(ref string) (skip bool, err error) {
+		if err := e.remove(ctx, ref, &rr); err != nil {
+			if cerrdefs.IsConflict(err) {
+				return true, nil
+			}
+			return false, z.Err(err, "remove %q", ref)
+		}
+		return false, nil
+	}
+	if len(digests) == 0 {
+		// No references at all: the by-ID delete destroys content directly, and a
+		// tag pull the in-flight registry cannot correlate to this ID may have
+		// (re)referenced it — look one more time immediately before deleting.
+		ins, err := e.cli.ImageInspect(ctx, id)
+		if err != nil {
+			if client.IsErrNotFound(err) {
+				return rr, true, nil
+			}
+			return rr, false, z.Err(err, "image inspect")
+		}
+		if len(realRefs(ins.RepoTags))+len(realRefs(ins.RepoDigests)) > 0 {
+			return rr, false, nil
+		}
+		skip, err := remove(id)
+		return rr, !skip && err == nil, err
+	}
+	for _, d := range digests {
+		skip, err := remove(d)
+		if err != nil {
+			return rr, false, err
+		}
+		if skip {
+			return rr, false, nil
+		}
+	}
+	// Content is freed when the last digest ref goes; no by-ID pass. If a racing
+	// re-reference kept the content alive, the next scan reconciles.
+	return rr, true, nil
 }
 
 // layerUpdate maps a JSONMessage to a LayerUpdate, or ok=false for lines that

@@ -184,7 +184,7 @@ func kvi(id string, bytes int64) json.RawMessage {
 	return b
 }
 
-func gcDetail(deleted, untagged, errs int) json.RawMessage {
-	b, _ := json.Marshal(map[string]int{"deleted": deleted, "untagged": untagged, "errors": errs})
+func gcDetail(deleted, untagged, reaped, errs int) json.RawMessage {
+	b, _ := json.Marshal(map[string]int{"deleted": deleted, "untagged": untagged, "reaped": reaped, "errors": errs})
 	return b
 }

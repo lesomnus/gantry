@@ -220,9 +220,9 @@ type recRecorder struct {
 	pins    []string
 }
 
-func (r *recRecorder) GCApplied(string, int, int, int) { r.gc++ }
-func (r *recRecorder) ImageRemoved(_, ref string)      { r.removed = append(r.removed, ref) }
-func (r *recRecorder) Pinned(_, value string, _ bool)  { r.pins = append(r.pins, value) }
+func (r *recRecorder) GCApplied(string, int, int, int, int) { r.gc++ }
+func (r *recRecorder) ImageRemoved(_, ref string)           { r.removed = append(r.removed, ref) }
+func (r *recRecorder) Pinned(_, value string, _ bool)       { r.pins = append(r.pins, value) }
 
 func TestApplyEmitsAuditEvents(t *testing.T) {
 	ix := openTemp(t)

@@ -254,7 +254,9 @@ Scheduler observability: when GC last ran and will next wake, whether the post-s
         "interval": "string",
         "min_interval": "string"
       },
-      "started": "string"
+      "started": "string",
+      "untagged": 0,
+      "untagged_after": "string"
     },
     "property2": {
       "grace_until": "string",
@@ -279,7 +281,9 @@ Scheduler observability: when GC last ran and will next wake, whether the post-s
         "interval": "string",
         "min_interval": "string"
       },
-      "started": "string"
+      "started": "string",
+      "untagged": 0,
+      "untagged_after": "string"
     }
   }
 }
@@ -312,7 +316,7 @@ curl -X GET /v1/store/{name}/gc \
 
 `GET /v1/store/{name}/gc`
 
-Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/max_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
+Returns the retention decision (keep/delete) without deleting anything (untagged reap clocks are not started either). An optional body overrides the configured max_age/keep_n/max_n/pins/untagged_after for this call — untagged_after left unset disables the reaper for the call, and cannot re-enable a store configured with "0s". NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.
 
 > Body parameter
 
@@ -323,7 +327,8 @@ Returns the retention decision (keep/delete) without deleting anything. An optio
   "max_n": 20,
   "pins": [
     "docker.io/library/nginx:1.27"
-  ]
+  ],
+  "untagged_after": "30m"
 }
 ```
 
@@ -343,6 +348,7 @@ Returns the retention decision (keep/delete) without deleting anything. An optio
   "delete": [
     {
       "digest": "string",
+      "image_id": "string",
       "last_used": "string",
       "reason": "string",
       "ref": "string"
@@ -388,7 +394,7 @@ curl -X POST /v1/store/{name}/gc \
 
 `POST /v1/store/{name}/gc`
 
-Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins for this call.
+Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins/untagged_after for this call — untagged_after left unset disables the reaper for the call, and cannot re-enable a store configured with "0s".
 
 > Body parameter
 
@@ -399,7 +405,8 @@ Applies the deletions and returns the apply result. An optional body overrides t
   "max_n": 20,
   "pins": [
     "docker.io/library/nginx:1.27"
-  ]
+  ],
+  "untagged_after": "30m"
 }
 ```
 
@@ -423,6 +430,12 @@ Applies the deletions and returns the apply result. An optional body overrides t
     "string"
   ],
   "evaluated": 0,
+  "reaped": [
+    "string"
+  ],
+  "skipped": [
+    "string"
+  ],
   "untagged": [
     "string"
   ]
@@ -459,7 +472,7 @@ curl -X DELETE /v1/store/{name}/image \
 
 `DELETE /v1/store/{name}/image`
 
-Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next pull. To delete the image itself use /remove.
+Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A ref that is a tracked untagged image ID purges that reap clock instead. A record (or clock) for an image still present is re-created by the usage watcher, the next pull, or the next inventory scan. To delete the image itself use /remove.
 
 > Body parameter
 
@@ -515,7 +528,7 @@ curl -X GET /v1/store/{name}/image \
 
 `GET /v1/store/{name}/image`
 
-The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned).
+The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned) — plus the tracked untagged images awaiting the reaper (first_seen starts the untagged_after clock).
 
 <h3 id="list-a-store's-image-inventory-parameters">Parameters</h3>
 
@@ -542,6 +555,12 @@ The retention index records for an engine store — what gantry believes is on t
       "ref": "string",
       "repo": "string",
       "tag": "string"
+    }
+  ],
+  "untagged": [
+    {
+      "first_seen": "string",
+      "id": "string"
     }
   ]
 }
@@ -1479,6 +1498,7 @@ Configured stores with their kind, capabilities, and readiness.
         "gc": true,
         "pull": true,
         "read": true,
+        "reconcile": true,
         "verify": true,
         "write": true
       },
@@ -1993,6 +2013,12 @@ BearerAuth
     "string"
   ],
   "evaluated": 0,
+  "reaped": [
+    "string"
+  ],
+  "skipped": [
+    "string"
+  ],
   "untagged": [
     "string"
   ]
@@ -2007,6 +2033,8 @@ BearerAuth
 |deleted|[string]|false|none|content-hash IDs whose bytes were freed|
 |errors|[string]|false|none|per-ref removal failures, "<ref>: <err>"|
 |evaluated|integer|false|none|number of records considered (delete+keep)|
+|reaped|[string]|false|none|untagged image IDs whose content was reaped|
+|skipped|[string]|false|none|untagged image IDs not reapable right now (re-tagged, container ref, in-flight pull)|
 |untagged|[string]|false|none|refs whose tag was removed but content may remain|
 
 <h2 id="tocS_retention.Candidate">retention.Candidate</h2>
@@ -2019,6 +2047,7 @@ BearerAuth
 ```json
 {
   "digest": "string",
+  "image_id": "string",
   "last_used": "string",
   "reason": "string",
   "ref": "string"
@@ -2031,8 +2060,9 @@ BearerAuth
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
 |digest|string|false|none|none|
+|image_id|string|false|none|set for untagged-reap candidates|
 |last_used|string|false|none|none|
-|reason|string|false|none|age_exceeded | max_n_exceeded|
+|reason|string|false|none|age_exceeded | max_n_exceeded | untagged|
 |ref|string|false|none|none|
 
 <h2 id="tocS_retention.Decision">retention.Decision</h2>
@@ -2047,6 +2077,7 @@ BearerAuth
   "delete": [
     {
       "digest": "string",
+      "image_id": "string",
       "last_used": "string",
       "reason": "string",
       "ref": "string"
@@ -2090,7 +2121,7 @@ BearerAuth
 
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
-|reason|string|false|none|in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged|
+|reason|string|false|none|in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged | untagged_grace | digest_tracked|
 |ref|string|false|none|none|
 
 <h2 id="tocS_retention.PinEntry">retention.PinEntry</h2>
@@ -2239,7 +2270,9 @@ BearerAuth
         "interval": "string",
         "min_interval": "string"
       },
-      "started": "string"
+      "started": "string",
+      "untagged": 0,
+      "untagged_after": "string"
     },
     "property2": {
       "grace_until": "string",
@@ -2264,7 +2297,9 @@ BearerAuth
         "interval": "string",
         "min_interval": "string"
       },
-      "started": "string"
+      "started": "string",
+      "untagged": 0,
+      "untagged_after": "string"
     }
   }
 }
@@ -2310,7 +2345,9 @@ BearerAuth
     "interval": "string",
     "min_interval": "string"
   },
-  "started": "string"
+  "started": "string",
+  "untagged": 0,
+  "untagged_after": "string"
 }
 
 ```
@@ -2328,6 +2365,30 @@ BearerAuth
 |running|boolean|false|none|none|
 |schedule|[retention.ScheduleStatus](#schemaretention.schedulestatus)|false|none|none|
 |started|string|false|none|none|
+|untagged|integer|false|none|tracked untagged images (reap clocks running)|
+|untagged_after|string|false|none|reap delay; absent when the reaper is off|
+
+<h2 id="tocS_retention.UntaggedEntry">retention.UntaggedEntry</h2>
+<!-- backwards compatibility -->
+<a id="schemaretention.untaggedentry"></a>
+<a id="schema_retention.UntaggedEntry"></a>
+<a id="tocSretention.untaggedentry"></a>
+<a id="tocsretention.untaggedentry"></a>
+
+```json
+{
+  "first_seen": "string",
+  "id": "string"
+}
+
+```
+
+### Properties
+
+|Name|Type|Required|Restrictions|Description|
+|---|---|---|---|---|
+|first_seen|string|false|none|none|
+|id|string|false|none|none|
 
 <h2 id="tocS_retention.WatcherStatus">retention.WatcherStatus</h2>
 <!-- backwards compatibility -->
@@ -2523,7 +2584,8 @@ BearerAuth
   "max_n": 20,
   "pins": [
     "docker.io/library/nginx:1.27"
-  ]
+  ],
+  "untagged_after": "30m"
 }
 
 ```
@@ -2536,6 +2598,7 @@ BearerAuth
 |max_age|string|false|none|Override max image age (Go duration, e.g. "720h"); "0s" disables age GC.|
 |max_n|integer|false|none|Override the per-repo tag cap; 0 disables the cap. Must be >= keep_n.|
 |pins|[string]|false|none|Override the pinned references exempt from GC.|
+|untagged_after|string|false|none|Override the untagged-image reap delay (docker stores); unset leaves the reaper off for the call.|
 
 <h2 id="tocS_server.imageListResponse">server.imageListResponse</h2>
 <!-- backwards compatibility -->
@@ -2557,6 +2620,12 @@ BearerAuth
       "repo": "string",
       "tag": "string"
     }
+  ],
+  "untagged": [
+    {
+      "first_seen": "string",
+      "id": "string"
+    }
   ]
 }
 
@@ -2567,6 +2636,7 @@ BearerAuth
 |Name|Type|Required|Restrictions|Description|
 |---|---|---|---|---|
 |items|[[retention.Record](#schemaretention.record)]|false|none|none|
+|untagged|[[retention.UntaggedEntry](#schemaretention.untaggedentry)]|false|none|Untagged are the images tracked with no tags — their reap clocks. Present<br>only for engines with the inventory-scan capability (docker), and omitted<br>when a repo/ref/pinned filter is supplied (entries are IDs, not refs).|
 
 <h2 id="tocS_server.inUseResponse">server.inUseResponse</h2>
 <!-- backwards compatibility -->
@@ -2766,6 +2836,7 @@ BearerAuth
         "gc": true,
         "pull": true,
         "read": true,
+        "reconcile": true,
         "verify": true,
         "write": true
       },
@@ -2981,6 +3052,7 @@ BearerAuth
   "gc": true,
   "pull": true,
   "read": true,
+  "reconcile": true,
   "verify": true,
   "write": true
 }
@@ -2996,6 +3068,7 @@ what this store can do
 |gc|boolean|false|none|engine supports image GC (phase 2)|
 |pull|boolean|false|none|engine can be triggered to pull|
 |read|boolean|false|none|registry: pull blobs|
+|reconcile|boolean|false|none|engine supports inventory scans / untagged reaping (phase 2)|
 |verify|boolean|false|none|engine can verify signatures (phase 2)|
 |write|boolean|false|none|registry: push blobs|
 
@@ -3013,6 +3086,7 @@ what this store can do
     "gc": true,
     "pull": true,
     "read": true,
+    "reconcile": true,
     "verify": true,
     "write": true
   },

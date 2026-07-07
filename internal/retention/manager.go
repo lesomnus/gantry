@@ -23,10 +23,12 @@ type Schedule struct {
 
 // ApplyResult reports a GC apply outcome.
 type ApplyResult struct {
-	Deleted   []string `json:"deleted"`          // content-hash IDs whose bytes were freed
-	Untagged  []string `json:"untagged"`         // refs whose tag was removed but content may remain
-	Errors    []string `json:"errors,omitempty"` // per-ref removal failures, "<ref>: <err>"
-	Evaluated int      `json:"evaluated"`        // number of records considered (delete+keep)
+	Deleted   []string `json:"deleted"`           // content-hash IDs whose bytes were freed
+	Untagged  []string `json:"untagged"`          // refs whose tag was removed but content may remain
+	Reaped    []string `json:"reaped,omitempty"`  // untagged image IDs whose content was reaped
+	Skipped   []string `json:"skipped,omitempty"` // untagged image IDs not reapable right now (re-tagged, container ref, in-flight pull)
+	Errors    []string `json:"errors,omitempty"`  // per-ref removal failures, "<ref>: <err>"
+	Evaluated int      `json:"evaluated"`         // number of records considered (delete+keep)
 }
 
 // Store describes one engine store's retention setup, passed to NewManager. Each
@@ -37,6 +39,11 @@ type Store struct {
 	Index    *Index
 	Rules    []Rule
 	Schedule Schedule
+	// UntaggedAfter reaps an image this long after it was first observed with no
+	// tags (docker engines only — requires the down.Reconciler capability). Zero
+	// disables the reaper; the inventory scan itself still runs when the engine
+	// supports it, seeding unknown tagged refs into the index.
+	UntaggedAfter time.Duration
 }
 
 // Manager runs per-store retention: every store has its own index, rules, grace
@@ -59,6 +66,12 @@ type unit struct {
 	rules  []Rule
 	sched  Schedule
 
+	// recon is the engine's optional inventory-scan capability (nil when the
+	// engine kind has none, e.g. containerd); untaggedAfter is the configured
+	// reap delay (zero = reaper off).
+	recon         down.Reconciler
+	untaggedAfter time.Duration
+
 	signal chan struct{}
 
 	mu      sync.Mutex
@@ -72,9 +85,11 @@ type unit struct {
 func NewManager(stores []Store) *Manager {
 	m := &Manager{units: make(map[string]*unit, len(stores)), now: time.Now}
 	for _, s := range stores {
+		recon, _ := s.Engine.(down.Reconciler)
 		m.units[s.Name] = &unit{
 			m: m, name: s.Name, engine: s.Engine, ix: s.Index,
 			rules: s.Rules, sched: s.Schedule, signal: make(chan struct{}, 1),
+			recon: recon, untaggedAfter: s.UntaggedAfter,
 		}
 	}
 	return m
@@ -82,7 +97,7 @@ func NewManager(stores []Store) *Manager {
 
 // Recorder receives GC-apply and manual pin/remove audit events.
 type Recorder interface {
-	GCApplied(store string, deleted, untagged, errs int)
+	GCApplied(store string, deleted, untagged, reaped, errs int)
 	ImageRemoved(store, ref string)
 	Pinned(store, value string, unpin bool)
 }
@@ -111,15 +126,17 @@ type Status struct {
 
 // StoreStatus is one store's scheduler state, rules, and index counts.
 type StoreStatus struct {
-	Running    bool           `json:"running"`
-	Started    time.Time      `json:"started,omitzero"`
-	LastRun    time.Time      `json:"last_run,omitzero"`
-	NextWake   time.Time      `json:"next_wake,omitzero"`
-	GraceUntil time.Time      `json:"grace_until,omitzero"`
-	Schedule   ScheduleStatus `json:"schedule"`
-	Rules      []RuleStatus   `json:"rules"`
-	Records    int            `json:"records"`
-	Pins       int            `json:"pins"`
+	Running       bool           `json:"running"`
+	Started       time.Time      `json:"started,omitzero"`
+	LastRun       time.Time      `json:"last_run,omitzero"`
+	NextWake      time.Time      `json:"next_wake,omitzero"`
+	GraceUntil    time.Time      `json:"grace_until,omitzero"`
+	Schedule      ScheduleStatus `json:"schedule"`
+	Rules         []RuleStatus   `json:"rules"`
+	Records       int            `json:"records"`
+	Pins          int            `json:"pins"`
+	Untagged      int            `json:"untagged"`                 // tracked untagged images (reap clocks running)
+	UntaggedAfter string         `json:"untagged_after,omitempty"` // reap delay; absent when the reaper is off
 }
 
 type ScheduleStatus struct {
@@ -160,8 +177,11 @@ func (m *Manager) Status() Status {
 			Grace:       u.sched.Grace.String(),
 		}
 		ss.Rules = ruleStatuses(u.rules)
-		if nrec, npin, err := u.ix.Counts(name); err == nil {
-			ss.Records, ss.Pins = nrec, npin
+		if nrec, npin, nunt, err := u.ix.Counts(name); err == nil {
+			ss.Records, ss.Pins, ss.Untagged = nrec, npin, nunt
+		}
+		if u.untaggedAfter > 0 {
+			ss.UntaggedAfter = u.untaggedAfter.String()
 		}
 		st.Stores[name] = ss
 	}
@@ -215,13 +235,27 @@ func (m *Manager) List(engine string) ([]Record, error) {
 	return u.ix.List(engine)
 }
 
-// DeleteRecord removes one record from a store's index (does not touch the engine).
+// DeleteRecord removes one record from a store's index (does not touch the
+// engine). A ref that is a tracked untagged image ID purges that entry instead.
 func (m *Manager) DeleteRecord(engine, ref string) (bool, error) {
 	u, ok := m.units[engine]
 	if !ok {
 		return false, fmt.Errorf("store %q has no retention", engine)
 	}
-	return u.ix.Delete(engine, ref)
+	existed, err := u.ix.Delete(engine, ref)
+	if err != nil || existed {
+		return existed, err
+	}
+	return u.ix.DeleteUntagged(engine, ref)
+}
+
+// ListUntagged returns a store's tracked untagged images (their reap clocks).
+func (m *Manager) ListUntagged(engine string) ([]UntaggedEntry, error) {
+	u, ok := m.units[engine]
+	if !ok {
+		return nil, fmt.Errorf("store %q has no retention", engine)
+	}
+	return u.ix.UntaggedEntries(engine)
 }
 
 // Distributed records a gantry push to an engine (a usage fallback signal).
@@ -275,25 +309,29 @@ func (m *Manager) StartWatchers(ctx context.Context) {
 	}
 }
 
-// registerGauges observes per-store retention index sizes (records and pins).
+// registerGauges observes per-store retention index sizes (records, pins, and
+// tracked untagged images).
 func (m *Manager) registerGauges(ctx context.Context) {
 	mt := otx.Meter(ctx)
 	records, _ := mt.Int64ObservableGauge("gantry.retention.records",
 		metric.WithDescription("retention index records per engine store"))
 	pins, _ := mt.Int64ObservableGauge("gantry.retention.pins",
 		metric.WithDescription("pinned references per engine store"))
+	untagged, _ := mt.Int64ObservableGauge("gantry.retention.untagged",
+		metric.WithDescription("tracked untagged images per engine store"))
 	_, _ = mt.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		for name, u := range m.units {
-			nrec, npin, err := u.ix.Counts(name)
+			nrec, npin, nunt, err := u.ix.Counts(name)
 			if err != nil {
 				continue
 			}
 			store_attr := metric.WithAttributes(attribute.String("store", name))
 			o.ObserveInt64(records, int64(nrec), store_attr)
 			o.ObserveInt64(pins, int64(npin), store_attr)
+			o.ObserveInt64(untagged, int64(nunt), store_attr)
 		}
 		return nil
-	}, records, pins)
+	}, records, pins, untagged)
 }
 
 func (u *unit) watch(ctx context.Context) {
@@ -350,17 +388,32 @@ func (u *unit) watch(ctx context.Context) {
 
 // Plan evaluates a store's rules without deleting. A non-nil override replaces
 // the configured per-repo rules with a single blanket policy for every repo (used
-// by the /gc endpoint's optional body).
+// by the /gc endpoint's optional body); the override's UntaggedAfter likewise
+// replaces the configured reap delay — unset (zero) turns the reaper off for
+// the call, consistent with the other override fields.
 func (m *Manager) Plan(ctx context.Context, engine string, override *Policy) (Decision, error) {
 	u, ok := m.units[engine]
 	if !ok {
 		return Decision{}, fmt.Errorf("store %q has no retention", engine)
 	}
 	rules := u.rules
+	after := u.untaggedAfter
 	if override != nil {
+		if override.UntaggedAfter > 0 {
+			if u.recon == nil {
+				return Decision{}, fmt.Errorf("store %q does not support untagged reaping", engine)
+			}
+			if u.untaggedAfter <= 0 {
+				// "0s" in the config means this store must never reap — e.g. another
+				// store reaps the same daemon (the config validation only blesses
+				// one reaper per daemon). An ad-hoc override cannot re-enable it.
+				return Decision{}, fmt.Errorf("store %q has untagged reaping disabled (untagged_after \"0s\"); an override cannot enable it", engine)
+			}
+		}
 		rules = blanketRules(*override)
+		after = override.UntaggedAfter
 	}
-	return u.plan(ctx, rules)
+	return u.plan(ctx, rules, after, nil)
 }
 
 // Apply executes the deletions in a decision and syncs the index.
@@ -377,7 +430,11 @@ func blanketRules(p Policy) []Rule {
 	return []Rule{{Repo: "**", MaxAge: &p.MaxAge, KeepN: &p.KeepN, MaxN: &p.MaxN, Pins: p.Pins}}
 }
 
-func (u *unit) plan(ctx context.Context, rules []Rule) (Decision, error) {
+// plan evaluates the rules plus, when the reaper is on, the untagged axis. A
+// non-nil inv reuses an inventory the caller already fetched (gcOnce scans once
+// for both reconciliation and planning); nil fetches one read-only, so the
+// HTTP dry-run reflects live daemon state without writing any reap clock.
+func (u *unit) plan(ctx context.Context, rules []Rule, after time.Duration, inv *down.Inventory) (Decision, error) {
 	recs, err := u.ix.List(u.name)
 	if err != nil {
 		return Decision{}, err
@@ -386,12 +443,89 @@ func (u *unit) plan(ctx context.Context, rules []Rule) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
-	return Evaluate(u.m.now(), recs, inUse, rules, u.graceUntil()), nil
+	dec := Evaluate(u.m.now(), recs, inUse, rules, u.graceUntil())
+	if after <= 0 || u.recon == nil {
+		return dec, nil
+	}
+	if inv == nil {
+		v, err := u.recon.Images(ctx)
+		if err != nil {
+			return Decision{}, err
+		}
+		inv = &v
+	}
+	entries, err := u.ix.UntaggedEntries(u.name)
+	if err != nil {
+		return Decision{}, err
+	}
+	firstSeen := make(map[string]time.Time, len(entries))
+	for _, e := range entries {
+		firstSeen[e.ID] = e.FirstSeen
+	}
+	pins, err := u.ix.Pins(u.name)
+	if err != nil {
+		return Decision{}, err
+	}
+	// Rule pins join as patterns: matchPin tries exact equality first, so exact
+	// refs written in rules keep protecting too.
+	for _, r := range rules {
+		for _, p := range r.Pins {
+			pins = append(pins, PinEntry{Value: p, Pattern: true})
+		}
+	}
+	EvaluateUntagged(u.m.now(), UntaggedInput{
+		Images:    inv.Untagged,
+		FirstSeen: firstSeen,
+		Records:   recs,
+		InUse:     inUse,
+		Pins:      pins,
+		After:     after,
+	}, u.graceUntil(), &dec)
+	return dec, nil
+}
+
+// reconcile snapshots the engine's image store and syncs the index: tagged refs
+// gantry has never observed get a record (FirstSeen = now, so the configured
+// rules eventually manage images a human pulled while gantry was away), newly
+// untagged images start their reap clock, and tracked entries whose image
+// regained a tag or vanished are dropped. Returns the inventory for the plan
+// that follows, or nil when the engine has no scan capability or the scan
+// failed (GC then proceeds on index records alone, like before).
+func (u *unit) reconcile(ctx context.Context) *down.Inventory {
+	if u.recon == nil {
+		return nil
+	}
+	inv, err := u.recon.Images(ctx)
+	if err != nil {
+		log.From(ctx).Warn("inventory scan failed", slog.String("store", u.name), slog.String("error", err.Error()))
+		return nil
+	}
+	now := u.m.now()
+	for _, ref := range inv.Refs {
+		_ = u.ix.Observe(u.name, ref, now)
+	}
+	live := make(map[string]bool, len(inv.Untagged))
+	for _, img := range inv.Untagged {
+		live[img.ID] = true
+		_ = u.ix.ObserveUntagged(u.name, img.ID, now)
+	}
+	if entries, err := u.ix.UntaggedEntries(u.name); err == nil {
+		for _, e := range entries {
+			if !live[e.ID] {
+				_, _ = u.ix.DeleteUntagged(u.name, e.ID)
+			}
+		}
+	}
+	return &inv
 }
 
 func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 	res := ApplyResult{Evaluated: len(dec.Delete) + len(dec.Keep)}
 	for _, c := range dec.Delete {
+		if c.ImageID != "" {
+			u.reapOne(ctx, c.ImageID, &res)
+			continue
+		}
 		rr, err := u.engine.Remove(ctx, c.Ref)
 		if err != nil {
 			res.Errors = append(res.Errors, c.Ref+": "+err.Error())
@@ -404,17 +538,55 @@ func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 			u.m.rec.ImageRemoved(u.name, c.Ref)
 		}
 	}
-	if len(res.Deleted)+len(res.Untagged) > 0 {
+	if len(res.Deleted)+len(res.Untagged)+len(res.Reaped) > 0 {
 		log.From(ctx).Info("gc collected", slog.String("store", u.name),
-			slog.Int("deleted", len(res.Deleted)), slog.Int("untagged", len(res.Untagged)), slog.Int("evaluated", res.Evaluated))
+			slog.Int("deleted", len(res.Deleted)), slog.Int("untagged", len(res.Untagged)),
+			slog.Int("reaped", len(res.Reaped)), slog.Int("evaluated", res.Evaluated))
 		if u.m.rec != nil {
-			u.m.rec.GCApplied(u.name, len(res.Deleted), len(res.Untagged), len(res.Errors))
+			u.m.rec.GCApplied(u.name, len(res.Deleted), len(res.Untagged), len(res.Reaped), len(res.Errors))
 		}
 	}
 	if len(res.Errors) > 0 {
 		log.From(ctx).Warn("gc removal errors", slog.String("store", u.name), slog.Int("count", len(res.Errors)))
 	}
 	return res
+}
+
+// reapOne executes one untagged-image reap. The engine re-checks reapability
+// right before removing (re-tagged, container reference, in-flight pull) and
+// reports not-ok without error for a transient hold — the entry stays tracked
+// and the next pass retries; the next scan drops it if the image was re-tagged.
+func (u *unit) reapOne(ctx context.Context, id string, res *ApplyResult) {
+	if u.recon == nil {
+		return
+	}
+	// The decision may be stale: a DELETE /image purge of the reap clock between
+	// plan and apply cancels the reap.
+	if has, err := u.ix.HasUntagged(u.name, id); err != nil || !has {
+		res.Skipped = append(res.Skipped, id)
+		return
+	}
+	rr, ok, err := u.recon.ReapUntagged(ctx, id)
+	res.Deleted = append(res.Deleted, rr.Deleted...)
+	res.Untagged = append(res.Untagged, rr.Untagged...)
+	if err != nil {
+		res.Errors = append(res.Errors, id+": "+err.Error())
+		return
+	}
+	if !ok {
+		res.Skipped = append(res.Skipped, id)
+		return
+	}
+	_, _ = u.ix.DeleteUntagged(u.name, id)
+	// An image already gone (removed out-of-band or by a concurrent reap)
+	// converges the index but is not this pass's kill — don't report it as one.
+	if len(rr.Deleted)+len(rr.Untagged) == 0 {
+		return
+	}
+	res.Reaped = append(res.Reaped, id)
+	if u.m.rec != nil {
+		u.m.rec.ImageRemoved(u.name, id)
+	}
 }
 
 func (u *unit) graceUntil() time.Time {
@@ -492,7 +664,8 @@ func (u *unit) runScheduler(ctx context.Context) {
 }
 
 func (u *unit) gcOnce(ctx context.Context) Decision {
-	dec, err := u.plan(ctx, u.rules)
+	inv := u.reconcile(ctx)
+	dec, err := u.plan(ctx, u.rules, u.untaggedAfter, inv)
 	if err != nil {
 		log.From(ctx).Warn("gc plan failed", slog.String("store", u.name), slog.String("error", err.Error()))
 		return Decision{}

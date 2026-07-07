@@ -124,6 +124,22 @@
                         "description": "number of records considered (delete+keep)",
                         "type": "integer"
                     },
+                    "reaped": {
+                        "description": "untagged image IDs whose content was reaped",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "skipped": {
+                        "description": "untagged image IDs not reapable right now (re-tagged, container ref, in-flight pull)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
                     "untagged": {
                         "description": "refs whose tag was removed but content may remain",
                         "items": {
@@ -140,11 +156,15 @@
                     "digest": {
                         "type": "string"
                     },
+                    "image_id": {
+                        "description": "set for untagged-reap candidates",
+                        "type": "string"
+                    },
                     "last_used": {
                         "type": "string"
                     },
                     "reason": {
-                        "description": "age_exceeded | max_n_exceeded",
+                        "description": "age_exceeded | max_n_exceeded | untagged",
                         "type": "string"
                     },
                     "ref": {
@@ -179,7 +199,7 @@
             "retention.Kept": {
                 "properties": {
                     "reason": {
-                        "description": "in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged",
+                        "description": "in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged | untagged_grace | digest_tracked",
                         "type": "string"
                     },
                     "ref": {
@@ -322,6 +342,25 @@
                         "$ref": "#/components/schemas/retention.ScheduleStatus"
                     },
                     "started": {
+                        "type": "string"
+                    },
+                    "untagged": {
+                        "description": "tracked untagged images (reap clocks running)",
+                        "type": "integer"
+                    },
+                    "untagged_after": {
+                        "description": "reap delay; absent when the reaper is off",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "retention.UntaggedEntry": {
+                "properties": {
+                    "first_seen": {
+                        "type": "string"
+                    },
+                    "id": {
                         "type": "string"
                     }
                 },
@@ -484,6 +523,11 @@
                         },
                         "type": "array",
                         "uniqueItems": false
+                    },
+                    "untagged_after": {
+                        "description": "Override the untagged-image reap delay (docker stores); unset leaves the reaper off for the call.",
+                        "example": "30m",
+                        "type": "string"
                     }
                 },
                 "type": "object"
@@ -493,6 +537,14 @@
                     "items": {
                         "items": {
                             "$ref": "#/components/schemas/retention.Record"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "untagged": {
+                        "description": "Untagged are the images tracked with no tags — their reap clocks. Present\nonly for engines with the inventory-scan capability (docker), and omitted\nwhen a repo/ref/pinned filter is supplied (entries are IDs, not refs).",
+                        "items": {
+                            "$ref": "#/components/schemas/retention.UntaggedEntry"
                         },
                         "type": "array",
                         "uniqueItems": false
@@ -737,6 +789,10 @@
                     },
                     "read": {
                         "description": "registry: pull blobs",
+                        "type": "boolean"
+                    },
+                    "reconcile": {
+                        "description": "engine supports inventory scans / untagged reaping (phase 2)",
                         "type": "boolean"
                     },
                     "verify": {
@@ -1810,7 +1866,7 @@
         },
         "/v1/store/{name}/gc": {
             "get": {
-                "description": "Returns the retention decision (keep/delete) without deleting anything. An optional body overrides the configured max_age/keep_n/max_n/pins for this call. NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.",
+                "description": "Returns the retention decision (keep/delete) without deleting anything (untagged reap clocks are not started either). An optional body overrides the configured max_age/keep_n/max_n/pins/untagged_after for this call — untagged_after left unset disables the reaper for the call, and cannot re-enable a store configured with \"0s\". NOTE: a GET request body is dropped by fetch()/XHR, some HTTP clients, and proxies — to pass overrides reliably, use POST.",
                 "parameters": [
                     {
                         "description": "engine store name",
@@ -1895,7 +1951,7 @@
                 ]
             },
             "post": {
-                "description": "Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins for this call.",
+                "description": "Applies the deletions and returns the apply result. An optional body overrides the configured max_age/keep_n/max_n/pins/untagged_after for this call — untagged_after left unset disables the reaper for the call, and cannot re-enable a store configured with \"0s\".",
                 "parameters": [
                     {
                         "description": "engine store name",
@@ -2039,7 +2095,7 @@
         },
         "/v1/store/{name}/image": {
             "delete": {
-                "description": "Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A record for an image still present is re-created (with fresh timestamps) by the usage watcher or the next pull. To delete the image itself use /remove.",
+                "description": "Purges one record from the retention index WITHOUT touching the engine — the escape hatch for orphan records left by out-of-band image removal. A ref that is a tracked untagged image ID purges that reap clock instead. A record (or clock) for an image still present is re-created by the usage watcher, the next pull, or the next inventory scan. To delete the image itself use /remove.",
                 "parameters": [
                     {
                         "description": "engine store name",
@@ -2118,7 +2174,7 @@
                 ]
             },
             "get": {
-                "description": "The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned).",
+                "description": "The retention index records for an engine store — what gantry believes is on the node and the timestamps driving GC decisions (last_used, last_distributed, first_seen, pinned) — plus the tracked untagged images awaiting the reaper (first_seen starts the untagged_after clock).",
                 "parameters": [
                     {
                         "description": "engine store name",

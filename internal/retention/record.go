@@ -42,6 +42,11 @@ type Policy struct {
 	// KeepN. The cap is deferred during the startup grace window, like age GC.
 	MaxN int      `json:"max_n"`
 	Pins []string `json:"pins"`
+	// UntaggedAfter is store-level, not per-repo (an untagged image has no repo
+	// for a rule to match): reap an image this long after it was first observed
+	// with no tags. Zero disables the reaper — so a /gc override body that does
+	// not set it leaves the reaper off for that call, like every other field.
+	UntaggedAfter time.Duration `json:"untagged_after,omitempty"`
 }
 
 // Rule is one per-repo retention rule (the retention-package mirror of
@@ -56,18 +61,21 @@ type Rule struct {
 	Pins   []string
 }
 
-// Candidate is one image marked for deletion.
+// Candidate is one image marked for deletion. A tag candidate carries the ref
+// the rules selected; an untagged-reap candidate carries the image ID in both
+// Ref and ImageID (ImageID is the apply-path discriminator).
 type Candidate struct {
 	Ref      string    `json:"ref"`
+	ImageID  string    `json:"image_id,omitempty"` // set for untagged-reap candidates
 	Digest   string    `json:"digest,omitempty"`
 	LastUsed time.Time `json:"last_used"`
-	Reason   string    `json:"reason"` // age_exceeded | max_n_exceeded
+	Reason   string    `json:"reason"` // age_exceeded | max_n_exceeded | untagged
 }
 
 // Kept is one image protected from deletion, with the protecting reason.
 type Kept struct {
 	Ref    string `json:"ref"`
-	Reason string `json:"reason"` // in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged
+	Reason string `json:"reason"` // in_use | pinned | keep_n_recent | within_max_age | grace | age_gc_disabled | unmanaged | untagged_grace | digest_tracked
 }
 
 // Decision is the result of evaluating the policy over a store's records.

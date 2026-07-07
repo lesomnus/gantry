@@ -28,8 +28,8 @@ func (r *Recorder) JobFinished(id, ref, state, errMsg string, bytes int64) {
 
 // --- retention.Recorder ---
 
-func (r *Recorder) GCApplied(store string, deleted, untagged, errs int) {
-	r.emit(Event{Type: GCApplied, Store: store, Detail: gcDetail(deleted, untagged, errs)})
+func (r *Recorder) GCApplied(store string, deleted, untagged, reaped, errs int) {
+	r.emit(Event{Type: GCApplied, Store: store, Detail: gcDetail(deleted, untagged, reaped, errs)})
 }
 
 func (r *Recorder) ImageRemoved(store, ref string) {

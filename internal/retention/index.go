@@ -11,6 +11,7 @@ import (
 var (
 	bktImg = []byte("img") // img/<engine>/<ref> -> json(Record)
 	bktPin = []byte("pin") // pin/<engine>/<ref-or-pattern> -> json(PinEntry)
+	bktUnt = []byte("unt") // unt/<engine>/<image-id> -> json(UntaggedEntry)
 )
 
 // PinEntry is one persisted pin: an exact reference, or — when Pattern — a
@@ -41,7 +42,7 @@ func Open(path string) (*Index, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bktImg, bktPin} {
+		for _, b := range [][]byte{bktImg, bktPin, bktUnt} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}
@@ -108,6 +109,93 @@ func (ix *Index) Distributed(engine, ref string, t time.Time) error {
 		}
 		r.LastDistributed = t
 	})
+}
+
+// Observe records that ref exists on the engine (an inventory-scan sighting of
+// an image gantry never pulled or saw used). It creates the record when absent
+// — FirstSeen starts the age clock at observation — and never bumps the usage
+// signals of an existing record.
+func (ix *Index) Observe(engine, ref string, t time.Time) error {
+	return ix.upsert(engine, ref, func(r *Record) {
+		if r.FirstSeen.IsZero() {
+			r.FirstSeen = t
+		}
+	})
+}
+
+// UntaggedEntry tracks one image observed with no tags. The reap clock starts
+// at the first observation — the moment the tag was actually lost is unknowable
+// after the fact and is not needed.
+type UntaggedEntry struct {
+	ID        string    `json:"id"`
+	FirstSeen time.Time `json:"first_seen"`
+}
+
+// ObserveUntagged records that image id currently has no tags. FirstSeen is
+// write-once: a re-observation keeps the original clock.
+func (ix *Index) ObserveUntagged(engine, id string, t time.Time) error {
+	return ix.db.Update(func(tx *bolt.Tx) error {
+		b, err := sub(tx, bktUnt, engine)
+		if err != nil {
+			return err
+		}
+		if b.Get([]byte(id)) != nil {
+			return nil
+		}
+		enc, err := json.Marshal(UntaggedEntry{ID: id, FirstSeen: t})
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(id), enc)
+	})
+}
+
+// UntaggedEntries returns every tracked untagged image for an engine.
+func (ix *Index) UntaggedEntries(engine string) ([]UntaggedEntry, error) {
+	var out []UntaggedEntry
+	err := ix.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bktUnt).Bucket([]byte(engine))
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			var e UntaggedEntry
+			if json.Unmarshal(v, &e) != nil {
+				return nil
+			}
+			e.ID = string(k)
+			out = append(out, e)
+			return nil
+		})
+	})
+	return out, err
+}
+
+// HasUntagged reports whether an untagged image is still tracked.
+func (ix *Index) HasUntagged(engine, id string) (bool, error) {
+	has := false
+	err := ix.db.View(func(tx *bolt.Tx) error {
+		if b := tx.Bucket(bktUnt).Bucket([]byte(engine)); b != nil {
+			has = b.Get([]byte(id)) != nil
+		}
+		return nil
+	})
+	return has, err
+}
+
+// DeleteUntagged drops one tracked untagged image (reaped, re-tagged, or gone),
+// reporting whether it existed.
+func (ix *Index) DeleteUntagged(engine, id string) (bool, error) {
+	existed := false
+	err := ix.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bktUnt).Bucket([]byte(engine))
+		if b == nil || b.Get([]byte(id)) == nil {
+			return nil
+		}
+		existed = true
+		return b.Delete([]byte(id))
+	})
+	return existed, err
 }
 
 // List returns every record for an engine, with Pinned set from the pin bucket
@@ -207,9 +295,10 @@ func (ix *Index) Pins(engine string) ([]PinEntry, error) {
 	return out, err
 }
 
-// Counts tallies an engine's records and pins with a key-only walk — no
-// decoding or pin matching (polled by the metrics observer on every collection).
-func (ix *Index) Counts(engine string) (records, pins int, err error) {
+// Counts tallies an engine's records, pins, and tracked untagged images with a
+// key-only walk — no decoding or pin matching (polled by the metrics observer
+// on every collection).
+func (ix *Index) Counts(engine string) (records, pins, untagged int, err error) {
 	err = ix.db.View(func(tx *bolt.Tx) error {
 		if b := tx.Bucket(bktImg).Bucket([]byte(engine)); b != nil {
 			records = b.Stats().KeyN
@@ -217,9 +306,12 @@ func (ix *Index) Counts(engine string) (records, pins int, err error) {
 		if b := tx.Bucket(bktPin).Bucket([]byte(engine)); b != nil {
 			pins = b.Stats().KeyN
 		}
+		if b := tx.Bucket(bktUnt).Bucket([]byte(engine)); b != nil {
+			untagged = b.Stats().KeyN
+		}
 		return nil
 	})
-	return records, pins, err
+	return records, pins, untagged, err
 }
 
 // parseRef splits a reference into its host-qualified repo (the keep-N grouping

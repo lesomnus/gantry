@@ -143,6 +143,14 @@ type StoreRetention struct {
 	// Grace holds off deletion this long after startup, since the usage index has
 	// no history for the downtime. Default 1h.
 	Grace Duration `yaml:"grace"`
+	// UntaggedAfter reaps an image this long after gantry first observes it with
+	// no tags — e.g. the previous image of a tag that was re-pulled. Untagged
+	// images bypass the per-repo rules (there is no tag for a rule to manage);
+	// running containers, digest-pinned records, and repo@digest pins still
+	// protect them. docker stores only: containerd reclaims untagged content by
+	// itself. A pointer so an explicit "0s" (reaper off) differs from unset
+	// (default 1h on docker stores).
+	UntaggedAfter *Duration `yaml:"untagged_after"`
 	// Rules are per-repo retention policies. For a given repo, the matching rules
 	// (doublestar patterns) are resolved field-by-field: each field takes the
 	// value from the most specific matching rule that sets it (longest literal
@@ -173,6 +181,15 @@ type RetentionRule struct {
 // Enabled reports whether retention/GC is configured for this store.
 func (c *StoreRetention) Enabled() bool { return c != nil && c.Path != "" }
 
+// UntaggedReapAfter is the effective untagged-image reap delay after defaults
+// are applied; zero means the reaper is off.
+func (c *StoreRetention) UntaggedReapAfter() time.Duration {
+	if c == nil || c.UntaggedAfter == nil {
+		return 0
+	}
+	return time.Duration(*c.UntaggedAfter)
+}
+
 // evaluateRetention applies defaults and validates the store's retention config.
 // Retention is only supported on engine stores.
 func (s *StoreConfig) evaluateRetention() error {
@@ -189,6 +206,20 @@ func (s *StoreConfig) evaluateRetention() error {
 	z.FallbackP((*time.Duration)(&r.Interval), time.Hour)
 	z.FallbackP((*time.Duration)(&r.MinInterval), time.Minute)
 	z.FallbackP((*time.Duration)(&r.Grace), time.Hour)
+	switch s.Kind {
+	case "docker":
+		if r.UntaggedAfter == nil {
+			d := Duration(time.Hour) // default-on: gantry is the node's image manager
+			r.UntaggedAfter = &d
+		}
+		if *r.UntaggedAfter < 0 {
+			return z.Err(nil, "retention.untagged_after must not be negative")
+		}
+	default:
+		if r.UntaggedAfter != nil {
+			return z.Err(nil, "retention.untagged_after is only supported on docker stores; containerd reclaims untagged content itself")
+		}
+	}
 	for i := range r.Rules {
 		rule := &r.Rules[i]
 		if rule.Repo == "" {

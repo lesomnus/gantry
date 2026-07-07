@@ -80,6 +80,7 @@ func NewCmdServe() *xli.Command {
 							MinInterval: time.Duration(rc.MinInterval),
 							Grace:       time.Duration(rc.Grace),
 						},
+						UntaggedAfter: rc.UntaggedReapAfter(),
 					})
 					log.From(ctx).Info("retention enabled",
 						slog.String("store", name), slog.String("path", rc.Path), slog.Int("rules", len(rc.Rules)))
