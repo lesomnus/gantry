@@ -50,7 +50,7 @@ type Engine interface {
 	// platform ("os/arch", OCI form) selects the platform to pull; empty means
 	// the daemon's default. The value is passed through as-is — if the image has
 	// no such platform, the daemon's error is returned.
-	Pull(ctx context.Context, ref string, digest string, platform string, sink Sink) error
+	Pull(ctx context.Context, ref string, digest string, platform string, as []string, sink Sink) error
 	// Platform reports the daemon host's platform in OCI form ("linux/amd64").
 	Platform(ctx context.Context) (string, error)
 

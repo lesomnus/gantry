@@ -104,6 +104,12 @@ message Job {
     features.field_presence = EXPLICIT,
     (orm.field) = {immutable: true}
   ];
+  // Engine destination only: record the pulled image under these names
+  // instead of the pull reference, so a cache-fed engine keeps the image
+  // under its upstream name (e.g. "docker.io/library/redis:7"). Tag
+  // references only; non-empty replaces the pull-reference name entirely —
+  // include it in the list to keep it.
+  repeated string as = 14 [(orm.field) = {immutable: true}];
 
   JobState state = 7;
   string error = 8;

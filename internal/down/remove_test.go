@@ -143,7 +143,7 @@ func TestDockerPullAnchoredTags(t *testing.T) {
 	}
 	eng := &dockerEngine{name: "d", cli: cli}
 	dg := "sha256:0123456789012345678901234567890123456789012345678901234567890123"
-	if err := eng.Pull(context.Background(), "cache.local/team/app:1", dg, "", nopSink{}); err != nil {
+	if err := eng.Pull(context.Background(), "cache.local/team/app:1", dg, "", nil, nopSink{}); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()

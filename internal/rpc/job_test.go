@@ -31,6 +31,7 @@ func TestJobAdd(t *testing.T) {
 	job, err := e.client.Job().Add(ctx, pb.JobAddRequest_builder{
 		Ref: "src.local/lib/app:1",
 		To:  pb.StoreByName("node"),
+		As:  []string{"docker.io/lib/app:1"},
 	}.Build(), grpc.Trailer(&trailer))
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +42,8 @@ func TestJobAdd(t *testing.T) {
 	if got := trailer.Get("gantry-coalesced"); len(got) != 1 || got[0] != "false" {
 		t.Errorf("want coalesced=false trailer, got %v", got)
 	}
-	if len(e.warmer.submits) != 1 || e.warmer.submits[0].To != "node" {
+	if len(e.warmer.submits) != 1 || e.warmer.submits[0].To != "node" ||
+		len(e.warmer.submits[0].As) != 1 || e.warmer.submits[0].As[0] != "docker.io/lib/app:1" {
 		t.Errorf("submit not forwarded: %+v", e.warmer.submits)
 	}
 
@@ -307,6 +309,7 @@ func TestJobPlan(t *testing.T) {
 		To:        "node",
 		SrcRef:    "src.local/lib/app@sha256:abc",
 		DstRef:    "src.local/lib/app:1",
+		As:        []string{"docker.io/lib/app:1"},
 		Coalesces: "job_7",
 	}
 
@@ -317,7 +320,8 @@ func TestJobPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.GetSrcRef() != "src.local/lib/app@sha256:abc" || res.GetCoalesces() != "job_7" {
+	if res.GetSrcRef() != "src.local/lib/app@sha256:abc" || res.GetCoalesces() != "job_7" ||
+		len(res.GetAs()) != 1 || res.GetAs()[0] != "docker.io/lib/app:1" {
 		t.Errorf("unexpected plan: %v", res)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -125,7 +126,7 @@ func ociPlatform(osType, arch string) (string, error) {
 
 func (e *dockerEngine) Close() error { return e.cli.Close() }
 
-func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, platform string, sink Sink) error {
+func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, sink Sink) error {
 	pull_ref := ref
 	if digest != "" {
 		var err error
@@ -160,22 +161,47 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 			sink.Layer(u)
 		}
 	}
-	if pull_ref != ref {
-		// The digest pull leaves the image untagged; give it the tag callers,
-		// containers, and the retention index know it by.
-		if err := e.cli.ImageTag(ctx, pull_ref, ref); err != nil {
+	// Record the names the deployment knows the image by: the requested `as`
+	// names, or — for an anchored pull, which leaves the content untagged —
+	// the tag form of the pull reference.
+	anchored := pull_ref != ref
+	names := as
+	if len(names) == 0 {
+		if !anchored {
+			return nil
+		}
+		names = []string{ref}
+	}
+	tagged := false
+	for _, n := range names {
+		if !anchored && n == ref {
+			tagged = true // the pull itself created this tag
+			continue
+		}
+		if err := e.cli.ImageTag(ctx, pull_ref, n); err != nil {
 			// Best-effort fast cleanup (the untagged reaper is the eventual
-			// backstop, but it can be configured off). Untagging the canonical ref
-			// is safe — content held by other tags stays — unless another pull of
-			// the same reference is in flight and about to tag it. The pull
-			// context may already be canceled (a likely cause of the failure), so
-			// detach from it.
-			if e.pullCount(pull_ref) == 1 { // this pull is the sole registrant
+			// backstop, but it can be configured off), only while the content has
+			// no visible name yet — a partially named image stays. Skip when
+			// another pull of the same reference is in flight and about to tag
+			// it. The pull context may already be canceled (a likely cause of the
+			// failure), so detach from it.
+			if anchored && !tagged && e.pullCount(pull_ref) == 1 {
 				dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 				defer cancel()
 				_, _ = e.cli.ImageRemove(dctx, pull_ref, image.RemoveOptions{})
 			}
-			return z.Err(err, "tag %q", ref)
+			return z.Err(err, "tag %q", n)
+		}
+		tagged = true
+	}
+	if !anchored && !slices.Contains(names, ref) {
+		// The caller renamed the image away from the pull-created tag; drop it.
+		// Content held by the names above stays. Skip when another pull of the
+		// same reference is in flight and racing to tag it.
+		if e.pullCount(ref) == 1 {
+			if _, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{}); err != nil {
+				return z.Err(err, "untag %q", ref)
+			}
 		}
 	}
 	return nil

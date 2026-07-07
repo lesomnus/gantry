@@ -2,6 +2,7 @@ package down
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,7 +55,7 @@ func (e *containerdEngine) Platform(context.Context) (string, error) {
 	return platforms.Format(platforms.DefaultSpec()), nil
 }
 
-func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, platform string, sink Sink) error {
+func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, sink Sink) error {
 	ctx = namespaces.WithNamespace(ctx, e.namespace)
 	pull_ref := ref
 	if digest != "" {
@@ -76,23 +77,44 @@ func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, 
 	if err != nil {
 		return z.Err(err, "pull")
 	}
-	if pull_ref != ref {
-		// Record the tag name for the digest-pulled content so containers, the
-		// retention index, and kubelet resolve it as usual.
-		rec := images.Image{Name: ref, Target: img.Target()}
+	// Record the names the deployment knows the image by: the requested `as`
+	// names, or — for an anchored pull, whose only record is digest-named —
+	// the tag form of the pull reference.
+	anchored := pull_ref != ref
+	names := as
+	if len(names) == 0 {
+		if !anchored {
+			return nil
+		}
+		names = []string{ref}
+	}
+	named := false
+	for _, n := range names {
+		if n == pull_ref {
+			named = true // the pull itself recorded this name
+			continue
+		}
+		rec := images.Image{Name: n, Target: img.Target()}
 		if _, err := e.cli.ImageService().Create(ctx, rec); err != nil {
 			if !cerrdefs.IsAlreadyExists(err) {
-				e.untrack(ctx, pull_ref) // don't leave content rooted by an invisible record
-				return z.Err(err, "tag %q", ref)
+				if anchored && !named {
+					e.untrack(ctx, pull_ref) // don't leave content rooted by an invisible record
+				}
+				return z.Err(err, "tag %q", n)
 			}
 			if _, err := e.cli.ImageService().Update(ctx, rec, "target"); err != nil {
-				e.untrack(ctx, pull_ref)
-				return z.Err(err, "retag %q", ref)
+				if anchored && !named {
+					e.untrack(ctx, pull_ref)
+				}
+				return z.Err(err, "retag %q", n)
 			}
 		}
-		// The pull itself recorded the digest-named ref. The retention index only
-		// ever tracks the tag, so that record would root the content forever;
-		// drop it now that the tag record holds the same target.
+		named = true
+	}
+	if !slices.Contains(names, pull_ref) {
+		// Drop the pull-created record: the caller renamed the image away from
+		// it — and for an anchored pull the retention index only ever tracks
+		// tags, so the digest-named record would root the content forever.
 		if err := e.cli.ImageService().Delete(ctx, pull_ref); err != nil && !cerrdefs.IsNotFound(err) {
 			return z.Err(err, "untrack %q", pull_ref)
 		}

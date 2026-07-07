@@ -246,6 +246,7 @@ func jobToPB(snap warm.JobSnapshot) *pb.Job {
 		Id:           snap.ID,
 		Ref:          snap.Ref,
 		Platforms:    snap.Platforms,
+		As:           snap.As,
 		State:        jobStateToPB[snap.State],
 		Error:        snap.Err,
 		Verification: verificationToPB(snap.Verification),
@@ -406,6 +407,7 @@ func applyResultToPB(res retention.ApplyResult) *pb.StoreGcApplyResponse {
 func planToPB(res warm.PlanResult) *pb.JobPlanResponse {
 	b := pb.JobPlanResponse_builder{
 		Platforms:    res.Platforms,
+		As:           res.As,
 		Verification: verificationToPB(res.Verification),
 	}
 	if res.From != "" {

@@ -41,6 +41,7 @@ message JobAddRequest {
   StoreRef to = 4;
   repeated string platforms = 5;
   bool copy_referrers = 6;
+  repeated string as = 14;
   JobState state = 7 [features.field_presence = IMPLICIT];
   string error = 8 [features.field_presence = IMPLICIT];
   Verification verification = 9;
@@ -68,6 +69,7 @@ message JobSelect {
   StoreSelect to = 4;
   bool platforms = 5;
   bool copy_referrers = 6;
+  bool as = 14;
   bool state = 7;
   bool error = 8;
   bool verification = 9;
@@ -111,6 +113,8 @@ message JobPlanRequest {
   StoreRef to = 3;
   repeated string platforms = 4;
   bool copy_referrers = 5;
+  // Engine destination only: names the image would be recorded under.
+  repeated string as = 6;
 }
 
 message JobPlanResponse {
@@ -129,4 +133,6 @@ message JobPlanResponse {
   Verification verification = 7;
   // The active job an identical submit would coalesce onto, if any.
   string coalesces = 8;
+  // Engine destination: the (normalized) names the image is recorded under.
+  repeated string as = 9;
 }

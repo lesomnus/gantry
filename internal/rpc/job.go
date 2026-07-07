@@ -65,12 +65,13 @@ func idemKey(ctx context.Context) string {
 	return ""
 }
 
-func requestFromPB(ref string, from, to *pb.StoreRef, platforms []string) warm.Request {
+func requestFromPB(ref string, from, to *pb.StoreRef, platforms, as []string) warm.Request {
 	return warm.Request{
 		Ref:       ref,
 		Platforms: platforms,
 		From:      from.GetName(),
 		To:        to.GetName(),
+		As:        as,
 	}
 }
 
@@ -78,7 +79,7 @@ func (v *jobService) Add(ctx context.Context, req *pb.JobAddRequest) (*pb.Job, e
 	if req.GetRef() == "" {
 		return nil, status.Error(codes.InvalidArgument, "ref is required")
 	}
-	r := requestFromPB(req.GetRef(), req.GetFrom(), req.GetTo(), req.GetPlatforms())
+	r := requestFromPB(req.GetRef(), req.GetFrom(), req.GetTo(), req.GetPlatforms(), req.GetAs())
 	if req.HasCopyReferrers() {
 		cr := req.GetCopyReferrers()
 		r.CopyReferrers = &cr
@@ -191,7 +192,7 @@ func (v *jobService) Plan(ctx context.Context, req *pb.JobPlanRequest) (*pb.JobP
 	if req.GetRef() == "" {
 		return nil, status.Error(codes.InvalidArgument, "ref is required")
 	}
-	r := requestFromPB(req.GetRef(), req.GetFrom(), req.GetTo(), req.GetPlatforms())
+	r := requestFromPB(req.GetRef(), req.GetFrom(), req.GetTo(), req.GetPlatforms(), req.GetAs())
 	if req.HasCopyReferrers() {
 		cr := req.GetCopyReferrers()
 		r.CopyReferrers = &cr

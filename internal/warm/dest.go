@@ -40,7 +40,7 @@ type puller interface {
 	pullRef(src name.Reference, from config.StoreConfig) (string, error)
 	// pull triggers the fetch. digest anchors it; platform is passed through
 	// as-is (the daemon errors if the image has no such platform).
-	pull(ctx context.Context, ref, digest, platform string, sink down.Sink) error
+	pull(ctx context.Context, ref, digest, platform string, as []string, sink down.Sink) error
 	// hostPlatform is the daemon host's platform in OCI form ("linux/amd64"),
 	// the default platform when a job does not name one.
 	hostPlatform(ctx context.Context) (string, error)
@@ -104,8 +104,8 @@ func (d *engineDest) pullRef(src name.Reference, from config.StoreConfig) (strin
 	return rewriteHost(src, host)
 }
 
-func (d *engineDest) pull(ctx context.Context, ref, digest, platform string, sink down.Sink) error {
-	return d.eng.Pull(ctx, ref, digest, platform, sink)
+func (d *engineDest) pull(ctx context.Context, ref, digest, platform string, as []string, sink down.Sink) error {
+	return d.eng.Pull(ctx, ref, digest, platform, as, sink)
 }
 
 func (d *engineDest) hostPlatform(ctx context.Context) (string, error) {

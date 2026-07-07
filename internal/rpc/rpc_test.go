@@ -44,6 +44,7 @@ type fakeEngine struct {
 
 type pullCall struct {
 	ref, digest, platform string
+	as                    []string
 }
 
 func (e *fakeEngine) setReady(err error) {
@@ -63,11 +64,11 @@ func (e *fakeEngine) Ready(context.Context) error {
 func (e *fakeEngine) Platform(context.Context) (string, error) { return "linux/amd64", nil }
 func (e *fakeEngine) Close() error                             { return nil }
 
-func (e *fakeEngine) Pull(_ context.Context, ref, digest, platform string, _ down.Sink) error {
+func (e *fakeEngine) Pull(_ context.Context, ref, digest, platform string, as []string, _ down.Sink) error {
 	if e.pullErr != nil {
 		return e.pullErr
 	}
-	e.pulled = append(e.pulled, pullCall{ref, digest, platform})
+	e.pulled = append(e.pulled, pullCall{ref, digest, platform, as})
 	return nil
 }
 

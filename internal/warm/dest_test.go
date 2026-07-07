@@ -22,6 +22,7 @@ type fakePullEngine struct {
 	mu       sync.Mutex
 	ref      string
 	digest   string
+	as       []string
 	pulled   string // platform the pull asked for
 	pullErr  error
 	reported []down.LayerUpdate
@@ -37,9 +38,9 @@ func (f *fakePullEngine) Platform(context.Context) (string, error) {
 	}
 	return f.platform, nil
 }
-func (f *fakePullEngine) Pull(_ context.Context, ref, digest, platform string, sink down.Sink) error {
+func (f *fakePullEngine) Pull(_ context.Context, ref, digest, platform string, as []string, sink down.Sink) error {
 	f.mu.Lock()
-	f.ref, f.digest, f.pulled = ref, digest, platform
+	f.ref, f.digest, f.pulled, f.as = ref, digest, platform, as
 	reports := f.reported
 	err := f.pullErr
 	f.mu.Unlock()

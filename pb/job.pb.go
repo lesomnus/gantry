@@ -627,6 +627,7 @@ type Job struct {
 	xxx_hidden_To            *Store                 `protobuf:"bytes,4,opt,name=to"`
 	xxx_hidden_Platforms     []string               `protobuf:"bytes,5,rep,name=platforms"`
 	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,6,opt,name=copy_referrers,json=copyReferrers"`
+	xxx_hidden_As            []string               `protobuf:"bytes,14,rep,name=as"`
 	xxx_hidden_State         JobState               `protobuf:"varint,7,opt,name=state,enum=gantry.JobState"`
 	xxx_hidden_Error         string                 `protobuf:"bytes,8,opt,name=error"`
 	xxx_hidden_Verification  *Verification          `protobuf:"bytes,9,opt,name=verification"`
@@ -707,6 +708,13 @@ func (x *Job) GetCopyReferrers() bool {
 	return false
 }
 
+func (x *Job) GetAs() []string {
+	if x != nil {
+		return x.xxx_hidden_As
+	}
+	return nil
+}
+
 func (x *Job) GetState() JobState {
 	if x != nil {
 		return x.xxx_hidden_State
@@ -780,7 +788,11 @@ func (x *Job) SetPlatforms(v []string) {
 
 func (x *Job) SetCopyReferrers(v bool) {
 	x.xxx_hidden_CopyReferrers = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 13)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 14)
+}
+
+func (x *Job) SetAs(v []string) {
+	x.xxx_hidden_As = v
 }
 
 func (x *Job) SetState(v JobState) {
@@ -908,13 +920,19 @@ type Job_builder struct {
 	// Copy source referrer artifacts (signatures) along with the image.
 	// Absent = server default (on when the job is verified).
 	CopyReferrers *bool
-	State         JobState
-	Error         string
-	Verification  *Verification
-	Transfers     []*Transfer
-	CreatedAt     *timestamppb.Timestamp
-	StartedAt     *timestamppb.Timestamp
-	EndedAt       *timestamppb.Timestamp
+	// Engine destination only: record the pulled image under these names
+	// instead of the pull reference, so a cache-fed engine keeps the image
+	// under its upstream name (e.g. "docker.io/library/redis:7"). Tag
+	// references only; non-empty replaces the pull-reference name entirely —
+	// include it in the list to keep it.
+	As           []string
+	State        JobState
+	Error        string
+	Verification *Verification
+	Transfers    []*Transfer
+	CreatedAt    *timestamppb.Timestamp
+	StartedAt    *timestamppb.Timestamp
+	EndedAt      *timestamppb.Timestamp
 }
 
 func (b0 Job_builder) Build() *Job {
@@ -927,9 +945,10 @@ func (b0 Job_builder) Build() *Job {
 	x.xxx_hidden_To = b.To
 	x.xxx_hidden_Platforms = b.Platforms
 	if b.CopyReferrers != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 13)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 14)
 		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
 	}
+	x.xxx_hidden_As = b.As
 	x.xxx_hidden_State = b.State
 	x.xxx_hidden_Error = b.Error
 	x.xxx_hidden_Verification = b.Verification
@@ -968,14 +987,15 @@ const file_gantry_job_proto_rawDesc = "" +
 	"bytes_done\x18\b \x01(\x03R\tbytesDone\x12%\n" +
 	"\x06layers\x18\t \x03(\v2\r.gantry.LayerR\x06layers\x12\x14\n" +
 	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"\xd2\x04\n" +
+	" \x01(\tR\x05error\"\xea\x04\n" +
 	"\x03Job\x12\x19\n" +
 	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12\x18\n" +
 	"\x03ref\x18\x02 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12+\n" +
 	"\x04from\x18\x03 \x01(\v2\r.gantry.StoreB\b\xf2\x82\x16\x048\x01@\x01R\x04from\x12%\n" +
 	"\x02to\x18\x04 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x02to\x12$\n" +
 	"\tplatforms\x18\x05 \x03(\tB\x06\xea\x82\x16\x02@\x01R\tplatforms\x122\n" +
-	"\x0ecopy_referrers\x18\x06 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x12&\n" +
+	"\x0ecopy_referrers\x18\x06 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x12\x16\n" +
+	"\x02as\x18\x0e \x03(\tB\x06\xea\x82\x16\x02@\x01R\x02as\x12&\n" +
 	"\x05state\x18\a \x01(\x0e2\x10.gantry.JobStateR\x05state\x12\x14\n" +
 	"\x05error\x18\b \x01(\tR\x05error\x128\n" +
 	"\fverification\x18\t \x01(\v2\x14.gantry.VerificationR\fverification\x12.\n" +

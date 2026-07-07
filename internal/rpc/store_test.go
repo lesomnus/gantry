@@ -94,9 +94,10 @@ func TestStorePull(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Manual pulls are unanchored (digest "") and pass the platform through.
-	want := pullCall{ref: "src.local/lib/app:1", digest: "", platform: "linux/arm64"}
-	if len(e.eng.pulled) != 1 || e.eng.pulled[0] != want {
-		t.Fatalf("pull not forwarded: %v", e.eng.pulled)
+	got := e.eng.pulled
+	if len(got) != 1 || got[0].ref != "src.local/lib/app:1" || got[0].digest != "" ||
+		got[0].platform != "linux/arm64" || len(got[0].as) != 0 {
+		t.Fatalf("pull not forwarded: %+v", got)
 	}
 	// The pull stamps the retention index and records an audit event.
 	recs, err := e.gc.List("node")

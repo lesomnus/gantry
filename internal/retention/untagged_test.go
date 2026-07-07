@@ -42,7 +42,7 @@ func TestEvaluateUntaggedProtectionsAndDeadline(t *testing.T) {
 		Records: []Record{ownedRec},
 		InUse:   map[string]bool{"sha256:run": true, "r/d@" + dg: true},
 		Pins: []PinEntry{
-			{Value: "r/f@" + dg}, // exact digest-ref pin
+			{Value: "r/f@" + dg},    // exact digest-ref pin
 			{Value: "sha256:pinid"}, // exact bare-ID pin
 		},
 		After: time.Hour,

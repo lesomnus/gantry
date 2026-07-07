@@ -72,6 +72,10 @@ type Request struct {
 	// verification is enabled and the destination is a copy-mode cache.
 	// Registry destinations only.
 	CopyReferrers *bool
+	// As records the pulled image under these names instead of the pull
+	// reference, so a cache-fed engine can keep the image under its upstream
+	// name. Tag references only. Engine destinations only.
+	As []string
 }
 
 // jobExec is the resolved plan for a job, computed at submit time.
@@ -82,6 +86,7 @@ type jobExec struct {
 	src           name.Reference        // source ref; digest-pinned when verified
 	cacheRef      name.Reference        // pusher dest: the rewritten in-store ref
 	pullRef       string                // puller dest: the ref the engine is told to pull
+	as            []string              // puller dest: names recorded instead of pullRef
 	platform      string                // puller dest: the resolved platform
 	verification  *VerificationSnapshot // admission-time verification, stamped onto the Job
 
@@ -239,7 +244,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 		return JobSnapshot{}, false, err
 	}
 
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name())
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name(), ex.as)
 	if snap, ok := w.store.Active(key); ok {
 		return snap, false, nil
 	}
@@ -248,6 +253,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 	ctx, cancel := context.WithCancel(w.base)
 	job := NewJob(id, req.Ref, platforms, time.Now())
 	job.ctx, job.cancel, job.dedup, job.exec, job.req = ctx, cancel, key, ex, req
+	job.As = ex.as
 	job.Verification = ex.verification
 	job.Transfers = transfers
 	if err := w.store.Add(job); err != nil {
@@ -300,6 +306,7 @@ type PlanResult struct {
 	SrcRef        string                `json:"src_ref"`           // source ref, digest-pinned when verified
 	DstRef        string                `json:"dst_ref,omitempty"` // destination-side ref: the rewritten cache ref, or the ref the engine is told to pull
 	Platforms     []string              `json:"platforms"`         // registry dest: empty = all platforms; engine dest: the single platform pulled
+	As            []string              `json:"as,omitempty"`      // engine dest: names the image is recorded under
 	CopyReferrers bool                  `json:"copy_referrers"`
 	Verification  *VerificationSnapshot `json:"verification,omitempty"`
 	Coalesces     string                `json:"coalesces,omitempty"` // active job an identical submit would join
@@ -317,6 +324,7 @@ func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
 		To:            ex.dst.Name(),
 		SrcRef:        ex.src.Name(),
 		Platforms:     platforms,
+		As:            ex.as,
 		CopyReferrers: ex.copyReferrers,
 		Verification:  ex.verification,
 	}
@@ -326,7 +334,7 @@ func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
 	case ex.pullRef != "":
 		out.DstRef = ex.pullRef
 	}
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name())
+	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name(), ex.as)
 	if snap, ok := w.store.Active(key); ok {
 		out.Coalesces = snap.ID
 	}
@@ -373,6 +381,9 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 	var transfers []*Transfer
 	switch d := ex.dst.(type) {
 	case pusher:
+		if len(req.As) > 0 {
+			return nil, nil, nil, fmt.Errorf("`as` names the image on an engine; store %q is a registry", d.Name())
+		}
 		ex.cacheRef, err = d.dstRef(ex.src)
 		if err != nil {
 			return nil, nil, nil, z.Err(err, "rewrite into %q", d.Name())
@@ -399,6 +410,21 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		ex.pullRef, err = d.pullRef(ex.src, ex.from)
 		if err != nil {
 			return nil, nil, nil, err
+		}
+		// The image is recorded under the requested names — so a cache-fed
+		// engine can keep the upstream name — instead of the pull reference.
+		// Tags only: a digest is content identity, not a name. The strings are
+		// kept VERBATIM: containerd resolves image names by exact match, so
+		// normalizing (docker.io -> index.docker.io) would break kubelet lookups.
+		for _, n := range req.As {
+			parsed, err := name.ParseReference(n, w.srcOpts...)
+			if err != nil {
+				return nil, nil, nil, z.Err(err, "parse `as` name %q", n)
+			}
+			if _, ok := parsed.(name.Digest); ok {
+				return nil, nil, nil, fmt.Errorf("`as` name %q is a digest; use a tag reference", n)
+			}
+			ex.as = append(ex.as, n)
 		}
 		transfers = append(transfers, &Transfer{
 			Store: d.Name(), Kind: d.Kind(), From: ex.from.Name,
@@ -612,7 +638,7 @@ func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 	}
 
 	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
-	if err := d.pull(ctx, ex.pullRef, digest, ex.platform, sink); err != nil {
+	if err := d.pull(ctx, ex.pullRef, digest, ex.platform, ex.as, sink); err != nil {
 		return w.failTransfer(job, t, err)
 	}
 	w.store.Update(job.ID, func(*Job) {
@@ -632,7 +658,15 @@ func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 		t.State = "done"
 	})
 	if w.pullHook != nil {
-		w.pullHook(d.Name(), ex.pullRef)
+		// Stamp the names the daemon actually records — the retention index,
+		// in-use matching, and the inventory all key on them.
+		names := ex.as
+		if len(names) == 0 {
+			names = []string{ex.pullRef}
+		}
+		for _, n := range names {
+			w.pullHook(d.Name(), n)
+		}
 	}
 	log.From(ctx).Info("engine pulled",
 		slog.String("store", d.Name()), slog.String("ref", ex.pullRef), slog.String("platform", ex.platform))

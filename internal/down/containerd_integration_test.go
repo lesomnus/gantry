@@ -47,7 +47,7 @@ func TestContainerdEngineLive(t *testing.T) {
 		t.Skipf("no reachable containerd (%s): %v", containerdAddr(), err)
 	}
 
-	if err := eng.Pull(ctx, "docker.io/library/busybox:latest", "", "", &recSink{}); err != nil {
+	if err := eng.Pull(ctx, "docker.io/library/busybox:latest", "", "", nil, &recSink{}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 }
@@ -77,7 +77,7 @@ func TestContainerdAnchoredPull(t *testing.T) {
 	const ref = "docker.io/library/busybox:latest"
 	// Resolve the tag's manifest digest first (via a plain pull), then remove it
 	// so the anchored pull actually re-resolves by digest.
-	if err := eng.Pull(ctx, ref, "", "", &recSink{}); err != nil {
+	if err := eng.Pull(ctx, ref, "", "", nil, &recSink{}); err != nil {
 		t.Fatalf("seed pull: %v", err)
 	}
 	nctx := namespaces.WithNamespace(ctx, ns)
@@ -91,7 +91,7 @@ func TestContainerdAnchoredPull(t *testing.T) {
 	_, _ = eng.Remove(ctx, repo+"@"+digest) // clear any digest record from the seed
 
 	// Anchored pull: repo@digest, tagged back to ref.
-	if err := eng.Pull(ctx, ref, digest, "", &recSink{}); err != nil {
+	if err := eng.Pull(ctx, ref, digest, "", nil, &recSink{}); err != nil {
 		t.Fatalf("anchored pull: %v", err)
 	}
 

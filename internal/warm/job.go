@@ -56,6 +56,7 @@ type Job struct {
 	ID        string
 	Ref       string // the requested image reference
 	Platforms []string
+	As        []string // engine dest: names the image is recorded under
 
 	State        JobState
 	Err          string
@@ -100,10 +101,12 @@ func (j *Job) Canceled() bool { return j.canceled.Load() }
 func (j *Job) DedupKey() string { return j.dedup }
 
 // dedupKey collapses identical moves (same image, platforms, route) onto one job.
-func dedupKey(ref string, platforms []string, from, to string) string {
+func dedupKey(ref string, platforms []string, from, to string, as []string) string {
 	ps := append([]string(nil), platforms...)
 	sort.Strings(ps)
-	return strings.Join([]string{ref, strings.Join(ps, ","), from, to}, "\x00")
+	ns := append([]string(nil), as...)
+	sort.Strings(ns)
+	return strings.Join([]string{ref, strings.Join(ps, ","), from, to, strings.Join(ns, ",")}, "\x00")
 }
 
 // Transfer is one step of a job: moving an image into a store. A registry copy
@@ -154,6 +157,7 @@ type JobSnapshot struct {
 	ID           string                `json:"id"`
 	Ref          string                `json:"ref"`
 	Platforms    []string              `json:"platforms"`
+	As           []string              `json:"as,omitempty"`
 	State        JobState              `json:"state"`
 	Err          string                `json:"error"`
 	Verification *VerificationSnapshot `json:"verification,omitempty"`
@@ -189,6 +193,7 @@ func (j *Job) snapshot() JobSnapshot {
 		ID:        j.ID,
 		Ref:       j.Ref,
 		Platforms: j.Platforms,
+		As:        j.As,
 		State:     j.State,
 		Err:       j.Err,
 		CreatedAt: j.CreatedAt,
