@@ -124,6 +124,25 @@ func (l *Log) Append(e Event) error {
 	})
 }
 
+// Get returns the event with the given sequence number, or ok=false when it
+// was never written or has been evicted by the ring.
+func (l *Log) Get(seq uint64) (Event, bool, error) {
+	var e Event
+	ok := false
+	err := l.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bktEvt).Get(itob(seq))
+		if v == nil {
+			return nil
+		}
+		if err := json.Unmarshal(v, &e); err != nil {
+			return err
+		}
+		ok = true
+		return nil
+	})
+	return e, ok, err
+}
+
 // List returns matching events newest-first, capped by Filter.Limit (default
 // 100, hard max 1000).
 func (l *Log) List(f Filter) ([]Event, error) {

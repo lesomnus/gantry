@@ -433,8 +433,9 @@ func (b0 GcRule_builder) Build() *GcRule {
 	return m0
 }
 
-// One-shot policy override; unset fields keep the store's configured value,
-// zero values disable the corresponding mechanism.
+// One-shot policy override. A present override REPLACES the store's
+// configured rules with a single blanket rule built from these fields; unset
+// fields are zero, which disables the corresponding mechanism for the call.
 type GcOverride struct {
 	state                    protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_MaxAge        *durationpb.Duration   `protobuf:"bytes,1,opt,name=max_age,json=maxAge"`

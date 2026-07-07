@@ -114,6 +114,10 @@ serve:
   addr: ":8080"
   shutdown_grace: "15s"
 
+  # The same API over gRPC, sharing serve.auth. Empty/unset disables it.
+  # grpc:
+  #   addr: ":9090"
+
   # Authentication for /v1/* (/healthz is exempt).
   # auth:
   #   tokens: ["${GANTRY_TOKEN}"]

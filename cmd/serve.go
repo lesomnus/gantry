@@ -13,6 +13,7 @@ import (
 	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
+	"github.com/lesomnus/gantry/internal/rpc"
 	"github.com/lesomnus/gantry/internal/server"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
@@ -21,6 +22,9 @@ import (
 	"github.com/lesomnus/xli"
 	"github.com/lesomnus/xli/flg"
 	"github.com/lesomnus/z"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/reflection"
 )
 
 func NewCmdServe() *xli.Command {
@@ -160,6 +164,35 @@ func NewCmdServe() *xli.Command {
 			l := log.From(ctx)
 			l.Info("serving", slog.String("addr", c.Serve.Addr), slog.Int("stores", len(c.Stores)))
 
+			// The gRPC API serves the same surface on its own listener,
+			// sharing serve.auth (bearer tokens, TLS cert/key). All fallible
+			// setup happens before either listener starts serving.
+			var gsrv *grpc.Server
+			var glis net.Listener
+			if c.Serve.Grpc.Enabled() {
+				au, as := rpc.Auth(c.Serve.Auth)
+				opts := []grpc.ServerOption{
+					grpc.ChainUnaryInterceptor(au),
+					grpc.ChainStreamInterceptor(as),
+				}
+				if c.Serve.Auth.TLSCert != "" {
+					creds, err := credentials.NewServerTLSFromFile(c.Serve.Auth.TLSCert, c.Serve.Auth.TLSKey)
+					if err != nil {
+						return z.Err(err, "grpc tls")
+					}
+					opts = append(opts, grpc.Creds(creds))
+				}
+				gsrv = grpc.NewServer(opts...)
+				rpc.New(wmr, jobStore, stores, gc, hc, vf, events).Register(gsrv)
+				reflection.Register(gsrv)
+
+				lis, err := net.Listen("tcp", c.Serve.Grpc.Addr)
+				if err != nil {
+					return z.Err(err, "grpc listen")
+				}
+				glis = lis
+			}
+
 			errc := make(chan error, 1)
 			go func() {
 				var err error
@@ -172,6 +205,14 @@ func NewCmdServe() *xli.Command {
 					errc <- err
 				}
 			}()
+			if gsrv != nil {
+				l.Info("serving grpc", slog.String("addr", c.Serve.Grpc.Addr))
+				go func() {
+					if err := gsrv.Serve(glis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+						errc <- err
+					}
+				}()
+			}
 
 			select {
 			case err := <-errc:
@@ -185,6 +226,16 @@ func NewCmdServe() *xli.Command {
 			defer cancel()
 			if err := srv.Shutdown(sctx); err != nil {
 				l.Warn("graceful shutdown timed out", slog.String("error", err.Error()))
+			}
+			if gsrv != nil {
+				// Drain in-flight RPCs within what remains of the grace window.
+				done := make(chan struct{})
+				go func() { gsrv.GracefulStop(); close(done) }()
+				select {
+				case <-done:
+				case <-sctx.Done():
+					gsrv.Stop()
+				}
 			}
 			wmr.Stop()
 			return nil

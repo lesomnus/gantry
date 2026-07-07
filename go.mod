@@ -13,6 +13,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/go-containerregistry v0.21.7
 	github.com/google/go-tpm v0.9.8
+	github.com/google/uuid v1.6.0
 	github.com/lesomnus/mkot v0.0.0-20260702145326-2198e788ed64
 	github.com/lesomnus/mkot/otlp v0.0.0-20260702145326-2198e788ed64
 	github.com/lesomnus/mkot/pretty v0.0.0-20260702145326-2198e788ed64
@@ -64,7 +65,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect

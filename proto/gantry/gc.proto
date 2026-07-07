@@ -44,8 +44,9 @@ message GcRule {
   repeated string pins = 5;
 }
 
-// One-shot policy override; unset fields keep the store's configured value,
-// zero values disable the corresponding mechanism.
+// One-shot policy override. A present override REPLACES the store's
+// configured rules with a single blanket rule built from these fields; unset
+// fields are zero, which disables the corresponding mechanism for the call.
 message GcOverride {
   google.protobuf.Duration max_age = 1;
   int32 keep_n = 2;

@@ -12,6 +12,7 @@ import (
 // and the worker pool are top-level config sections (Config.Stores, Config.Worker).
 type ServeConfig struct {
 	Addr          string     `yaml:"addr"`
+	Grpc          GrpcConfig `yaml:"grpc"`
 	ShutdownGrace Duration   `yaml:"shutdown_grace"`
 	Auth          AuthConfig `yaml:"auth"`
 	// AllowUnknownStores permits a job to reference a registry by a bare host
@@ -22,6 +23,16 @@ type ServeConfig struct {
 	Verify             VerifyConfig `yaml:"verify"`
 	Events             EventsConfig `yaml:"events"`
 }
+
+// GrpcConfig serves the same API over gRPC, next to the HTTP listener. It
+// shares serve.auth (bearer tokens, TLS cert/key). An empty Addr disables it.
+type GrpcConfig struct {
+	// Addr is the gRPC listen address, e.g. ":9090". Empty disables the gRPC API.
+	Addr string `yaml:"addr"`
+}
+
+// Enabled reports whether the gRPC API is configured.
+func (c GrpcConfig) Enabled() bool { return c.Addr != "" }
 
 // EventsConfig governs the audit log (GET /v1/event). An empty Path disables it.
 // It is independent of retention so the log works even when GC is off.
