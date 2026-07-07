@@ -124,14 +124,14 @@ worker:
 ```sh
 go run . --config gantry-e2e.yaml serve &
 
-curl -s http://127.0.0.1:18080/v1/store         # 3 stores, capabilities, ready
+grpcurl -plaintext 127.0.0.1:18080 gantry.StoreService/List   # 3 stores, capabilities, ready
 
 # 사전에 어디에도 없는 이미지로(content-store 캐시 혼동 방지)
-ID=$(curl -s -X POST http://127.0.0.1:18080/v1/job \
-       -d '{"ref":"busybox:latest","from":"docker.io","to":"cache","distribute":["dind-docker","dind-ctr"]}' \
-     | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+ID=$(grpcurl -plaintext -d '{"ref":"busybox:latest","from":{"name":"docker.io"},"to":{"name":"cache"}}' \
+       127.0.0.1:18080 gantry.JobService/Add \
+     | sed -n 's/.*"id": "\([^"]*\)".*/\1/p')
 
-curl -s http://127.0.0.1:18080/v1/job/$ID       # transfers[]: cache + each engine
+grpcurl -plaintext -d "{\"ref\":{\"id\":\"$ID\"}}" 127.0.0.1:18080 gantry.JobService/Get  # transfers[]
 ```
 
 기대 결과: `state=done`, cache transfer는 `bytes_done==bytes_total`, `dind-docker`·`dind-ctr` 모두
@@ -181,7 +181,7 @@ targets:
 `cache.cr.com/library/redis:7`을 pull하라고 시킨다(repo·tag/digest는 그대로, 호스트만 치환).
 데몬 쪽에서 `cache.cr.com`을 신뢰(TLS 또는 insecure-registries)하고 DNS/hosts로
 `192.168.0.22`를 가리키게 해두면, 비-loopback에서도 insecure 신뢰 문제를 우회할 수 있다.
-각 target의 pull ref는 `GET /v1/job/{id}`의 `targets[].ref`로 확인된다.
+각 target의 pull ref는 `JobService.Get`의 `transfers[].ref`로 확인된다.
 
 > dev의 `127.0.0.1:5000`은 포워드를 거쳐 registry로, 데몬의 `127.0.0.1:5000`은 자기
 > publish 포트로 — 서로 다른 net namespace지만 **같은 registry**를 가리키고 양쪽 다

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,18 +21,22 @@ import (
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	healthsvc "google.golang.org/grpc/health"
 	"google.golang.org/grpc/test/bufconn"
 )
 
-// fakeEngine is a canned down.Engine.
+// fakeEngine is a canned down.Engine. readyErr is mutex-guarded because the
+// readiness watcher probes it concurrently with the test's writes.
 type fakeEngine struct {
 	name      string
 	inuse     map[string]bool
 	removeRes down.RemoveResult
 	pullErr   error
-	readyErr  error
 	removeErr error
 	inuseErr  error
+
+	mu       sync.Mutex
+	readyErr error
 
 	pulled  []pullCall
 	removed []string
@@ -41,11 +46,22 @@ type pullCall struct {
 	ref, digest, platform string
 }
 
-func (e *fakeEngine) Name() string                  { return e.name }
-func (e *fakeEngine) Kind() string                  { return "docker" }
-func (e *fakeEngine) Ready(context.Context) error   { return e.readyErr }
+func (e *fakeEngine) setReady(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.readyErr = err
+}
+
+func (e *fakeEngine) Name() string { return e.name }
+func (e *fakeEngine) Kind() string { return "docker" }
+
+func (e *fakeEngine) Ready(context.Context) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.readyErr
+}
 func (e *fakeEngine) Platform(context.Context) (string, error) { return "linux/amd64", nil }
-func (e *fakeEngine) Close() error                  { return nil }
+func (e *fakeEngine) Close() error                             { return nil }
 
 func (e *fakeEngine) Pull(_ context.Context, ref, digest, platform string, _ down.Sink) error {
 	if e.pullErr != nil {
@@ -66,7 +82,7 @@ func (e *fakeEngine) InUse(context.Context) (map[string]bool, error) {
 	return out, nil
 }
 
-func (e *fakeEngine) SeedUsage(context.Context, down.UsageSink) error  { return nil }
+func (e *fakeEngine) SeedUsage(context.Context, down.UsageSink) error { return nil }
 func (e *fakeEngine) WatchUsage(ctx context.Context, _ down.UsageSink) error {
 	<-ctx.Done()
 	return ctx.Err()
@@ -132,6 +148,8 @@ type env struct {
 	gc     *retention.Manager
 	events *event.Log
 	stores *store.Set
+	srv    *rpc.Server
+	hs     *healthsvc.Server
 
 	client pb.Client
 	conn   *grpc.ClientConn
@@ -147,10 +165,10 @@ type envCfg struct {
 	auth      *config.AuthConfig
 }
 
-func withoutGC() envOpt       { return func(c *envCfg) { c.gcOff = true } }
-func withoutEvents() envOpt   { return func(c *envCfg) { c.eventsOff = true } }
-func withVerify() envOpt      { return func(c *envCfg) { c.verifyOn = true } }
-func withTypedNils() envOpt   { return func(c *envCfg) { c.gcOff = true; c.typedNils = true } }
+func withoutGC() envOpt     { return func(c *envCfg) { c.gcOff = true } }
+func withoutEvents() envOpt { return func(c *envCfg) { c.eventsOff = true } }
+func withVerify() envOpt    { return func(c *envCfg) { c.verifyOn = true } }
+func withTypedNils() envOpt { return func(c *envCfg) { c.gcOff = true; c.typedNils = true } }
 func withAuth(a config.AuthConfig) envOpt {
 	return func(c *envCfg) { c.auth = &a }
 }
@@ -212,8 +230,12 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 		vf = (*verify.Swappable)(nil)
 	}
 
-	hc := health.NewChecker(stores, health.Options{})
+	hc := health.NewChecker(stores, health.Options{
+		CacheTTL:     time.Millisecond,
+		ProbeTimeout: time.Second,
+	})
 	srv := rpc.New(e.warmer, e.jobs, stores, gc, hc, vf, e.events)
+	e.srv = srv
 
 	var sopts []grpc.ServerOption
 	if cfg.auth != nil {
@@ -221,7 +243,7 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 		sopts = append(sopts, grpc.ChainUnaryInterceptor(au), grpc.ChainStreamInterceptor(as))
 	}
 	g := grpc.NewServer(sopts...)
-	srv.Register(g)
+	e.hs = srv.Register(g)
 
 	l := bufconn.Listen(1 << 20)
 	go g.Serve(l)

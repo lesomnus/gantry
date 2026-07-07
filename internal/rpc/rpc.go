@@ -1,5 +1,4 @@
-// Package rpc serves the gantry API over gRPC — the counterpart of
-// internal/server (HTTP) over the same dependencies. Write RPCs that have no
+// Package rpc serves the gantry API over gRPC. Write RPCs that have no
 // domain operation (stores are declared in configuration, image records and
 // audit events are written internally) answer codes.Unimplemented.
 package rpc
@@ -8,6 +7,7 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/lesomnus/gantry/internal/event"
@@ -47,15 +47,15 @@ type GC interface {
 // Health is the subset of *health.Checker the services call.
 type Health interface {
 	Check(ctx context.Context, name string) (health.Report, error)
+	ReadyStores() []string
 }
 
-// Server implements pb.Server plus the VerifyService over the same
-// dependencies internal/server takes.
+// Server implements pb.Server plus the VerifyService.
 type Server struct {
 	warmer Warmer
 	jobs   warm.Store
 	stores *store.Set
-	gc     GC             // nil when retention/GC is disabled
+	gc     GC // nil when retention/GC is disabled
 	health Health
 	verify verify.Service // nil when verification is disabled
 	events *event.Log     // nil when the audit log is disabled
@@ -115,10 +115,61 @@ func (s *Server) Event() pb.EventServiceServer { return &eventService{s: s} }
 func (s *Server) VerifyService() pb.VerifyServiceServer { return &verifyService{s: s} }
 
 // Register registers every gantry service plus the standard
-// grpc.health.v1.Health service (SERVING once the server is up — the gRPC
-// counterpart of /healthz).
-func (s *Server) Register(g *grpc.Server) {
+// grpc.health.v1.Health service, returned so the caller can drive readiness
+// (see WatchReadiness). The overall status starts SERVING.
+func (s *Server) Register(g *grpc.Server) *healthsvc.Server {
 	pb.RegisterServer(g, s)
 	pb.RegisterVerifyServiceServer(g, s.VerifyService())
-	healthpb.RegisterHealthServer(g, healthsvc.NewServer())
+	hs := healthsvc.NewServer()
+	healthpb.RegisterHealthServer(g, hs)
+	return hs
+}
+
+// WatchReadiness keeps the overall serving status in step with the gated
+// stores (serve.health.ready_stores; every engine store when unset), probing
+// them every interval until ctx is done. The health checker's TTL cache
+// bounds the probe cost.
+func (s *Server) WatchReadiness(ctx context.Context, hs *healthsvc.Server, every time.Duration) {
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		st := healthpb.HealthCheckResponse_SERVING
+		if !s.ready(ctx) {
+			st = healthpb.HealthCheckResponse_NOT_SERVING
+		}
+		hs.SetServingStatus("", st)
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// ready probes the gated stores concurrently and reports whether all are
+// healthy, like the old /readyz.
+func (s *Server) ready(ctx context.Context) bool {
+	gate := s.health.ReadyStores()
+	if len(gate) == 0 {
+		// A flaky remote upstream must not flap node readiness: only the
+		// engine stores gate by default.
+		gate = s.stores.EngineNames()
+	}
+	oks := make([]bool, len(gate))
+	var wg sync.WaitGroup
+	for i, name := range gate {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rep, err := s.health.Check(ctx, name)
+			oks[i] = err == nil && rep.Healthy
+		}()
+	}
+	wg.Wait()
+	for _, ok := range oks {
+		if !ok {
+			return false
+		}
+	}
+	return true
 }

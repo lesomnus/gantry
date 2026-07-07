@@ -8,11 +8,10 @@ import (
 	"github.com/lesomnus/z"
 )
 
-// ServeConfig configures the `serve` subcommand's HTTP API. The image stores
+// ServeConfig configures the `serve` subcommand's gRPC API. The image stores
 // and the worker pool are top-level config sections (Config.Stores, Config.Worker).
 type ServeConfig struct {
 	Addr          string     `yaml:"addr"`
-	Grpc          GrpcConfig `yaml:"grpc"`
 	ShutdownGrace Duration   `yaml:"shutdown_grace"`
 	Auth          AuthConfig `yaml:"auth"`
 	// AllowUnknownStores permits a job to reference a registry by a bare host
@@ -24,17 +23,7 @@ type ServeConfig struct {
 	Events             EventsConfig `yaml:"events"`
 }
 
-// GrpcConfig serves the same API over gRPC, next to the HTTP listener. It
-// shares serve.auth (bearer tokens, TLS cert/key). An empty Addr disables it.
-type GrpcConfig struct {
-	// Addr is the gRPC listen address, e.g. ":9090". Empty disables the gRPC API.
-	Addr string `yaml:"addr"`
-}
-
-// Enabled reports whether the gRPC API is configured.
-func (c GrpcConfig) Enabled() bool { return c.Addr != "" }
-
-// EventsConfig governs the audit log (GET /v1/event). An empty Path disables it.
+// EventsConfig governs the audit log (EventService). An empty Path disables it.
 // It is independent of retention so the log works even when GC is off.
 type EventsConfig struct {
 	// Path is the bbolt file for the audit ring. Empty disables the log.
@@ -125,7 +114,7 @@ type StoreVerify struct {
 	Mode VerifyMode `yaml:"mode"`
 }
 
-// HealthConfig governs the cached per-store health probe (GET /v1/store/{name}/health).
+// HealthConfig governs the cached per-store health probe (StoreService.Health).
 type HealthConfig struct {
 	// CacheTTL is how long a store's probe result is cached before the next call
 	// re-probes. Default 5s.
@@ -133,7 +122,7 @@ type HealthConfig struct {
 	// ProbeTimeout bounds a single store probe (engine ready-check or registry
 	// /v2/ ping). Default 3s.
 	ProbeTimeout Duration `yaml:"probe_timeout"`
-	// ReadyStores are the store names GET /readyz gates on. Empty means every
+	// ReadyStores are the store names the gRPC health readiness gates on. Empty means every
 	// engine store — a remote upstream registry must not flap node readiness,
 	// so registries join the gate only by being listed here.
 	ReadyStores []string `yaml:"ready_stores"`
@@ -257,13 +246,13 @@ func (s *StoreConfig) evaluateRetention() error {
 	return nil
 }
 
-// AuthConfig guards /v1/* (/healthz is always exempt).
+// AuthConfig guards the API (the health and reflection services are always exempt).
 type AuthConfig struct {
-	// Tokens is a bearer-token whitelist; if non-empty, /v1/* requires one.
+	// Tokens is a bearer-token whitelist; if non-empty, every RPC requires one.
 	Tokens []string `yaml:"tokens"`
 	// ClientCA, if set, accepts a verified mTLS client certificate in lieu of a token.
 	ClientCA string `yaml:"client_ca"`
-	// TLSCert/TLSKey serve the API over HTTPS; empty means plain HTTP (TLS terminated upstream).
+	// TLSCert/TLSKey serve the API over TLS; empty means plaintext (TLS terminated upstream).
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`
 }

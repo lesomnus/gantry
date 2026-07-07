@@ -10,10 +10,10 @@ import (
 	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc/codes"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 func TestVerifyDisabled(t *testing.T) {
@@ -150,7 +150,7 @@ func TestAuth(t *testing.T) {
 	_, err = e.client.Store().List(bad, &pb.StoreListRequest{})
 	wantCode(t, err, codes.Unauthenticated)
 
-	// The health service stays public, like /healthz.
+	// The health service stays public.
 	hres, err := healthpb.NewHealthClient(e.conn).Check(ctx, &healthpb.HealthCheckRequest{})
 	if err != nil || hres.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 		t.Fatalf("health: %v %v", hres, err)

@@ -43,7 +43,7 @@ type Report struct {
 type Options struct {
 	CacheTTL     time.Duration // how long a probe result is reused; <=0 -> 5s
 	ProbeTimeout time.Duration // per-probe deadline; <=0 -> 3s
-	// ReadyStores are the store names /readyz gates on; empty means every
+	// ReadyStores are the store names readiness gates on; empty means every
 	// engine store (a remote upstream must not flap the node's readiness).
 	ReadyStores []string
 }

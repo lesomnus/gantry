@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net"
-	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/rpc"
-	"github.com/lesomnus/gantry/internal/server"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
 	"github.com/lesomnus/gantry/internal/warm"
@@ -154,88 +152,59 @@ func NewCmdServe() *xli.Command {
 				gc.StartScheduler(ctx)
 			}
 
-			h := server.Auth(c.Serve.Auth)(server.New(wmr, jobStore, stores, gc, hc, vf, events))
-			srv := &http.Server{
-				Addr:        c.Serve.Addr,
-				Handler:     h,
-				BaseContext: func(net.Listener) context.Context { return ctx },
+			au, as := rpc.Auth(c.Serve.Auth)
+			opts := []grpc.ServerOption{
+				grpc.ChainUnaryInterceptor(au),
+				grpc.ChainStreamInterceptor(as),
 			}
+			if c.Serve.Auth.TLSCert != "" {
+				creds, err := credentials.NewServerTLSFromFile(c.Serve.Auth.TLSCert, c.Serve.Auth.TLSKey)
+				if err != nil {
+					return z.Err(err, "tls")
+				}
+				opts = append(opts, grpc.Creds(creds))
+			}
+			gsrv := grpc.NewServer(opts...)
+			rsrv := rpc.New(wmr, jobStore, stores, gc, hc, vf, events)
+			hs := rsrv.Register(gsrv)
+			reflection.Register(gsrv)
+
+			lis, err := net.Listen("tcp", c.Serve.Addr)
+			if err != nil {
+				return z.Err(err, "listen")
+			}
+			// Readiness rides the standard health service: the overall status
+			// follows the gated stores, like the old /readyz.
+			go rsrv.WatchReadiness(ctx, hs, 5*time.Second)
 
 			l := log.From(ctx)
 			l.Info("serving", slog.String("addr", c.Serve.Addr), slog.Int("stores", len(c.Stores)))
 
-			// The gRPC API serves the same surface on its own listener,
-			// sharing serve.auth (bearer tokens, TLS cert/key). All fallible
-			// setup happens before either listener starts serving.
-			var gsrv *grpc.Server
-			var glis net.Listener
-			if c.Serve.Grpc.Enabled() {
-				au, as := rpc.Auth(c.Serve.Auth)
-				opts := []grpc.ServerOption{
-					grpc.ChainUnaryInterceptor(au),
-					grpc.ChainStreamInterceptor(as),
-				}
-				if c.Serve.Auth.TLSCert != "" {
-					creds, err := credentials.NewServerTLSFromFile(c.Serve.Auth.TLSCert, c.Serve.Auth.TLSKey)
-					if err != nil {
-						return z.Err(err, "grpc tls")
-					}
-					opts = append(opts, grpc.Creds(creds))
-				}
-				gsrv = grpc.NewServer(opts...)
-				rpc.New(wmr, jobStore, stores, gc, hc, vf, events).Register(gsrv)
-				reflection.Register(gsrv)
-
-				lis, err := net.Listen("tcp", c.Serve.Grpc.Addr)
-				if err != nil {
-					return z.Err(err, "grpc listen")
-				}
-				glis = lis
-			}
-
 			errc := make(chan error, 1)
 			go func() {
-				var err error
-				if c.Serve.Auth.TLSCert != "" {
-					err = srv.ListenAndServeTLS(c.Serve.Auth.TLSCert, c.Serve.Auth.TLSKey)
-				} else {
-					err = srv.ListenAndServe()
-				}
-				if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				if err := gsrv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 					errc <- err
 				}
 			}()
-			if gsrv != nil {
-				l.Info("serving grpc", slog.String("addr", c.Serve.Grpc.Addr))
-				go func() {
-					if err := gsrv.Serve(glis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-						errc <- err
-					}
-				}()
-			}
 
 			select {
 			case err := <-errc:
-				return z.Err(err, "listen")
+				return z.Err(err, "serve")
 			case <-ctx.Done():
 				l.Info("shutting down")
 			}
 
+			// Drain in-flight RPCs within the grace window.
 			grace := time.Duration(c.Serve.ShutdownGrace)
 			sctx, cancel := context.WithTimeout(context.Background(), grace)
 			defer cancel()
-			if err := srv.Shutdown(sctx); err != nil {
-				l.Warn("graceful shutdown timed out", slog.String("error", err.Error()))
-			}
-			if gsrv != nil {
-				// Drain in-flight RPCs within what remains of the grace window.
-				done := make(chan struct{})
-				go func() { gsrv.GracefulStop(); close(done) }()
-				select {
-				case <-done:
-				case <-sctx.Done():
-					gsrv.Stop()
-				}
+			done := make(chan struct{})
+			go func() { gsrv.GracefulStop(); close(done) }()
+			select {
+			case <-done:
+			case <-sctx.Done():
+				l.Warn("graceful shutdown timed out")
+				gsrv.Stop()
 			}
 			wmr.Stop()
 			return nil

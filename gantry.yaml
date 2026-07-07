@@ -104,21 +104,20 @@ worker:
   max_concurrent_jobs: 2
   # Max layers moved at once during a job's registry copy (tier-2).
   max_concurrent_layers: 4
-  # Buffered depth of the pending-job queue; a full queue returns 503.
+  # Buffered depth of the pending-job queue; a full queue rejects the job
+  # (RESOURCE_EXHAUSTED).
   queue_size: 256
   # How long a finished job's record is kept before eviction.
   job_ttl: "30m"
 
 # Server configuration (used by the `serve` subcommand).
 serve:
+  # The gRPC listen address.
   addr: ":8080"
   shutdown_grace: "15s"
 
-  # The same API over gRPC, sharing serve.auth. Empty/unset disables it.
-  # grpc:
-  #   addr: ":9090"
-
-  # Authentication for /v1/* (/healthz is exempt).
+  # Authentication for every RPC (the standard health and reflection
+  # services are exempt). Clients send `authorization: Bearer <token>`.
   # auth:
   #   tokens: ["${GANTRY_TOKEN}"]
   #   client_ca: "/etc/gantry/ca.pem"
@@ -127,8 +126,8 @@ serve:
   # Default false: only declared stores may be used.
   allow_unknown_stores: false
 
-  # Per-store health probe (GET /v1/store/{name}/health). An engine store is
-  # probed with its daemon ready-check; a registry store with a GET /v2/ ping
+  # Per-store health probe (StoreService.Health). An engine store is probed
+  # with its daemon ready-check; a registry store with a GET /v2/ ping
   # (a 200 or a 401 auth challenge both count as reachable). Results are cached
   # so frequent polling (load balancers, dashboards) does not hammer backends.
   health:
@@ -136,9 +135,10 @@ serve:
     cache_ttl: "5s"
     # Deadline for a single probe (a hung backend fails at this bound).
     probe_timeout: "3s"
-    # Store names GET /readyz gates on; empty = every engine store. List a
-    # registry here (e.g. the local cache) to make its reachability gate
-    # readiness — remote upstreams should stay out so WAN blips don't flap it.
+    # Store names the gRPC health readiness (grpc.health.v1.Health) gates on;
+    # empty = every engine store. List a registry here (e.g. the local cache)
+    # to make its reachability gate readiness — remote upstreams should stay
+    # out so WAN blips don't flap it.
     # ready_stores: ["cache"]
 
   # Image retention / garbage collection is configured PER ENGINE STORE, under
@@ -157,7 +157,7 @@ serve:
   # A repo matching no rule is left unmanaged (never deleted); anything else is
   # deleted (held only by the store's post-startup `grace` window).
 
-  # Audit log (GET /v1/event): an append-only ring of operationally significant
+  # Audit log (EventService): an append-only ring of operationally significant
   # events (jobs admitted/finished, GC applied, manual pull/remove, pins) that
   # survive process restart — the durable record the in-memory job store cannot
   # provide. Independent of retention, so it works even when GC is disabled.

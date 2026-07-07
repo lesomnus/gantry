@@ -42,7 +42,7 @@ func TestStoreGet(t *testing.T) {
 		t.Errorf("unexpected engine status: %v", st)
 	}
 
-	e.eng.readyErr = errors.New("daemon down")
+	e.eng.setReady(errors.New("daemon down"))
 	st, err = e.client.Store().Get(ctx, pb.StoreGetByName("node"))
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func TestStoreHealth(t *testing.T) {
 
 func TestStoreHealthUnhealthy(t *testing.T) {
 	e := newEnv(t)
-	e.eng.readyErr = errors.New("daemon down")
+	e.eng.setReady(errors.New("daemon down"))
 
 	// An unhealthy store is a report, not an RPC failure.
 	rep, err := e.client.Store().Health(context.Background(), pb.StoreByName("node"))

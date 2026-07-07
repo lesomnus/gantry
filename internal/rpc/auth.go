@@ -15,10 +15,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Auth builds interceptors enforcing the same model as the HTTP middleware:
-// a bearer-token whitelist (env-expanded, empty tokens dropped) or a verified
-// mTLS client certificate. With neither configured every call is allowed.
-// The standard health service stays public, like /healthz.
+// Auth builds interceptors enforcing serve.auth: a bearer-token whitelist
+// (env-expanded, empty tokens dropped) or a verified mTLS client
+// certificate. With neither configured every call is allowed. The standard
+// health and reflection services stay public — they expose liveness and the
+// schema, not the data.
 func Auth(cfg config.AuthConfig) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
 	tokens := make([][]byte, 0, len(cfg.Tokens))
 	for _, t := range cfg.Tokens {
@@ -52,8 +53,6 @@ func Auth(cfg config.AuthConfig) (grpc.UnaryServerInterceptor, grpc.StreamServer
 }
 
 func isPublicMethod(method string) bool {
-	// Health mirrors the public /healthz; reflection mirrors the public
-	// /openapi.json — both expose the schema, not the data.
 	return strings.HasPrefix(method, "/grpc.health.v1.Health/") ||
 		strings.HasPrefix(method, "/grpc.reflection.")
 }
