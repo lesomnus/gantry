@@ -8,12 +8,18 @@ on:
     paths: &paths
       - .github/workflows/ci.yaml
       - cmd/**
-      - internal/**
       - docker-bake.hcl
       - Dockerfile
       - go.mod
       - go.sum
       - main.go
+      - pb/**
+      - proto/**
+      - proto.svc/**
+      - buf.yaml
+      - buf.gen.yaml
+      - buf.gen.svc.yaml
+      - scripts/gen-proto.sh
   pull_request:
     branches:
       - main

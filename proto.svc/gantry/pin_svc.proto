@@ -1,0 +1,26 @@
+// Hand-written overlay merged onto the generated PinService by
+// scripts/gen-proto.sh (protobuf-merge). Adds the RPCs protoc-gen-orm-service
+// does not generate.
+edition = "2023";
+
+package gantry;
+
+import "gantry/pin.proto";
+import "gantry/store_svc.g.proto";
+
+service PinService {
+  // List returns the pins of a store.
+  rpc List(PinListRequest) returns (PinListResponse);
+}
+
+message PinListRequest {
+  StoreRef store = 1;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message PinListResponse {
+  repeated Pin items = 1;
+  string next_page_token = 2;
+}

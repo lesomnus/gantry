@@ -1,0 +1,73 @@
+edition = "2023";
+package gantry;
+
+import "gantry/pin.proto";
+import "gantry/store_svc.g.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+service PinService {
+  // Add creates a new Pin
+  rpc Add(PinAddRequest) returns (Pin);
+  // Get retrieves a Pin
+  rpc Get(PinGetRequest) returns (Pin);
+  // Patch updates an existing Pin
+  rpc Patch(PinPatchRequest) returns (Pin);
+  // Erase deletes a Pin
+  rpc Erase(PinRef) returns (google.protobuf.Empty);
+  // List returns the pins of a store.
+  rpc List(PinListRequest) returns (PinListResponse);
+}
+
+message PinAddRequest {
+  bytes id = 1;
+  StoreRef store = 2;
+  string value = 3 [features.field_presence = IMPLICIT];
+  bool pattern = 4 [features.field_presence = IMPLICIT];
+  google.protobuf.Timestamp pinned_at = 5;
+}
+
+message PinGetRequest {
+  PinRef ref = 1;
+  PinSelect select = 2;
+}
+
+message PinRef {
+  oneof key {
+    bytes id = 1;
+    PinRefByValue value = 2;
+  }
+}
+
+message PinRefByValue {
+  StoreRef store = 2;
+  string value = 3;
+}
+
+message PinSelect {
+  bool all = 1;
+  StoreSelect store = 2;
+  bool value = 3;
+  bool pattern = 4;
+  bool pinned_at = 5;
+}
+
+message PinPatchRequest {
+  PinRef ref = 1;
+  bool pattern = 7;
+  google.protobuf.Timestamp pinned_at = 9;
+}
+
+message PinListRequest {
+  StoreRef store = 1;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message PinListResponse {
+  repeated Pin items = 1;
+  string next_page_token = 2;
+}

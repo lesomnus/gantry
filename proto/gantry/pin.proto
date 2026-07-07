@@ -1,0 +1,50 @@
+edition = "2023";
+
+package gantry;
+
+import "gantry/store.proto";
+import "google/protobuf/timestamp.proto";
+import "orm.proto";
+
+option features.field_presence = IMPLICIT;
+option go_package = "github.com/lesomnus/gantry/pb";
+
+// A GC exemption on an engine store: an exact image reference or a
+// doublestar pattern. Identity is (store, value); re-pinning the same value
+// is an upsert that refreshes pinned_at.
+message Pin {
+  bytes id = 1 [(orm.field) = {
+    type: TYPE_UUID
+    key: true
+    default: ""
+  }];
+  Store store = 2 [(orm.edge) = {immutable: true}];
+  // Exact reference (pattern=false) or doublestar glob (pattern=true),
+  // e.g. "docker.io/library/nginx:1.27" or "*:stable".
+  string value = 3 [(orm.field) = {immutable: true}];
+  // May flip on re-pin of the same value: pattern-ness is an attribute of
+  // the pin, not part of its identity.
+  bool pattern = 4;
+  // Server-stamped; absent on pins persisted before entries carried a time.
+  google.protobuf.Timestamp pinned_at = 5;
+
+  option (orm.message) = {
+    rpc: {crud: true}
+    indexes: [
+      {
+        name: "value"
+        unique: true
+        refs: [
+          {
+            name: "store"
+            number: 2
+          },
+          {
+            name: "value"
+            number: 3
+          }
+        ]
+      }
+    ]
+  };
+}

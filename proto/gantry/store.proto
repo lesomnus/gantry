@@ -1,0 +1,59 @@
+edition = "2023";
+
+package gantry;
+
+import "orm.proto";
+
+option features.field_presence = IMPLICIT;
+option go_package = "github.com/lesomnus/gantry/pb";
+
+enum StoreKind {
+  STORE_KIND_UNSPECIFIED = 0;
+  STORE_KIND_OCI = 1; // OCI registry: gantry reads/writes blobs.
+  STORE_KIND_DOCKER = 2; // Docker engine: the daemon pulls.
+  STORE_KIND_CONTAINERD = 3; // containerd engine: the daemon pulls.
+}
+
+// How gantry fills a registry store as a copy destination.
+enum StoreMode {
+  STORE_MODE_UNSPECIFIED = 0;
+  STORE_MODE_COPY = 1; // gantry pushes blobs (default).
+  STORE_MODE_PROXY = 2; // reads through the destination so a pull-through cache self-fills.
+}
+
+// What operations the store supports. Registries get read/write; engines get
+// pull plus the optional daemon capabilities discovered at dial time.
+message StoreCapabilities {
+  bool read = 1;
+  bool write = 2;
+  bool pull = 3;
+  bool verify = 4;
+  bool gc = 5;
+  bool reconcile = 6;
+}
+
+// A registry or a daemon engine that images move between. Declared in
+// gantry.yaml today; Add/Patch/Erase exist for the contract (and for seeding
+// fakes in tests) even though the current server resolves stores from config.
+message Store {
+  string name = 1 [(orm.field) = {key: true}];
+  StoreKind kind = 2 [(orm.field) = {immutable: true}];
+
+  // Registry (oci) stores only.
+  string host = 3;
+  StoreMode mode = 4;
+
+  // Engine (docker/containerd) stores only.
+  string address = 5;
+  string namespace = 6;
+
+  // Live status, derived per read: registries report ready from config,
+  // engines are probed.
+  bool ready = 7;
+  string error = 8;
+  StoreCapabilities capabilities = 9;
+
+  option (orm.message) = {
+    rpc: {crud: true}
+  };
+}

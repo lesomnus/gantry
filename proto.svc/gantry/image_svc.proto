@@ -1,0 +1,40 @@
+// Hand-written overlay merged onto the generated ImageService by
+// scripts/gen-proto.sh (protobuf-merge). Adds the RPCs protoc-gen-orm-service
+// does not generate.
+edition = "2023";
+
+package gantry;
+
+import "gantry/image.proto";
+import "gantry/store_svc.g.proto";
+import "google/protobuf/timestamp.proto";
+
+service ImageService {
+  // List returns the image inventory of a store.
+  rpc List(ImageListRequest) returns (ImageListResponse);
+}
+
+// Reap clock of an image observed with no tags (docker engines only).
+message UntaggedImage {
+  string id = 1;
+  google.protobuf.Timestamp first_seen = 2;
+}
+
+message ImageListRequest {
+  StoreRef store = 1;
+  // Exact match on the host-qualified repository.
+  string repo = 2;
+  // Exact match on the full reference.
+  string ref = 3;
+  bool pinned = 4;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message ImageListResponse {
+  repeated Image items = 1;
+  string next_page_token = 2;
+  // Present only on unfiltered lists, mirroring the REST endpoint.
+  repeated UntaggedImage untagged = 3;
+}

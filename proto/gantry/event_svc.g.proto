@@ -1,0 +1,79 @@
+edition = "2023";
+package gantry;
+
+import "gantry/event.proto";
+import "gantry/job.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+service EventService {
+  // Add creates a new Event
+  rpc Add(EventAddRequest) returns (Event);
+  // Get retrieves a Event
+  rpc Get(EventGetRequest) returns (Event);
+  // Patch updates an existing Event
+  rpc Patch(EventPatchRequest) returns (Event);
+  // Erase deletes a Event
+  rpc Erase(EventRef) returns (google.protobuf.Empty);
+  // List returns audit events newest-first.
+  rpc List(EventListRequest) returns (EventListResponse);
+}
+
+message EventAddRequest {
+  uint64 seq = 1;
+  google.protobuf.Timestamp at = 2;
+  EventType type = 3 [features.field_presence = IMPLICIT];
+  string store = 4 [features.field_presence = IMPLICIT];
+  string ref = 5 [features.field_presence = IMPLICIT];
+  JobState state = 6 [features.field_presence = IMPLICIT];
+  string digest = 7 [features.field_presence = IMPLICIT];
+  string error = 8 [features.field_presence = IMPLICIT];
+  EventDetail detail = 9;
+}
+
+message EventGetRequest {
+  EventRef ref = 1;
+  EventSelect select = 2;
+}
+
+message EventRef {
+  oneof key {
+    uint64 seq = 1;
+  }
+}
+
+message EventSelect {
+  bool all = 1;
+  bool at = 2;
+  bool type = 3;
+  bool store = 4;
+  bool ref = 5;
+  bool state = 6;
+  bool digest = 7;
+  bool error = 8;
+  bool detail = 9;
+}
+
+message EventPatchRequest {
+  EventRef ref = 1;
+}
+
+message EventListRequest {
+  EventType type = 1;
+  string store = 2;
+  string ref = 3;
+  // Terminal job state, for job_done events.
+  JobState state = 4;
+  // Events recorded at or after this instant.
+  google.protobuf.Timestamp since = 5;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message EventListResponse {
+  repeated Event items = 1;
+  string next_page_token = 2;
+}

@@ -1,0 +1,23 @@
+version: v2
+modules:
+  - path: proto
+deps:
+  - buf.build/orm/orm
+lint:
+  use:
+    - STANDARD
+  except:
+    # The gantry package is deliberately unversioned.
+    - PACKAGE_VERSION_SUFFIX
+    # The generated CRUD services return the entity itself and take Ref
+    # messages; that resource-oriented shape is protoc-gen-orm-service's
+    # contract style, not an accident.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    # "*_svc.g.proto" marks generated files, following the protobuf-orm
+    # ecosystem convention.
+    - FILE_LOWER_SNAKE_CASE
+breaking:
+  use:
+    - FILE

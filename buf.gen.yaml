@@ -1,0 +1,25 @@
+# Pass 2 of scripts/gen-proto.sh: compile the entity protos and the merged
+# service protos into Go stubs under pb/.
+#
+# default_api_level=API_OPAQUE is required: the protoc-gen-orm-go helpers use
+# the opaque API (builders, Set*/Which*).
+version: v2
+inputs:
+  - directory: proto
+    paths:
+      - proto/gantry
+plugins:
+  - local: [go, tool, google.golang.org/protobuf/cmd/protoc-gen-go]
+    out: .
+    opt:
+      - module=github.com/lesomnus/gantry
+      - default_api_level=API_OPAQUE
+  - local: [go, tool, google.golang.org/grpc/cmd/protoc-gen-go-grpc]
+    out: .
+    opt:
+      - module=github.com/lesomnus/gantry
+  - local: protoc-gen-orm-go # built from $ORM_ROOT by scripts/gen-proto.sh
+    out: .
+    opt:
+      - module=github.com/lesomnus/gantry
+      - query.namer={{ .Name }}_query.g.go

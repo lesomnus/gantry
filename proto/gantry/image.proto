@@ -1,0 +1,60 @@
+edition = "2023";
+
+package gantry;
+
+import "gantry/store.proto";
+import "google/protobuf/timestamp.proto";
+import "orm.proto";
+
+option features.field_presence = IMPLICIT;
+option go_package = "github.com/lesomnus/gantry/pb";
+
+// Retention state of one image on one engine store — the image inventory
+// entry. Created and updated by gantry's usage watcher and job pipeline;
+// identity is (store, ref).
+message Image {
+  bytes id = 1 [(orm.field) = {
+    type: TYPE_UUID
+    key: true
+    default: ""
+  }];
+  Store store = 2 [(orm.edge) = {immutable: true}];
+  // Full local image reference, e.g. "cache.local/team/app:1.2".
+  string ref = 3 [(orm.field) = {immutable: true}];
+
+  // Derived from ref at creation.
+  string repo = 4 [(orm.field) = {immutable: true}];
+  string tag = 5 [(orm.field) = {immutable: true}];
+  // Resolved manifest digest, when known.
+  string digest = 6;
+
+  // Age clock for images never observed used.
+  google.protobuf.Timestamp first_seen = 7 [(orm.field) = {immutable: true}];
+  // Last time a container ran with this image; absent = never observed.
+  google.protobuf.Timestamp last_used = 8;
+  // Last time gantry pushed this ref to the engine.
+  google.protobuf.Timestamp last_distributed = 9;
+
+  // Derived: whether any pin currently protects this record.
+  bool pinned = 10;
+
+  option (orm.message) = {
+    rpc: {crud: true}
+    indexes: [
+      {
+        name: "locator"
+        unique: true
+        refs: [
+          {
+            name: "store"
+            number: 2
+          },
+          {
+            name: "ref"
+            number: 3
+          }
+        ]
+      }
+    ]
+  };
+}

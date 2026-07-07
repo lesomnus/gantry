@@ -1,0 +1,33 @@
+// Hand-written overlay merged onto the generated EventService by
+// scripts/gen-proto.sh (protobuf-merge). Adds the RPCs protoc-gen-orm-service
+// does not generate.
+edition = "2023";
+
+package gantry;
+
+import "gantry/event.proto";
+import "gantry/job.proto";
+import "google/protobuf/timestamp.proto";
+
+service EventService {
+  // List returns audit events newest-first.
+  rpc List(EventListRequest) returns (EventListResponse);
+}
+
+message EventListRequest {
+  EventType type = 1;
+  string store = 2;
+  string ref = 3;
+  // Terminal job state, for job_done events.
+  JobState state = 4;
+  // Events recorded at or after this instant.
+  google.protobuf.Timestamp since = 5;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message EventListResponse {
+  repeated Event items = 1;
+  string next_page_token = 2;
+}

@@ -1,0 +1,25 @@
+// Hand-written overlay merged onto the generated StoreService by
+// scripts/gen-proto.sh (protobuf-merge). Adds the RPCs protoc-gen-orm-service
+// does not generate.
+edition = "2023";
+
+package gantry;
+
+import "gantry/store.proto";
+
+service StoreService {
+  // List returns the declared stores, sorted by name.
+  rpc List(StoreListRequest) returns (StoreListResponse);
+}
+
+message StoreListRequest {
+  StoreKind kind = 1;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message StoreListResponse {
+  repeated Store items = 1;
+  string next_page_token = 2;
+}

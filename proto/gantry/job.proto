@@ -1,0 +1,123 @@
+edition = "2023";
+
+package gantry;
+
+import "gantry/store.proto";
+import "google/protobuf/timestamp.proto";
+import "orm.proto";
+
+option features.field_presence = IMPLICIT;
+option go_package = "github.com/lesomnus/gantry/pb";
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_PENDING = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_DONE = 3;
+  JOB_STATE_FAILED = 4;
+  JOB_STATE_CANCELED = 5;
+}
+
+enum VerifyMode {
+  VERIFY_MODE_UNSPECIFIED = 0;
+  VERIFY_MODE_OFF = 1;
+  VERIFY_MODE_VERIFY_IF_PRESENT = 2;
+  VERIFY_MODE_REQUIRE = 3;
+}
+
+enum TransferState {
+  TRANSFER_STATE_UNSPECIFIED = 0;
+  TRANSFER_STATE_PENDING = 1;
+  TRANSFER_STATE_RUNNING = 2;
+  TRANSFER_STATE_DONE = 3;
+  TRANSFER_STATE_EXISTS = 4;
+  TRANSFER_STATE_FAILED = 5;
+}
+
+enum LayerState {
+  LAYER_STATE_UNSPECIFIED = 0;
+  LAYER_STATE_PENDING = 1;
+  LAYER_STATE_PULLING = 2;
+  LAYER_STATE_DONE = 3;
+  LAYER_STATE_EXISTS = 4;
+  LAYER_STATE_FAILED = 5;
+}
+
+// Admission-time signature verification audit record; absent when
+// verification is disabled.
+message Verification {
+  VerifyMode mode = 1;
+  bool verified = 2;
+  // The digest the job was pinned to when verified.
+  string digest = 3;
+}
+
+// Per-blob progress of a transfer step.
+message Layer {
+  string digest = 1;
+  string platform = 2;
+  int64 total = 3;
+  int64 done = 4;
+  LayerState state = 5;
+}
+
+// One step of a job: a registry copy or an engine pull.
+message Transfer {
+  string store = 1;
+  StoreKind kind = 2;
+  string from = 3;
+  // The reference placed in the destination.
+  string ref = 4;
+  // Manifest/index digest the step was anchored to, when known.
+  string digest = 5;
+  TransferState state = 6;
+  int64 bytes_total = 7;
+  int64 bytes_done = 8;
+  repeated Layer layers = 9;
+  string error = 10;
+}
+
+// A move of one image from a source registry into a destination store.
+message Job {
+  // Server-generated, e.g. "job_1f2e...".
+  string id = 1 [(orm.field) = {
+    key: true
+    default: ""
+  }];
+  // Image reference to move, e.g. "docker.io/library/redis:7".
+  string ref = 2 [(orm.field) = {immutable: true}];
+  // Source registry; defaults to the ref's registry. Unlike the REST API,
+  // the gRPC surface addresses declared stores only — bare registry hosts
+  // (allow_unknown_stores) are not expressible through a StoreRef.
+  Store from = 3 [(orm.edge) = {
+    nullable: true
+    immutable: true
+  }];
+  // Destination store: a registry (gantry copies) or an engine (daemon pulls).
+  Store to = 4 [(orm.edge) = {immutable: true}];
+  // Registry destination: platforms to copy (empty = all). Engine
+  // destination: the single platform to pull (empty = daemon's).
+  repeated string platforms = 5 [(orm.field) = {immutable: true}];
+  // Copy source referrer artifacts (signatures) along with the image.
+  // Absent = server default (on when the job is verified).
+  bool copy_referrers = 6 [
+    features.field_presence = EXPLICIT,
+    (orm.field) = {immutable: true}
+  ];
+
+  JobState state = 7;
+  string error = 8;
+  Verification verification = 9;
+  repeated Transfer transfers = 10;
+
+  google.protobuf.Timestamp created_at = 11 [(orm.field) = {
+    immutable: true
+    default: ""
+  }];
+  google.protobuf.Timestamp started_at = 12;
+  google.protobuf.Timestamp ended_at = 13;
+
+  option (orm.message) = {
+    rpc: {crud: true}
+  };
+}

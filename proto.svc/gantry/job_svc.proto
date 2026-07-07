@@ -1,0 +1,34 @@
+// Hand-written overlay merged onto the generated JobService by
+// scripts/gen-proto.sh (protobuf-merge). Adds the RPCs protoc-gen-orm-service
+// does not generate.
+edition = "2023";
+
+package gantry;
+
+import "gantry/job.proto";
+import "google/protobuf/timestamp.proto";
+
+service JobService {
+  // List returns jobs newest-first.
+  rpc List(JobListRequest) returns (JobListResponse);
+  // Watch streams snapshots of the job as its transfers progress and ends
+  // after the snapshot that carries a terminal state. The gRPC counterpart
+  // of the REST SSE endpoint GET /v1/job/{id}/progress.
+  rpc Watch(JobRef) returns (stream Job);
+}
+
+message JobListRequest {
+  JobState state = 1;
+  // Substring match on the requested ref.
+  string ref = 2;
+  // Jobs created at or after this instant.
+  google.protobuf.Timestamp since = 3;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message JobListResponse {
+  repeated Job items = 1;
+  string next_page_token = 2;
+}

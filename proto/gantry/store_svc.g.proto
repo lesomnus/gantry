@@ -1,0 +1,79 @@
+edition = "2023";
+package gantry;
+
+import "gantry/store.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+service StoreService {
+  // Add creates a new Store
+  rpc Add(StoreAddRequest) returns (Store);
+  // Get retrieves a Store
+  rpc Get(StoreGetRequest) returns (Store);
+  // Patch updates an existing Store
+  rpc Patch(StorePatchRequest) returns (Store);
+  // Erase deletes a Store
+  rpc Erase(StoreRef) returns (google.protobuf.Empty);
+  // List returns the declared stores, sorted by name.
+  rpc List(StoreListRequest) returns (StoreListResponse);
+}
+
+message StoreAddRequest {
+  string name = 1 [features.field_presence = IMPLICIT];
+  StoreKind kind = 2 [features.field_presence = IMPLICIT];
+  string host = 3 [features.field_presence = IMPLICIT];
+  StoreMode mode = 4 [features.field_presence = IMPLICIT];
+  string address = 5 [features.field_presence = IMPLICIT];
+  string namespace = 6 [features.field_presence = IMPLICIT];
+  bool ready = 7 [features.field_presence = IMPLICIT];
+  string error = 8 [features.field_presence = IMPLICIT];
+  StoreCapabilities capabilities = 9;
+}
+
+message StoreGetRequest {
+  StoreRef ref = 1;
+  StoreSelect select = 2;
+}
+
+message StoreRef {
+  oneof key {
+    string name = 1;
+  }
+}
+
+message StoreSelect {
+  bool all = 1;
+  bool kind = 2;
+  bool host = 3;
+  bool mode = 4;
+  bool address = 5;
+  bool namespace = 6;
+  bool ready = 7;
+  bool error = 8;
+  bool capabilities = 9;
+}
+
+message StorePatchRequest {
+  StoreRef ref = 1;
+  string host = 5;
+  StoreMode mode = 7;
+  string address = 9;
+  string namespace = 11;
+  bool ready = 13;
+  string error = 15;
+  StoreCapabilities capabilities = 17;
+  bool capabilities_null = 18;
+}
+
+message StoreListRequest {
+  StoreKind kind = 1;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message StoreListResponse {
+  repeated Store items = 1;
+  string next_page_token = 2;
+}

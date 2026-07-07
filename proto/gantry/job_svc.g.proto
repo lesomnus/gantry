@@ -1,0 +1,96 @@
+edition = "2023";
+package gantry;
+
+import "gantry/job.proto";
+import "gantry/store_svc.g.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+service JobService {
+  // Add creates a new Job
+  rpc Add(JobAddRequest) returns (Job);
+  // Get retrieves a Job
+  rpc Get(JobGetRequest) returns (Job);
+  // Patch updates an existing Job
+  rpc Patch(JobPatchRequest) returns (Job);
+  // Erase deletes a Job
+  rpc Erase(JobRef) returns (google.protobuf.Empty);
+  // List returns jobs newest-first.
+  rpc List(JobListRequest) returns (JobListResponse);
+  // Watch streams snapshots of the job as its transfers progress and ends
+  // after the snapshot that carries a terminal state. The gRPC counterpart
+  // of the REST SSE endpoint GET /v1/job/{id}/progress.
+  rpc Watch(JobRef) returns (stream Job);
+}
+
+message JobAddRequest {
+  string id = 1;
+  string ref = 2 [features.field_presence = IMPLICIT];
+  StoreRef from = 3;
+  StoreRef to = 4;
+  repeated string platforms = 5;
+  bool copy_referrers = 6;
+  JobState state = 7 [features.field_presence = IMPLICIT];
+  string error = 8 [features.field_presence = IMPLICIT];
+  Verification verification = 9;
+  repeated Transfer transfers = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp started_at = 12;
+  google.protobuf.Timestamp ended_at = 13;
+}
+
+message JobGetRequest {
+  JobRef ref = 1;
+  JobSelect select = 2;
+}
+
+message JobRef {
+  oneof key {
+    string id = 1;
+  }
+}
+
+message JobSelect {
+  bool all = 1;
+  bool ref = 2;
+  StoreSelect from = 3;
+  StoreSelect to = 4;
+  bool platforms = 5;
+  bool copy_referrers = 6;
+  bool state = 7;
+  bool error = 8;
+  bool verification = 9;
+  bool transfers = 10;
+  bool created_at = 11;
+  bool started_at = 12;
+  bool ended_at = 13;
+}
+
+message JobPatchRequest {
+  JobRef ref = 1;
+  JobState state = 13;
+  string error = 15;
+  Verification verification = 17;
+  bool verification_null = 18;
+  repeated Transfer transfers = 19;
+  google.protobuf.Timestamp started_at = 23;
+  google.protobuf.Timestamp ended_at = 25;
+}
+
+message JobListRequest {
+  JobState state = 1;
+  // Substring match on the requested ref.
+  string ref = 2;
+  // Jobs created at or after this instant.
+  google.protobuf.Timestamp since = 3;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message JobListResponse {
+  repeated Job items = 1;
+  string next_page_token = 2;
+}

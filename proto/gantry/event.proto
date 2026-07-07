@@ -1,0 +1,65 @@
+edition = "2023";
+
+package gantry;
+
+import "gantry/job.proto";
+import "google/protobuf/timestamp.proto";
+import "orm.proto";
+
+option features.field_presence = IMPLICIT;
+option go_package = "github.com/lesomnus/gantry/pb";
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_JOB_ADMITTED = 1;
+  EVENT_TYPE_JOB_DONE = 2;
+  EVENT_TYPE_GC_APPLIED = 3;
+  EVENT_TYPE_IMAGE_PULLED = 4;
+  EVENT_TYPE_IMAGE_REMOVED = 5;
+  EVENT_TYPE_PINNED = 6;
+  EVENT_TYPE_UNPINNED = 7;
+}
+
+// Type-specific payload; which fields are set depends on the event type.
+message EventDetail {
+  // job_admitted: the source store.
+  string from = 1;
+  // job_done: the job id and total bytes moved.
+  string job = 2;
+  int64 bytes = 3;
+  // gc_applied: apply counters.
+  int32 deleted = 4;
+  int32 untagged = 5;
+  int32 reaped = 6;
+  int32 errors = 7;
+}
+
+// One entry of the append-only audit log. Written internally by gantry;
+// Add/Patch/Erase exist for the contract and for seeding fakes in tests.
+// The store is recorded by name (not an edge) so audit entries outlive
+// store re-configuration.
+message Event {
+  // Assigned from the log's monotonic sequence.
+  uint64 seq = 1 [(orm.field) = {
+    key: true
+    default: ""
+  }];
+  google.protobuf.Timestamp at = 2 [(orm.field) = {immutable: true}];
+  EventType type = 3 [(orm.field) = {immutable: true}];
+
+  string store = 4 [(orm.field) = {immutable: true}];
+  // Image reference; a pin value for pinned/unpinned, an image ID for
+  // untagged reaps.
+  string ref = 5 [(orm.field) = {immutable: true}];
+  // Terminal job state, on job_done.
+  JobState state = 6 [(orm.field) = {immutable: true}];
+  // Verified source digest, on job_admitted.
+  string digest = 7 [(orm.field) = {immutable: true}];
+  // Failure text, on job_done of a failed job.
+  string error = 8 [(orm.field) = {immutable: true}];
+  EventDetail detail = 9 [(orm.field) = {immutable: true}];
+
+  option (orm.message) = {
+    rpc: {crud: true}
+  };
+}

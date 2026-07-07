@@ -1,0 +1,98 @@
+edition = "2023";
+package gantry;
+
+import "gantry/image.proto";
+import "gantry/store_svc.g.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+service ImageService {
+  // Add creates a new Image
+  rpc Add(ImageAddRequest) returns (Image);
+  // Get retrieves a Image
+  rpc Get(ImageGetRequest) returns (Image);
+  // Patch updates an existing Image
+  rpc Patch(ImagePatchRequest) returns (Image);
+  // Erase deletes a Image
+  rpc Erase(ImageRef) returns (google.protobuf.Empty);
+  // List returns the image inventory of a store.
+  rpc List(ImageListRequest) returns (ImageListResponse);
+}
+
+message ImageAddRequest {
+  bytes id = 1;
+  StoreRef store = 2;
+  string ref = 3 [features.field_presence = IMPLICIT];
+  string repo = 4 [features.field_presence = IMPLICIT];
+  string tag = 5 [features.field_presence = IMPLICIT];
+  string digest = 6 [features.field_presence = IMPLICIT];
+  google.protobuf.Timestamp first_seen = 7;
+  google.protobuf.Timestamp last_used = 8;
+  google.protobuf.Timestamp last_distributed = 9;
+  bool pinned = 10 [features.field_presence = IMPLICIT];
+}
+
+message ImageGetRequest {
+  ImageRef ref = 1;
+  ImageSelect select = 2;
+}
+
+message ImageRef {
+  oneof key {
+    bytes id = 1;
+    ImageRefByLocator locator = 2;
+  }
+}
+
+message ImageRefByLocator {
+  StoreRef store = 2;
+  string ref = 3;
+}
+
+message ImageSelect {
+  bool all = 1;
+  StoreSelect store = 2;
+  bool ref = 3;
+  bool repo = 4;
+  bool tag = 5;
+  bool digest = 6;
+  bool first_seen = 7;
+  bool last_used = 8;
+  bool last_distributed = 9;
+  bool pinned = 10;
+}
+
+message ImagePatchRequest {
+  ImageRef ref = 1;
+  string digest = 11;
+  google.protobuf.Timestamp last_used = 15;
+  google.protobuf.Timestamp last_distributed = 17;
+  bool pinned = 19;
+}
+
+message ImageListRequest {
+  StoreRef store = 1;
+  // Exact match on the host-qualified repository.
+  string repo = 2;
+  // Exact match on the full reference.
+  string ref = 3;
+  bool pinned = 4;
+
+  int32 page_size = 10;
+  string page_token = 11;
+}
+
+message ImageListResponse {
+  repeated Image items = 1;
+  string next_page_token = 2;
+  // Present only on unfiltered lists, mirroring the REST endpoint.
+  repeated UntaggedImage untagged = 3;
+}
+
+// Reap clock of an image observed with no tags (docker engines only).
+message UntaggedImage {
+  string id = 1;
+  google.protobuf.Timestamp first_seen = 2;
+}

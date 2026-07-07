@@ -7,6 +7,7 @@ require (
 	github.com/containerd/containerd/api v1.11.1
 	github.com/containerd/containerd/v2 v2.3.2
 	github.com/containerd/errdefs v1.0.0
+	github.com/containerd/platforms v1.0.0-rc.4
 	github.com/containerd/typeurl/v2 v2.2.3
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/goccy/go-yaml v1.19.2
@@ -22,13 +23,14 @@ require (
 	github.com/notaryproject/notation-go v1.3.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
+	github.com/protobuf-orm/protobuf-orm v0.0.0-20260627113410-c97ccf1e9419
 	go.etcd.io/bbolt v1.5.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.43.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	go.opentelemetry.io/proto/otlp v1.10.0
-	google.golang.org/grpc v1.80.0
+	google.golang.org/grpc v1.81.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	oras.land/oras-go/v2 v2.6.1
 )
@@ -45,7 +47,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/containerd/platforms v1.0.0-rc.4 // indirect
 	github.com/containerd/plugin v1.1.0 // indirect
 	github.com/containerd/ttrpc v1.2.8 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
@@ -105,5 +106,11 @@ require (
 	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260406210006-6f92a3bedf2d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260406210006-6f92a3bedf2d // indirect
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.2 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
+)
+
+tool (
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc
+	google.golang.org/protobuf/cmd/protoc-gen-go
 )

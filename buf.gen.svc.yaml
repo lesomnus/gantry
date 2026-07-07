@@ -1,0 +1,12 @@
+# Pass 1 of scripts/gen-proto.sh: emit CRUD service definitions (*_svc.g.proto)
+# from the orm-annotated entity protos. The output is staged in .gen/svc, then
+# scripts/gen-proto.sh overlays proto.svc/gantry/*.proto onto it with
+# protobuf-merge and writes the result back into proto/gantry.
+version: v2
+inputs:
+  - directory: proto
+    paths:
+      - proto/gantry
+plugins:
+  - local: protoc-gen-orm-service # built from $ORM_ROOT by scripts/gen-proto.sh
+    out: .gen/svc
