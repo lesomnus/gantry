@@ -22,15 +22,16 @@ service JobService {
   // Watch streams snapshots of the job as its transfers progress and ends
   // after the snapshot that carries a terminal state. The gRPC counterpart
   // of the REST SSE endpoint GET /v1/job/{id}/progress.
-  rpc Watch(JobWatchRequest) returns (stream Job);
+  rpc Watch(JobRef) returns (stream Job);
   // Plan runs admission for a would-be job without submitting it: store
   // binding, rewrite, verification, and coalescing are all evaluated.
   rpc Plan(JobPlanRequest) returns (JobPlanResponse);
-  // Cancel stops a running job but keeps its record for inspection.
-  rpc Cancel(JobCancelRequest) returns (JobCancelResponse);
+  // Cancel stops a running job but keeps its record for inspection; the
+  // returned snapshot is taken right after the cancel is signaled.
+  rpc Cancel(JobRef) returns (Job);
   // Retry re-submits a terminal job's original request as a new job, with
   // fresh resolution and verification.
-  rpc Retry(JobRetryRequest) returns (JobRetryResponse);
+  rpc Retry(JobRef) returns (Job);
 }
 
 message JobAddRequest {
@@ -103,10 +104,6 @@ message JobListResponse {
   string next_page_token = 2;
 }
 
-message JobWatchRequest {
-  JobRef ref = 1;
-}
-
 // The same inputs as JobAddRequest, evaluated without submitting.
 message JobPlanRequest {
   string ref = 1;
@@ -132,22 +129,4 @@ message JobPlanResponse {
   Verification verification = 7;
   // The active job an identical submit would coalesce onto, if any.
   string coalesces = 8;
-}
-
-message JobCancelRequest {
-  JobRef ref = 1;
-}
-
-message JobCancelResponse {
-  // Snapshot taken right after the cancel was signaled.
-  Job job = 1;
-}
-
-message JobRetryRequest {
-  JobRef ref = 1;
-}
-
-message JobRetryResponse {
-  // The newly submitted job.
-  Job job = 1;
 }

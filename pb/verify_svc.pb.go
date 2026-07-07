@@ -13,6 +13,7 @@ package pb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	unsafe "unsafe"
@@ -24,49 +25,6 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
-
-type VerifyDescribeRequest struct {
-	state         protoimpl.MessageState `protogen:"opaque.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VerifyDescribeRequest) Reset() {
-	*x = VerifyDescribeRequest{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VerifyDescribeRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VerifyDescribeRequest) ProtoMessage() {}
-
-func (x *VerifyDescribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-type VerifyDescribeRequest_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-}
-
-func (b0 VerifyDescribeRequest_builder) Build() *VerifyDescribeRequest {
-	m0 := &VerifyDescribeRequest{}
-	b, x := &b0, m0
-	_, _ = b, x
-	return m0
-}
 
 type VerifyDescribeResponse struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
@@ -85,7 +43,7 @@ type VerifyDescribeResponse struct {
 
 func (x *VerifyDescribeResponse) Reset() {
 	*x = VerifyDescribeResponse{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[1]
+	mi := &file_gantry_verify_svc_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -97,7 +55,7 @@ func (x *VerifyDescribeResponse) String() string {
 func (*VerifyDescribeResponse) ProtoMessage() {}
 
 func (x *VerifyDescribeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[1]
+	mi := &file_gantry_verify_svc_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -304,7 +262,7 @@ type VerifyPolicy struct {
 
 func (x *VerifyPolicy) Reset() {
 	*x = VerifyPolicy{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[2]
+	mi := &file_gantry_verify_svc_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -316,7 +274,7 @@ func (x *VerifyPolicy) String() string {
 func (*VerifyPolicy) ProtoMessage() {}
 
 func (x *VerifyPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[2]
+	mi := &file_gantry_verify_svc_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -442,7 +400,7 @@ type VerifyAnchor struct {
 
 func (x *VerifyAnchor) Reset() {
 	*x = VerifyAnchor{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[3]
+	mi := &file_gantry_verify_svc_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -454,7 +412,7 @@ func (x *VerifyAnchor) String() string {
 func (*VerifyAnchor) ProtoMessage() {}
 
 func (x *VerifyAnchor) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[3]
+	mi := &file_gantry_verify_svc_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -578,7 +536,7 @@ type VerifyCheckRequest struct {
 
 func (x *VerifyCheckRequest) Reset() {
 	*x = VerifyCheckRequest{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[4]
+	mi := &file_gantry_verify_svc_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +548,7 @@ func (x *VerifyCheckRequest) String() string {
 func (*VerifyCheckRequest) ProtoMessage() {}
 
 func (x *VerifyCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[4]
+	mi := &file_gantry_verify_svc_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -684,7 +642,7 @@ type VerifyCheckResponse struct {
 
 func (x *VerifyCheckResponse) Reset() {
 	*x = VerifyCheckResponse{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[5]
+	mi := &file_gantry_verify_svc_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -696,7 +654,7 @@ func (x *VerifyCheckResponse) String() string {
 func (*VerifyCheckResponse) ProtoMessage() {}
 
 func (x *VerifyCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[5]
+	mi := &file_gantry_verify_svc_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -847,98 +805,11 @@ func (b0 VerifyCheckResponse_builder) Build() *VerifyCheckResponse {
 	return m0
 }
 
-type VerifyReloadRequest struct {
-	state         protoimpl.MessageState `protogen:"opaque.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VerifyReloadRequest) Reset() {
-	*x = VerifyReloadRequest{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VerifyReloadRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VerifyReloadRequest) ProtoMessage() {}
-
-func (x *VerifyReloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-type VerifyReloadRequest_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-}
-
-func (b0 VerifyReloadRequest_builder) Build() *VerifyReloadRequest {
-	m0 := &VerifyReloadRequest{}
-	b, x := &b0, m0
-	_, _ = b, x
-	return m0
-}
-
-type VerifyReloadResponse struct {
-	state         protoimpl.MessageState `protogen:"opaque.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VerifyReloadResponse) Reset() {
-	*x = VerifyReloadResponse{}
-	mi := &file_gantry_verify_svc_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VerifyReloadResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VerifyReloadResponse) ProtoMessage() {}
-
-func (x *VerifyReloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_verify_svc_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-type VerifyReloadResponse_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-}
-
-func (b0 VerifyReloadResponse_builder) Build() *VerifyReloadResponse {
-	m0 := &VerifyReloadResponse{}
-	b, x := &b0, m0
-	_, _ = b, x
-	return m0
-}
-
 var File_gantry_verify_svc_proto protoreflect.FileDescriptor
 
 const file_gantry_verify_svc_proto_rawDesc = "" +
 	"\n" +
-	"\x17gantry/verify_svc.proto\x12\x06gantry\x1a\x10gantry/job.proto\x1a\x18gantry/store_svc.g.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x17\n" +
-	"\x15VerifyDescribeRequest\"\x81\x03\n" +
+	"\x17gantry/verify_svc.proto\x12\x06gantry\x1a\x10gantry/job.proto\x1a\x18gantry/store_svc.g.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x81\x03\n" +
 	"\x16VerifyDescribeResponse\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12&\n" +
@@ -966,44 +837,40 @@ const file_gantry_verify_svc_proto_rawDesc = "" +
 	"\bverified\x18\x01 \x01(\bR\bverified\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x16\n" +
 	"\x06digest\x18\x03 \x01(\tR\x06digest\x12&\n" +
-	"\x04mode\x18\x04 \x01(\x0e2\x12.gantry.VerifyModeR\x04mode\"\x15\n" +
-	"\x13VerifyReloadRequest\"\x16\n" +
-	"\x14VerifyReloadResponse2\xe1\x01\n" +
-	"\rVerifyService\x12I\n" +
-	"\bDescribe\x12\x1d.gantry.VerifyDescribeRequest\x1a\x1e.gantry.VerifyDescribeResponse\x12@\n" +
-	"\x05Check\x12\x1a.gantry.VerifyCheckRequest\x1a\x1b.gantry.VerifyCheckResponse\x12C\n" +
-	"\x06Reload\x12\x1b.gantry.VerifyReloadRequest\x1a\x1c.gantry.VerifyReloadResponseB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
+	"\x04mode\x18\x04 \x01(\x0e2\x12.gantry.VerifyModeR\x04mode2\xcf\x01\n" +
+	"\rVerifyService\x12B\n" +
+	"\bDescribe\x12\x16.google.protobuf.Empty\x1a\x1e.gantry.VerifyDescribeResponse\x12@\n" +
+	"\x05Check\x12\x1a.gantry.VerifyCheckRequest\x1a\x1b.gantry.VerifyCheckResponse\x128\n" +
+	"\x06Reload\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.EmptyB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
 
-var file_gantry_verify_svc_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_gantry_verify_svc_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_gantry_verify_svc_proto_goTypes = []any{
-	(*VerifyDescribeRequest)(nil),  // 0: gantry.VerifyDescribeRequest
-	(*VerifyDescribeResponse)(nil), // 1: gantry.VerifyDescribeResponse
-	(*VerifyPolicy)(nil),           // 2: gantry.VerifyPolicy
-	(*VerifyAnchor)(nil),           // 3: gantry.VerifyAnchor
-	(*VerifyCheckRequest)(nil),     // 4: gantry.VerifyCheckRequest
-	(*VerifyCheckResponse)(nil),    // 5: gantry.VerifyCheckResponse
-	(*VerifyReloadRequest)(nil),    // 6: gantry.VerifyReloadRequest
-	(*VerifyReloadResponse)(nil),   // 7: gantry.VerifyReloadResponse
-	nil,                            // 8: gantry.VerifyDescribeResponse.StoresEntry
-	(VerifyMode)(0),                // 9: gantry.VerifyMode
-	(*timestamppb.Timestamp)(nil),  // 10: google.protobuf.Timestamp
-	(*StoreRef)(nil),               // 11: gantry.StoreRef
+	(*VerifyDescribeResponse)(nil), // 0: gantry.VerifyDescribeResponse
+	(*VerifyPolicy)(nil),           // 1: gantry.VerifyPolicy
+	(*VerifyAnchor)(nil),           // 2: gantry.VerifyAnchor
+	(*VerifyCheckRequest)(nil),     // 3: gantry.VerifyCheckRequest
+	(*VerifyCheckResponse)(nil),    // 4: gantry.VerifyCheckResponse
+	nil,                            // 5: gantry.VerifyDescribeResponse.StoresEntry
+	(VerifyMode)(0),                // 6: gantry.VerifyMode
+	(*timestamppb.Timestamp)(nil),  // 7: google.protobuf.Timestamp
+	(*StoreRef)(nil),               // 8: gantry.StoreRef
+	(*emptypb.Empty)(nil),          // 9: google.protobuf.Empty
 }
 var file_gantry_verify_svc_proto_depIdxs = []int32{
-	9,  // 0: gantry.VerifyDescribeResponse.mode:type_name -> gantry.VerifyMode
-	2,  // 1: gantry.VerifyDescribeResponse.policies:type_name -> gantry.VerifyPolicy
-	3,  // 2: gantry.VerifyDescribeResponse.anchors:type_name -> gantry.VerifyAnchor
-	8,  // 3: gantry.VerifyDescribeResponse.stores:type_name -> gantry.VerifyDescribeResponse.StoresEntry
-	10, // 4: gantry.VerifyAnchor.not_after:type_name -> google.protobuf.Timestamp
-	11, // 5: gantry.VerifyCheckRequest.from:type_name -> gantry.StoreRef
-	9,  // 6: gantry.VerifyCheckResponse.mode:type_name -> gantry.VerifyMode
-	9,  // 7: gantry.VerifyDescribeResponse.StoresEntry.value:type_name -> gantry.VerifyMode
-	0,  // 8: gantry.VerifyService.Describe:input_type -> gantry.VerifyDescribeRequest
-	4,  // 9: gantry.VerifyService.Check:input_type -> gantry.VerifyCheckRequest
-	6,  // 10: gantry.VerifyService.Reload:input_type -> gantry.VerifyReloadRequest
-	1,  // 11: gantry.VerifyService.Describe:output_type -> gantry.VerifyDescribeResponse
-	5,  // 12: gantry.VerifyService.Check:output_type -> gantry.VerifyCheckResponse
-	7,  // 13: gantry.VerifyService.Reload:output_type -> gantry.VerifyReloadResponse
+	6,  // 0: gantry.VerifyDescribeResponse.mode:type_name -> gantry.VerifyMode
+	1,  // 1: gantry.VerifyDescribeResponse.policies:type_name -> gantry.VerifyPolicy
+	2,  // 2: gantry.VerifyDescribeResponse.anchors:type_name -> gantry.VerifyAnchor
+	5,  // 3: gantry.VerifyDescribeResponse.stores:type_name -> gantry.VerifyDescribeResponse.StoresEntry
+	7,  // 4: gantry.VerifyAnchor.not_after:type_name -> google.protobuf.Timestamp
+	8,  // 5: gantry.VerifyCheckRequest.from:type_name -> gantry.StoreRef
+	6,  // 6: gantry.VerifyCheckResponse.mode:type_name -> gantry.VerifyMode
+	6,  // 7: gantry.VerifyDescribeResponse.StoresEntry.value:type_name -> gantry.VerifyMode
+	9,  // 8: gantry.VerifyService.Describe:input_type -> google.protobuf.Empty
+	3,  // 9: gantry.VerifyService.Check:input_type -> gantry.VerifyCheckRequest
+	9,  // 10: gantry.VerifyService.Reload:input_type -> google.protobuf.Empty
+	0,  // 11: gantry.VerifyService.Describe:output_type -> gantry.VerifyDescribeResponse
+	4,  // 12: gantry.VerifyService.Check:output_type -> gantry.VerifyCheckResponse
+	9,  // 13: gantry.VerifyService.Reload:output_type -> google.protobuf.Empty
 	11, // [11:14] is the sub-list for method output_type
 	8,  // [8:11] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
@@ -1024,7 +891,7 @@ func file_gantry_verify_svc_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gantry_verify_svc_proto_rawDesc), len(file_gantry_verify_svc_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

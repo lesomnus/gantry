@@ -1,0 +1,83 @@
+// Retention GC types, referenced by the StoreService GC RPCs (see
+// proto.svc/gantry/store_svc.proto). Types only — the RPCs live on
+// StoreService since GC is bound to a store.
+edition = "2023";
+
+package gantry;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+enum GcDeleteReason {
+  GC_DELETE_REASON_UNSPECIFIED = 0;
+  GC_DELETE_REASON_AGE_EXCEEDED = 1;
+  GC_DELETE_REASON_MAX_N_EXCEEDED = 2;
+  GC_DELETE_REASON_UNTAGGED = 3;
+}
+
+enum GcKeepReason {
+  GC_KEEP_REASON_UNSPECIFIED = 0;
+  GC_KEEP_REASON_IN_USE = 1;
+  GC_KEEP_REASON_PINNED = 2;
+  GC_KEEP_REASON_KEEP_N_RECENT = 3;
+  GC_KEEP_REASON_WITHIN_MAX_AGE = 4;
+  GC_KEEP_REASON_GRACE = 5;
+  GC_KEEP_REASON_AGE_GC_DISABLED = 6;
+  GC_KEEP_REASON_UNMANAGED = 7;
+  GC_KEEP_REASON_UNTAGGED_GRACE = 8;
+  GC_KEEP_REASON_DIGEST_TRACKED = 9;
+}
+
+message GcSchedule {
+  google.protobuf.Duration interval = 1;
+  google.protobuf.Duration min_interval = 2;
+  google.protobuf.Duration grace = 3;
+}
+
+message GcRule {
+  string repo = 1;
+  google.protobuf.Duration max_age = 2;
+  int32 keep_n = 3;
+  int32 max_n = 4;
+  repeated string pins = 5;
+}
+
+// One-shot policy override; unset fields keep the store's configured value,
+// zero values disable the corresponding mechanism.
+message GcOverride {
+  google.protobuf.Duration max_age = 1;
+  int32 keep_n = 2;
+  int32 max_n = 3;
+  repeated string pins = 4;
+  google.protobuf.Duration untagged_after = 5;
+}
+
+message GcCandidate {
+  string ref = 1;
+  string digest = 2;
+  // Set for untagged-reap candidates.
+  string image_id = 3;
+  google.protobuf.Timestamp last_used = 4;
+  GcDeleteReason reason = 5;
+}
+
+message GcKept {
+  string ref = 1;
+  GcKeepReason reason = 2;
+}
+
+// Health of the usage-event stream that stamps last_used on the store's
+// images. A dead stream freezes last_used and slowly turns age-GC against
+// hot images, so it is reported as part of the GC status.
+message GcWatcherStatus {
+  bool connected = 1;
+  google.protobuf.Timestamp watching_since = 2;
+  // Receipt time of the last usage event.
+  google.protobuf.Timestamp last_event_at = 3;
+  google.protobuf.Timestamp last_seed_at = 4;
+  // Times the event stream ended and was re-established.
+  int32 reconnects = 5;
+  string last_error = 6;
+}

@@ -20,15 +20,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	StoreService_Add_FullMethodName     = "/gantry.StoreService/Add"
-	StoreService_Get_FullMethodName     = "/gantry.StoreService/Get"
-	StoreService_Patch_FullMethodName   = "/gantry.StoreService/Patch"
-	StoreService_Erase_FullMethodName   = "/gantry.StoreService/Erase"
-	StoreService_List_FullMethodName    = "/gantry.StoreService/List"
-	StoreService_Pull_FullMethodName    = "/gantry.StoreService/Pull"
-	StoreService_Remove_FullMethodName  = "/gantry.StoreService/Remove"
-	StoreService_Health_FullMethodName  = "/gantry.StoreService/Health"
-	StoreService_Watcher_FullMethodName = "/gantry.StoreService/Watcher"
+	StoreService_Add_FullMethodName      = "/gantry.StoreService/Add"
+	StoreService_Get_FullMethodName      = "/gantry.StoreService/Get"
+	StoreService_Patch_FullMethodName    = "/gantry.StoreService/Patch"
+	StoreService_Erase_FullMethodName    = "/gantry.StoreService/Erase"
+	StoreService_List_FullMethodName     = "/gantry.StoreService/List"
+	StoreService_Pull_FullMethodName     = "/gantry.StoreService/Pull"
+	StoreService_Remove_FullMethodName   = "/gantry.StoreService/Remove"
+	StoreService_Health_FullMethodName   = "/gantry.StoreService/Health"
+	StoreService_GcStatus_FullMethodName = "/gantry.StoreService/GcStatus"
+	StoreService_GcPlan_FullMethodName   = "/gantry.StoreService/GcPlan"
+	StoreService_GcApply_FullMethodName  = "/gantry.StoreService/GcApply"
 )
 
 // StoreServiceClient is the client API for StoreService service.
@@ -51,10 +53,15 @@ type StoreServiceClient interface {
 	// index.
 	Remove(ctx context.Context, in *StoreRemoveRequest, opts ...grpc.CallOption) (*StoreRemoveResponse, error)
 	// Health probes the store, served from a short-lived cache.
-	Health(ctx context.Context, in *StoreHealthRequest, opts ...grpc.CallOption) (*StoreHealthResponse, error)
-	// Watcher reports the health of the usage-event stream that stamps
-	// last_used on the store's images.
-	Watcher(ctx context.Context, in *StoreWatcherRequest, opts ...grpc.CallOption) (*StoreWatcherResponse, error)
+	Health(ctx context.Context, in *StoreRef, opts ...grpc.CallOption) (*StoreHealthResponse, error)
+	// GcStatus reports the store's GC scheduler, retention rules, and the
+	// usage-watcher health.
+	GcStatus(ctx context.Context, in *StoreRef, opts ...grpc.CallOption) (*StoreGcStatusResponse, error)
+	// GcPlan evaluates the store's retention policy without deleting
+	// anything.
+	GcPlan(ctx context.Context, in *StoreGcRequest, opts ...grpc.CallOption) (*StoreGcPlanResponse, error)
+	// GcApply evaluates and executes the deletions.
+	GcApply(ctx context.Context, in *StoreGcRequest, opts ...grpc.CallOption) (*StoreGcApplyResponse, error)
 }
 
 type storeServiceClient struct {
@@ -135,7 +142,7 @@ func (c *storeServiceClient) Remove(ctx context.Context, in *StoreRemoveRequest,
 	return out, nil
 }
 
-func (c *storeServiceClient) Health(ctx context.Context, in *StoreHealthRequest, opts ...grpc.CallOption) (*StoreHealthResponse, error) {
+func (c *storeServiceClient) Health(ctx context.Context, in *StoreRef, opts ...grpc.CallOption) (*StoreHealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StoreHealthResponse)
 	err := c.cc.Invoke(ctx, StoreService_Health_FullMethodName, in, out, cOpts...)
@@ -145,10 +152,30 @@ func (c *storeServiceClient) Health(ctx context.Context, in *StoreHealthRequest,
 	return out, nil
 }
 
-func (c *storeServiceClient) Watcher(ctx context.Context, in *StoreWatcherRequest, opts ...grpc.CallOption) (*StoreWatcherResponse, error) {
+func (c *storeServiceClient) GcStatus(ctx context.Context, in *StoreRef, opts ...grpc.CallOption) (*StoreGcStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StoreWatcherResponse)
-	err := c.cc.Invoke(ctx, StoreService_Watcher_FullMethodName, in, out, cOpts...)
+	out := new(StoreGcStatusResponse)
+	err := c.cc.Invoke(ctx, StoreService_GcStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storeServiceClient) GcPlan(ctx context.Context, in *StoreGcRequest, opts ...grpc.CallOption) (*StoreGcPlanResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StoreGcPlanResponse)
+	err := c.cc.Invoke(ctx, StoreService_GcPlan_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storeServiceClient) GcApply(ctx context.Context, in *StoreGcRequest, opts ...grpc.CallOption) (*StoreGcApplyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StoreGcApplyResponse)
+	err := c.cc.Invoke(ctx, StoreService_GcApply_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +202,15 @@ type StoreServiceServer interface {
 	// index.
 	Remove(context.Context, *StoreRemoveRequest) (*StoreRemoveResponse, error)
 	// Health probes the store, served from a short-lived cache.
-	Health(context.Context, *StoreHealthRequest) (*StoreHealthResponse, error)
-	// Watcher reports the health of the usage-event stream that stamps
-	// last_used on the store's images.
-	Watcher(context.Context, *StoreWatcherRequest) (*StoreWatcherResponse, error)
+	Health(context.Context, *StoreRef) (*StoreHealthResponse, error)
+	// GcStatus reports the store's GC scheduler, retention rules, and the
+	// usage-watcher health.
+	GcStatus(context.Context, *StoreRef) (*StoreGcStatusResponse, error)
+	// GcPlan evaluates the store's retention policy without deleting
+	// anything.
+	GcPlan(context.Context, *StoreGcRequest) (*StoreGcPlanResponse, error)
+	// GcApply evaluates and executes the deletions.
+	GcApply(context.Context, *StoreGcRequest) (*StoreGcApplyResponse, error)
 	mustEmbedUnimplementedStoreServiceServer()
 }
 
@@ -210,11 +242,17 @@ func (UnimplementedStoreServiceServer) Pull(context.Context, *StorePullRequest) 
 func (UnimplementedStoreServiceServer) Remove(context.Context, *StoreRemoveRequest) (*StoreRemoveResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Remove not implemented")
 }
-func (UnimplementedStoreServiceServer) Health(context.Context, *StoreHealthRequest) (*StoreHealthResponse, error) {
+func (UnimplementedStoreServiceServer) Health(context.Context, *StoreRef) (*StoreHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
 }
-func (UnimplementedStoreServiceServer) Watcher(context.Context, *StoreWatcherRequest) (*StoreWatcherResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Watcher not implemented")
+func (UnimplementedStoreServiceServer) GcStatus(context.Context, *StoreRef) (*StoreGcStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GcStatus not implemented")
+}
+func (UnimplementedStoreServiceServer) GcPlan(context.Context, *StoreGcRequest) (*StoreGcPlanResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GcPlan not implemented")
+}
+func (UnimplementedStoreServiceServer) GcApply(context.Context, *StoreGcRequest) (*StoreGcApplyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GcApply not implemented")
 }
 func (UnimplementedStoreServiceServer) mustEmbedUnimplementedStoreServiceServer() {}
 func (UnimplementedStoreServiceServer) testEmbeddedByValue()                      {}
@@ -364,7 +402,7 @@ func _StoreService_Remove_Handler(srv interface{}, ctx context.Context, dec func
 }
 
 func _StoreService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StoreHealthRequest)
+	in := new(StoreRef)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -376,25 +414,61 @@ func _StoreService_Health_Handler(srv interface{}, ctx context.Context, dec func
 		FullMethod: StoreService_Health_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StoreServiceServer).Health(ctx, req.(*StoreHealthRequest))
+		return srv.(StoreServiceServer).Health(ctx, req.(*StoreRef))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _StoreService_Watcher_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StoreWatcherRequest)
+func _StoreService_GcStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StoreRef)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(StoreServiceServer).Watcher(ctx, in)
+		return srv.(StoreServiceServer).GcStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: StoreService_Watcher_FullMethodName,
+		FullMethod: StoreService_GcStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StoreServiceServer).Watcher(ctx, req.(*StoreWatcherRequest))
+		return srv.(StoreServiceServer).GcStatus(ctx, req.(*StoreRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StoreService_GcPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StoreGcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoreServiceServer).GcPlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StoreService_GcPlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoreServiceServer).GcPlan(ctx, req.(*StoreGcRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StoreService_GcApply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StoreGcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoreServiceServer).GcApply(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StoreService_GcApply_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoreServiceServer).GcApply(ctx, req.(*StoreGcRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -439,8 +513,16 @@ var StoreService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _StoreService_Health_Handler,
 		},
 		{
-			MethodName: "Watcher",
-			Handler:    _StoreService_Watcher_Handler,
+			MethodName: "GcStatus",
+			Handler:    _StoreService_GcStatus_Handler,
+		},
+		{
+			MethodName: "GcPlan",
+			Handler:    _StoreService_GcPlan_Handler,
+		},
+		{
+			MethodName: "GcApply",
+			Handler:    _StoreService_GcApply_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

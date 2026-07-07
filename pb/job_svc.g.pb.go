@@ -1543,74 +1543,6 @@ func (b0 JobListResponse_builder) Build() *JobListResponse {
 	return m0
 }
 
-type JobWatchRequest struct {
-	state          protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Ref *JobRef                `protobuf:"bytes,1,opt,name=ref"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *JobWatchRequest) Reset() {
-	*x = JobWatchRequest{}
-	mi := &file_gantry_job_svc_g_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *JobWatchRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*JobWatchRequest) ProtoMessage() {}
-
-func (x *JobWatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_job_svc_g_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-func (x *JobWatchRequest) GetRef() *JobRef {
-	if x != nil {
-		return x.xxx_hidden_Ref
-	}
-	return nil
-}
-
-func (x *JobWatchRequest) SetRef(v *JobRef) {
-	x.xxx_hidden_Ref = v
-}
-
-func (x *JobWatchRequest) HasRef() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_Ref != nil
-}
-
-func (x *JobWatchRequest) ClearRef() {
-	x.xxx_hidden_Ref = nil
-}
-
-type JobWatchRequest_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-	Ref *JobRef
-}
-
-func (b0 JobWatchRequest_builder) Build() *JobWatchRequest {
-	m0 := &JobWatchRequest{}
-	b, x := &b0, m0
-	_, _ = b, x
-	x.xxx_hidden_Ref = b.Ref
-	return m0
-}
-
 // The same inputs as JobAddRequest, evaluated without submitting.
 type JobPlanRequest struct {
 	state                    protoimpl.MessageState `protogen:"opaque.v1"`
@@ -1627,7 +1559,7 @@ type JobPlanRequest struct {
 
 func (x *JobPlanRequest) Reset() {
 	*x = JobPlanRequest{}
-	mi := &file_gantry_job_svc_g_proto_msgTypes[8]
+	mi := &file_gantry_job_svc_g_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1639,7 +1571,7 @@ func (x *JobPlanRequest) String() string {
 func (*JobPlanRequest) ProtoMessage() {}
 
 func (x *JobPlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_job_svc_g_proto_msgTypes[8]
+	mi := &file_gantry_job_svc_g_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1802,7 +1734,7 @@ type JobPlanResponse struct {
 
 func (x *JobPlanResponse) Reset() {
 	*x = JobPlanResponse{}
-	mi := &file_gantry_job_svc_g_proto_msgTypes[9]
+	mi := &file_gantry_job_svc_g_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1814,7 +1746,7 @@ func (x *JobPlanResponse) String() string {
 func (*JobPlanResponse) ProtoMessage() {}
 
 func (x *JobPlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_job_svc_g_proto_msgTypes[9]
+	mi := &file_gantry_job_svc_g_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2070,280 +2002,6 @@ func (b0 JobPlanResponse_builder) Build() *JobPlanResponse {
 	return m0
 }
 
-type JobCancelRequest struct {
-	state          protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Ref *JobRef                `protobuf:"bytes,1,opt,name=ref"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *JobCancelRequest) Reset() {
-	*x = JobCancelRequest{}
-	mi := &file_gantry_job_svc_g_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *JobCancelRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*JobCancelRequest) ProtoMessage() {}
-
-func (x *JobCancelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_job_svc_g_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-func (x *JobCancelRequest) GetRef() *JobRef {
-	if x != nil {
-		return x.xxx_hidden_Ref
-	}
-	return nil
-}
-
-func (x *JobCancelRequest) SetRef(v *JobRef) {
-	x.xxx_hidden_Ref = v
-}
-
-func (x *JobCancelRequest) HasRef() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_Ref != nil
-}
-
-func (x *JobCancelRequest) ClearRef() {
-	x.xxx_hidden_Ref = nil
-}
-
-type JobCancelRequest_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-	Ref *JobRef
-}
-
-func (b0 JobCancelRequest_builder) Build() *JobCancelRequest {
-	m0 := &JobCancelRequest{}
-	b, x := &b0, m0
-	_, _ = b, x
-	x.xxx_hidden_Ref = b.Ref
-	return m0
-}
-
-type JobCancelResponse struct {
-	state          protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Job *Job                   `protobuf:"bytes,1,opt,name=job"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *JobCancelResponse) Reset() {
-	*x = JobCancelResponse{}
-	mi := &file_gantry_job_svc_g_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *JobCancelResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*JobCancelResponse) ProtoMessage() {}
-
-func (x *JobCancelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_job_svc_g_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-func (x *JobCancelResponse) GetJob() *Job {
-	if x != nil {
-		return x.xxx_hidden_Job
-	}
-	return nil
-}
-
-func (x *JobCancelResponse) SetJob(v *Job) {
-	x.xxx_hidden_Job = v
-}
-
-func (x *JobCancelResponse) HasJob() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_Job != nil
-}
-
-func (x *JobCancelResponse) ClearJob() {
-	x.xxx_hidden_Job = nil
-}
-
-type JobCancelResponse_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-	// Snapshot taken right after the cancel was signaled.
-	Job *Job
-}
-
-func (b0 JobCancelResponse_builder) Build() *JobCancelResponse {
-	m0 := &JobCancelResponse{}
-	b, x := &b0, m0
-	_, _ = b, x
-	x.xxx_hidden_Job = b.Job
-	return m0
-}
-
-type JobRetryRequest struct {
-	state          protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Ref *JobRef                `protobuf:"bytes,1,opt,name=ref"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *JobRetryRequest) Reset() {
-	*x = JobRetryRequest{}
-	mi := &file_gantry_job_svc_g_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *JobRetryRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*JobRetryRequest) ProtoMessage() {}
-
-func (x *JobRetryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_job_svc_g_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-func (x *JobRetryRequest) GetRef() *JobRef {
-	if x != nil {
-		return x.xxx_hidden_Ref
-	}
-	return nil
-}
-
-func (x *JobRetryRequest) SetRef(v *JobRef) {
-	x.xxx_hidden_Ref = v
-}
-
-func (x *JobRetryRequest) HasRef() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_Ref != nil
-}
-
-func (x *JobRetryRequest) ClearRef() {
-	x.xxx_hidden_Ref = nil
-}
-
-type JobRetryRequest_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-	Ref *JobRef
-}
-
-func (b0 JobRetryRequest_builder) Build() *JobRetryRequest {
-	m0 := &JobRetryRequest{}
-	b, x := &b0, m0
-	_, _ = b, x
-	x.xxx_hidden_Ref = b.Ref
-	return m0
-}
-
-type JobRetryResponse struct {
-	state          protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Job *Job                   `protobuf:"bytes,1,opt,name=job"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *JobRetryResponse) Reset() {
-	*x = JobRetryResponse{}
-	mi := &file_gantry_job_svc_g_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *JobRetryResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*JobRetryResponse) ProtoMessage() {}
-
-func (x *JobRetryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gantry_job_svc_g_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-func (x *JobRetryResponse) GetJob() *Job {
-	if x != nil {
-		return x.xxx_hidden_Job
-	}
-	return nil
-}
-
-func (x *JobRetryResponse) SetJob(v *Job) {
-	x.xxx_hidden_Job = v
-}
-
-func (x *JobRetryResponse) HasJob() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_Job != nil
-}
-
-func (x *JobRetryResponse) ClearJob() {
-	x.xxx_hidden_Job = nil
-}
-
-type JobRetryResponse_builder struct {
-	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
-
-	// The newly submitted job.
-	Job *Job
-}
-
-func (b0 JobRetryResponse_builder) Build() *JobRetryResponse {
-	m0 := &JobRetryResponse{}
-	b, x := &b0, m0
-	_, _ = b, x
-	x.xxx_hidden_Job = b.Job
-	return m0
-}
-
 var File_gantry_job_svc_g_proto protoreflect.FileDescriptor
 
 const file_gantry_job_svc_g_proto_rawDesc = "" +
@@ -2409,9 +2067,7 @@ const file_gantry_job_svc_g_proto_rawDesc = "" +
 	"page_token\x18\v \x01(\tR\tpageToken\"\\\n" +
 	"\x0fJobListResponse\x12!\n" +
 	"\x05items\x18\x01 \x03(\v2\v.gantry.JobR\x05items\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"3\n" +
-	"\x0fJobWatchRequest\x12 \n" +
-	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.JobRefR\x03ref\"\xaf\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xaf\x01\n" +
 	"\x0eJobPlanRequest\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12$\n" +
 	"\x04from\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x04from\x12 \n" +
@@ -2426,28 +2082,20 @@ const file_gantry_job_svc_g_proto_rawDesc = "" +
 	"\tplatforms\x18\x05 \x03(\tR\tplatforms\x12%\n" +
 	"\x0ecopy_referrers\x18\x06 \x01(\bR\rcopyReferrers\x128\n" +
 	"\fverification\x18\a \x01(\v2\x14.gantry.VerificationR\fverification\x12\x1c\n" +
-	"\tcoalesces\x18\b \x01(\tR\tcoalesces\"4\n" +
-	"\x10JobCancelRequest\x12 \n" +
-	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.JobRefR\x03ref\"2\n" +
-	"\x11JobCancelResponse\x12\x1d\n" +
-	"\x03job\x18\x01 \x01(\v2\v.gantry.JobR\x03job\"3\n" +
-	"\x0fJobRetryRequest\x12 \n" +
-	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.JobRefR\x03ref\"1\n" +
-	"\x10JobRetryResponse\x12\x1d\n" +
-	"\x03job\x18\x01 \x01(\v2\v.gantry.JobR\x03job2\xe0\x03\n" +
+	"\tcoalesces\x18\b \x01(\tR\tcoalesces2\xa9\x03\n" +
 	"\n" +
 	"JobService\x12)\n" +
 	"\x03Add\x12\x15.gantry.JobAddRequest\x1a\v.gantry.Job\x12)\n" +
 	"\x03Get\x12\x15.gantry.JobGetRequest\x1a\v.gantry.Job\x12-\n" +
 	"\x05Patch\x12\x17.gantry.JobPatchRequest\x1a\v.gantry.Job\x12/\n" +
 	"\x05Erase\x12\x0e.gantry.JobRef\x1a\x16.google.protobuf.Empty\x127\n" +
-	"\x04List\x12\x16.gantry.JobListRequest\x1a\x17.gantry.JobListResponse\x12/\n" +
-	"\x05Watch\x12\x17.gantry.JobWatchRequest\x1a\v.gantry.Job0\x01\x127\n" +
-	"\x04Plan\x12\x16.gantry.JobPlanRequest\x1a\x17.gantry.JobPlanResponse\x12=\n" +
-	"\x06Cancel\x12\x18.gantry.JobCancelRequest\x1a\x19.gantry.JobCancelResponse\x12:\n" +
-	"\x05Retry\x12\x17.gantry.JobRetryRequest\x1a\x18.gantry.JobRetryResponseB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
+	"\x04List\x12\x16.gantry.JobListRequest\x1a\x17.gantry.JobListResponse\x12&\n" +
+	"\x05Watch\x12\x0e.gantry.JobRef\x1a\v.gantry.Job0\x01\x127\n" +
+	"\x04Plan\x12\x16.gantry.JobPlanRequest\x1a\x17.gantry.JobPlanResponse\x12%\n" +
+	"\x06Cancel\x12\x0e.gantry.JobRef\x1a\v.gantry.Job\x12$\n" +
+	"\x05Retry\x12\x0e.gantry.JobRef\x1a\v.gantry.JobB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
 
-var file_gantry_job_svc_g_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_gantry_job_svc_g_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_gantry_job_svc_g_proto_goTypes = []any{
 	(*JobAddRequest)(nil),         // 0: gantry.JobAddRequest
 	(*JobGetRequest)(nil),         // 1: gantry.JobGetRequest
@@ -2456,75 +2104,65 @@ var file_gantry_job_svc_g_proto_goTypes = []any{
 	(*JobPatchRequest)(nil),       // 4: gantry.JobPatchRequest
 	(*JobListRequest)(nil),        // 5: gantry.JobListRequest
 	(*JobListResponse)(nil),       // 6: gantry.JobListResponse
-	(*JobWatchRequest)(nil),       // 7: gantry.JobWatchRequest
-	(*JobPlanRequest)(nil),        // 8: gantry.JobPlanRequest
-	(*JobPlanResponse)(nil),       // 9: gantry.JobPlanResponse
-	(*JobCancelRequest)(nil),      // 10: gantry.JobCancelRequest
-	(*JobCancelResponse)(nil),     // 11: gantry.JobCancelResponse
-	(*JobRetryRequest)(nil),       // 12: gantry.JobRetryRequest
-	(*JobRetryResponse)(nil),      // 13: gantry.JobRetryResponse
-	(*StoreRef)(nil),              // 14: gantry.StoreRef
-	(JobState)(0),                 // 15: gantry.JobState
-	(*Verification)(nil),          // 16: gantry.Verification
-	(*Transfer)(nil),              // 17: gantry.Transfer
-	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
-	(*StoreSelect)(nil),           // 19: gantry.StoreSelect
-	(*Job)(nil),                   // 20: gantry.Job
-	(*emptypb.Empty)(nil),         // 21: google.protobuf.Empty
+	(*JobPlanRequest)(nil),        // 7: gantry.JobPlanRequest
+	(*JobPlanResponse)(nil),       // 8: gantry.JobPlanResponse
+	(*StoreRef)(nil),              // 9: gantry.StoreRef
+	(JobState)(0),                 // 10: gantry.JobState
+	(*Verification)(nil),          // 11: gantry.Verification
+	(*Transfer)(nil),              // 12: gantry.Transfer
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*StoreSelect)(nil),           // 14: gantry.StoreSelect
+	(*Job)(nil),                   // 15: gantry.Job
+	(*emptypb.Empty)(nil),         // 16: google.protobuf.Empty
 }
 var file_gantry_job_svc_g_proto_depIdxs = []int32{
-	14, // 0: gantry.JobAddRequest.from:type_name -> gantry.StoreRef
-	14, // 1: gantry.JobAddRequest.to:type_name -> gantry.StoreRef
-	15, // 2: gantry.JobAddRequest.state:type_name -> gantry.JobState
-	16, // 3: gantry.JobAddRequest.verification:type_name -> gantry.Verification
-	17, // 4: gantry.JobAddRequest.transfers:type_name -> gantry.Transfer
-	18, // 5: gantry.JobAddRequest.created_at:type_name -> google.protobuf.Timestamp
-	18, // 6: gantry.JobAddRequest.started_at:type_name -> google.protobuf.Timestamp
-	18, // 7: gantry.JobAddRequest.ended_at:type_name -> google.protobuf.Timestamp
+	9,  // 0: gantry.JobAddRequest.from:type_name -> gantry.StoreRef
+	9,  // 1: gantry.JobAddRequest.to:type_name -> gantry.StoreRef
+	10, // 2: gantry.JobAddRequest.state:type_name -> gantry.JobState
+	11, // 3: gantry.JobAddRequest.verification:type_name -> gantry.Verification
+	12, // 4: gantry.JobAddRequest.transfers:type_name -> gantry.Transfer
+	13, // 5: gantry.JobAddRequest.created_at:type_name -> google.protobuf.Timestamp
+	13, // 6: gantry.JobAddRequest.started_at:type_name -> google.protobuf.Timestamp
+	13, // 7: gantry.JobAddRequest.ended_at:type_name -> google.protobuf.Timestamp
 	2,  // 8: gantry.JobGetRequest.ref:type_name -> gantry.JobRef
 	3,  // 9: gantry.JobGetRequest.select:type_name -> gantry.JobSelect
-	19, // 10: gantry.JobSelect.from:type_name -> gantry.StoreSelect
-	19, // 11: gantry.JobSelect.to:type_name -> gantry.StoreSelect
+	14, // 10: gantry.JobSelect.from:type_name -> gantry.StoreSelect
+	14, // 11: gantry.JobSelect.to:type_name -> gantry.StoreSelect
 	2,  // 12: gantry.JobPatchRequest.ref:type_name -> gantry.JobRef
-	15, // 13: gantry.JobPatchRequest.state:type_name -> gantry.JobState
-	16, // 14: gantry.JobPatchRequest.verification:type_name -> gantry.Verification
-	17, // 15: gantry.JobPatchRequest.transfers:type_name -> gantry.Transfer
-	18, // 16: gantry.JobPatchRequest.started_at:type_name -> google.protobuf.Timestamp
-	18, // 17: gantry.JobPatchRequest.ended_at:type_name -> google.protobuf.Timestamp
-	15, // 18: gantry.JobListRequest.state:type_name -> gantry.JobState
-	18, // 19: gantry.JobListRequest.since:type_name -> google.protobuf.Timestamp
-	20, // 20: gantry.JobListResponse.items:type_name -> gantry.Job
-	2,  // 21: gantry.JobWatchRequest.ref:type_name -> gantry.JobRef
-	14, // 22: gantry.JobPlanRequest.from:type_name -> gantry.StoreRef
-	14, // 23: gantry.JobPlanRequest.to:type_name -> gantry.StoreRef
-	16, // 24: gantry.JobPlanResponse.verification:type_name -> gantry.Verification
-	2,  // 25: gantry.JobCancelRequest.ref:type_name -> gantry.JobRef
-	20, // 26: gantry.JobCancelResponse.job:type_name -> gantry.Job
-	2,  // 27: gantry.JobRetryRequest.ref:type_name -> gantry.JobRef
-	20, // 28: gantry.JobRetryResponse.job:type_name -> gantry.Job
-	0,  // 29: gantry.JobService.Add:input_type -> gantry.JobAddRequest
-	1,  // 30: gantry.JobService.Get:input_type -> gantry.JobGetRequest
-	4,  // 31: gantry.JobService.Patch:input_type -> gantry.JobPatchRequest
-	2,  // 32: gantry.JobService.Erase:input_type -> gantry.JobRef
-	5,  // 33: gantry.JobService.List:input_type -> gantry.JobListRequest
-	7,  // 34: gantry.JobService.Watch:input_type -> gantry.JobWatchRequest
-	8,  // 35: gantry.JobService.Plan:input_type -> gantry.JobPlanRequest
-	10, // 36: gantry.JobService.Cancel:input_type -> gantry.JobCancelRequest
-	12, // 37: gantry.JobService.Retry:input_type -> gantry.JobRetryRequest
-	20, // 38: gantry.JobService.Add:output_type -> gantry.Job
-	20, // 39: gantry.JobService.Get:output_type -> gantry.Job
-	20, // 40: gantry.JobService.Patch:output_type -> gantry.Job
-	21, // 41: gantry.JobService.Erase:output_type -> google.protobuf.Empty
-	6,  // 42: gantry.JobService.List:output_type -> gantry.JobListResponse
-	20, // 43: gantry.JobService.Watch:output_type -> gantry.Job
-	9,  // 44: gantry.JobService.Plan:output_type -> gantry.JobPlanResponse
-	11, // 45: gantry.JobService.Cancel:output_type -> gantry.JobCancelResponse
-	13, // 46: gantry.JobService.Retry:output_type -> gantry.JobRetryResponse
-	38, // [38:47] is the sub-list for method output_type
-	29, // [29:38] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	10, // 13: gantry.JobPatchRequest.state:type_name -> gantry.JobState
+	11, // 14: gantry.JobPatchRequest.verification:type_name -> gantry.Verification
+	12, // 15: gantry.JobPatchRequest.transfers:type_name -> gantry.Transfer
+	13, // 16: gantry.JobPatchRequest.started_at:type_name -> google.protobuf.Timestamp
+	13, // 17: gantry.JobPatchRequest.ended_at:type_name -> google.protobuf.Timestamp
+	10, // 18: gantry.JobListRequest.state:type_name -> gantry.JobState
+	13, // 19: gantry.JobListRequest.since:type_name -> google.protobuf.Timestamp
+	15, // 20: gantry.JobListResponse.items:type_name -> gantry.Job
+	9,  // 21: gantry.JobPlanRequest.from:type_name -> gantry.StoreRef
+	9,  // 22: gantry.JobPlanRequest.to:type_name -> gantry.StoreRef
+	11, // 23: gantry.JobPlanResponse.verification:type_name -> gantry.Verification
+	0,  // 24: gantry.JobService.Add:input_type -> gantry.JobAddRequest
+	1,  // 25: gantry.JobService.Get:input_type -> gantry.JobGetRequest
+	4,  // 26: gantry.JobService.Patch:input_type -> gantry.JobPatchRequest
+	2,  // 27: gantry.JobService.Erase:input_type -> gantry.JobRef
+	5,  // 28: gantry.JobService.List:input_type -> gantry.JobListRequest
+	2,  // 29: gantry.JobService.Watch:input_type -> gantry.JobRef
+	7,  // 30: gantry.JobService.Plan:input_type -> gantry.JobPlanRequest
+	2,  // 31: gantry.JobService.Cancel:input_type -> gantry.JobRef
+	2,  // 32: gantry.JobService.Retry:input_type -> gantry.JobRef
+	15, // 33: gantry.JobService.Add:output_type -> gantry.Job
+	15, // 34: gantry.JobService.Get:output_type -> gantry.Job
+	15, // 35: gantry.JobService.Patch:output_type -> gantry.Job
+	16, // 36: gantry.JobService.Erase:output_type -> google.protobuf.Empty
+	6,  // 37: gantry.JobService.List:output_type -> gantry.JobListResponse
+	15, // 38: gantry.JobService.Watch:output_type -> gantry.Job
+	8,  // 39: gantry.JobService.Plan:output_type -> gantry.JobPlanResponse
+	15, // 40: gantry.JobService.Cancel:output_type -> gantry.Job
+	15, // 41: gantry.JobService.Retry:output_type -> gantry.Job
+	33, // [33:42] is the sub-list for method output_type
+	24, // [24:33] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_gantry_job_svc_g_proto_init() }
@@ -2543,7 +2181,7 @@ func file_gantry_job_svc_g_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gantry_job_svc_g_proto_rawDesc), len(file_gantry_job_svc_g_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

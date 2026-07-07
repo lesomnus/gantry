@@ -48,15 +48,16 @@ type JobServiceClient interface {
 	// Watch streams snapshots of the job as its transfers progress and ends
 	// after the snapshot that carries a terminal state. The gRPC counterpart
 	// of the REST SSE endpoint GET /v1/job/{id}/progress.
-	Watch(ctx context.Context, in *JobWatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Job], error)
+	Watch(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Job], error)
 	// Plan runs admission for a would-be job without submitting it: store
 	// binding, rewrite, verification, and coalescing are all evaluated.
 	Plan(ctx context.Context, in *JobPlanRequest, opts ...grpc.CallOption) (*JobPlanResponse, error)
-	// Cancel stops a running job but keeps its record for inspection.
-	Cancel(ctx context.Context, in *JobCancelRequest, opts ...grpc.CallOption) (*JobCancelResponse, error)
+	// Cancel stops a running job but keeps its record for inspection; the
+	// returned snapshot is taken right after the cancel is signaled.
+	Cancel(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (*Job, error)
 	// Retry re-submits a terminal job's original request as a new job, with
 	// fresh resolution and verification.
-	Retry(ctx context.Context, in *JobRetryRequest, opts ...grpc.CallOption) (*JobRetryResponse, error)
+	Retry(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (*Job, error)
 }
 
 type jobServiceClient struct {
@@ -117,13 +118,13 @@ func (c *jobServiceClient) List(ctx context.Context, in *JobListRequest, opts ..
 	return out, nil
 }
 
-func (c *jobServiceClient) Watch(ctx context.Context, in *JobWatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Job], error) {
+func (c *jobServiceClient) Watch(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Job], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &JobService_ServiceDesc.Streams[0], JobService_Watch_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[JobWatchRequest, Job]{ClientStream: stream}
+	x := &grpc.GenericClientStream[JobRef, Job]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -146,9 +147,9 @@ func (c *jobServiceClient) Plan(ctx context.Context, in *JobPlanRequest, opts ..
 	return out, nil
 }
 
-func (c *jobServiceClient) Cancel(ctx context.Context, in *JobCancelRequest, opts ...grpc.CallOption) (*JobCancelResponse, error) {
+func (c *jobServiceClient) Cancel(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (*Job, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(JobCancelResponse)
+	out := new(Job)
 	err := c.cc.Invoke(ctx, JobService_Cancel_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -156,9 +157,9 @@ func (c *jobServiceClient) Cancel(ctx context.Context, in *JobCancelRequest, opt
 	return out, nil
 }
 
-func (c *jobServiceClient) Retry(ctx context.Context, in *JobRetryRequest, opts ...grpc.CallOption) (*JobRetryResponse, error) {
+func (c *jobServiceClient) Retry(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (*Job, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(JobRetryResponse)
+	out := new(Job)
 	err := c.cc.Invoke(ctx, JobService_Retry_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -183,15 +184,16 @@ type JobServiceServer interface {
 	// Watch streams snapshots of the job as its transfers progress and ends
 	// after the snapshot that carries a terminal state. The gRPC counterpart
 	// of the REST SSE endpoint GET /v1/job/{id}/progress.
-	Watch(*JobWatchRequest, grpc.ServerStreamingServer[Job]) error
+	Watch(*JobRef, grpc.ServerStreamingServer[Job]) error
 	// Plan runs admission for a would-be job without submitting it: store
 	// binding, rewrite, verification, and coalescing are all evaluated.
 	Plan(context.Context, *JobPlanRequest) (*JobPlanResponse, error)
-	// Cancel stops a running job but keeps its record for inspection.
-	Cancel(context.Context, *JobCancelRequest) (*JobCancelResponse, error)
+	// Cancel stops a running job but keeps its record for inspection; the
+	// returned snapshot is taken right after the cancel is signaled.
+	Cancel(context.Context, *JobRef) (*Job, error)
 	// Retry re-submits a terminal job's original request as a new job, with
 	// fresh resolution and verification.
-	Retry(context.Context, *JobRetryRequest) (*JobRetryResponse, error)
+	Retry(context.Context, *JobRef) (*Job, error)
 	mustEmbedUnimplementedJobServiceServer()
 }
 
@@ -217,16 +219,16 @@ func (UnimplementedJobServiceServer) Erase(context.Context, *JobRef) (*emptypb.E
 func (UnimplementedJobServiceServer) List(context.Context, *JobListRequest) (*JobListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method List not implemented")
 }
-func (UnimplementedJobServiceServer) Watch(*JobWatchRequest, grpc.ServerStreamingServer[Job]) error {
+func (UnimplementedJobServiceServer) Watch(*JobRef, grpc.ServerStreamingServer[Job]) error {
 	return status.Error(codes.Unimplemented, "method Watch not implemented")
 }
 func (UnimplementedJobServiceServer) Plan(context.Context, *JobPlanRequest) (*JobPlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Plan not implemented")
 }
-func (UnimplementedJobServiceServer) Cancel(context.Context, *JobCancelRequest) (*JobCancelResponse, error) {
+func (UnimplementedJobServiceServer) Cancel(context.Context, *JobRef) (*Job, error) {
 	return nil, status.Error(codes.Unimplemented, "method Cancel not implemented")
 }
-func (UnimplementedJobServiceServer) Retry(context.Context, *JobRetryRequest) (*JobRetryResponse, error) {
+func (UnimplementedJobServiceServer) Retry(context.Context, *JobRef) (*Job, error) {
 	return nil, status.Error(codes.Unimplemented, "method Retry not implemented")
 }
 func (UnimplementedJobServiceServer) mustEmbedUnimplementedJobServiceServer() {}
@@ -341,11 +343,11 @@ func _JobService_List_Handler(srv interface{}, ctx context.Context, dec func(int
 }
 
 func _JobService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(JobWatchRequest)
+	m := new(JobRef)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(JobServiceServer).Watch(m, &grpc.GenericServerStream[JobWatchRequest, Job]{ServerStream: stream})
+	return srv.(JobServiceServer).Watch(m, &grpc.GenericServerStream[JobRef, Job]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
@@ -370,7 +372,7 @@ func _JobService_Plan_Handler(srv interface{}, ctx context.Context, dec func(int
 }
 
 func _JobService_Cancel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(JobCancelRequest)
+	in := new(JobRef)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -382,13 +384,13 @@ func _JobService_Cancel_Handler(srv interface{}, ctx context.Context, dec func(i
 		FullMethod: JobService_Cancel_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(JobServiceServer).Cancel(ctx, req.(*JobCancelRequest))
+		return srv.(JobServiceServer).Cancel(ctx, req.(*JobRef))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _JobService_Retry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(JobRetryRequest)
+	in := new(JobRef)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -400,7 +402,7 @@ func _JobService_Retry_Handler(srv interface{}, ctx context.Context, dec func(in
 		FullMethod: JobService_Retry_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(JobServiceServer).Retry(ctx, req.(*JobRetryRequest))
+		return srv.(JobServiceServer).Retry(ctx, req.(*JobRef))
 	}
 	return interceptor(ctx, in, info, handler)
 }

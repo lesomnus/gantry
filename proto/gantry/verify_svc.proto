@@ -7,6 +7,7 @@ package gantry;
 
 import "gantry/job.proto";
 import "gantry/store_svc.g.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/lesomnus/gantry/pb";
@@ -14,16 +15,14 @@ option go_package = "github.com/lesomnus/gantry/pb";
 service VerifyService {
   // Describe reports the effective policy and trust anchors; key material
   // is never included.
-  rpc Describe(VerifyDescribeRequest) returns (VerifyDescribeResponse);
+  rpc Describe(google.protobuf.Empty) returns (VerifyDescribeResponse);
   // Check verifies a reference without creating a job: the preflight for
   // "would an edge accept this".
   rpc Check(VerifyCheckRequest) returns (VerifyCheckResponse);
   // Reload re-reads the trust store from disk; on failure the previous
   // verifier stays in effect.
-  rpc Reload(VerifyReloadRequest) returns (VerifyReloadResponse);
+  rpc Reload(google.protobuf.Empty) returns (google.protobuf.Empty);
 }
-
-message VerifyDescribeRequest {}
 
 message VerifyDescribeResponse {
   bool enabled = 1;
@@ -69,6 +68,3 @@ message VerifyCheckResponse {
   VerifyMode mode = 4;
 }
 
-message VerifyReloadRequest {}
-
-message VerifyReloadResponse {}

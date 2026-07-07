@@ -1,7 +1,9 @@
 edition = "2023";
 package gantry;
 
+import "gantry/gc.proto";
 import "gantry/store.proto";
+import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -24,10 +26,15 @@ service StoreService {
   // index.
   rpc Remove(StoreRemoveRequest) returns (StoreRemoveResponse);
   // Health probes the store, served from a short-lived cache.
-  rpc Health(StoreHealthRequest) returns (StoreHealthResponse);
-  // Watcher reports the health of the usage-event stream that stamps
-  // last_used on the store's images.
-  rpc Watcher(StoreWatcherRequest) returns (StoreWatcherResponse);
+  rpc Health(StoreRef) returns (StoreHealthResponse);
+  // GcStatus reports the store's GC scheduler, retention rules, and the
+  // usage-watcher health.
+  rpc GcStatus(StoreRef) returns (StoreGcStatusResponse);
+  // GcPlan evaluates the store's retention policy without deleting
+  // anything.
+  rpc GcPlan(StoreGcRequest) returns (StoreGcPlanResponse);
+  // GcApply evaluates and executes the deletions.
+  rpc GcApply(StoreGcRequest) returns (StoreGcApplyResponse);
 }
 
 message StoreAddRequest {
@@ -114,10 +121,6 @@ message StoreRemoveResponse {
   repeated string deleted = 2;
 }
 
-message StoreHealthRequest {
-  StoreRef store = 1;
-}
-
 message StoreHealthResponse {
   bool healthy = 1;
   StoreKind kind = 2;
@@ -128,17 +131,50 @@ message StoreHealthResponse {
   bool cached = 6;
 }
 
-message StoreWatcherRequest {
-  StoreRef store = 1;
+message StoreGcStatusResponse {
+  // Scheduling is on for this store.
+  bool enabled = 1;
+  bool running = 2;
+  google.protobuf.Timestamp started = 3;
+  google.protobuf.Timestamp last_run = 4;
+  google.protobuf.Timestamp next_wake = 5;
+  google.protobuf.Timestamp grace_until = 6;
+  GcSchedule schedule = 7;
+  repeated GcRule rules = 8;
+  int32 records = 9;
+  int32 pins = 10;
+  // Tracked untagged images (reap clocks running).
+  int32 untagged = 11;
+  // Reap delay; absent when the reaper is off.
+  google.protobuf.Duration untagged_after = 12;
+  GcWatcherStatus watcher = 13;
 }
 
-message StoreWatcherResponse {
-  bool connected = 1;
-  google.protobuf.Timestamp watching_since = 2;
-  // Receipt time of the last usage event.
-  google.protobuf.Timestamp last_event_at = 3;
-  google.protobuf.Timestamp last_seed_at = 4;
-  // Times the event stream ended and was re-established.
-  int32 reconnects = 5;
-  string last_error = 6;
+message StoreGcRequest {
+  StoreRef store = 1;
+  GcOverride override = 2;
+}
+
+message StoreGcPlanResponse {
+  repeated GcCandidate delete = 1;
+  repeated GcKept keep = 2;
+  // The soonest a currently-kept record could become age-deletable; absent
+  // when nothing is on an age path.
+  google.protobuf.Timestamp next_age_out = 3;
+}
+
+message StoreGcApplyResponse {
+  // Number of records considered (delete + keep).
+  int32 evaluated = 1;
+  // Tag refs removed.
+  repeated string untagged = 2;
+  // Content-hash IDs whose bytes were freed.
+  repeated string deleted = 3;
+  // Untagged image IDs whose content was reaped.
+  repeated string reaped = 4;
+  // Untagged image IDs not reapable right now (re-tagged, container ref,
+  // in-flight pull).
+  repeated string skipped = 5;
+  // Per-ref removal failures, "<ref>: <err>".
+  repeated string errors = 6;
 }

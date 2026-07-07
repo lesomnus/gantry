@@ -15,6 +15,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -34,13 +35,13 @@ const (
 type VerifyServiceClient interface {
 	// Describe reports the effective policy and trust anchors; key material
 	// is never included.
-	Describe(ctx context.Context, in *VerifyDescribeRequest, opts ...grpc.CallOption) (*VerifyDescribeResponse, error)
+	Describe(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*VerifyDescribeResponse, error)
 	// Check verifies a reference without creating a job: the preflight for
 	// "would an edge accept this".
 	Check(ctx context.Context, in *VerifyCheckRequest, opts ...grpc.CallOption) (*VerifyCheckResponse, error)
 	// Reload re-reads the trust store from disk; on failure the previous
 	// verifier stays in effect.
-	Reload(ctx context.Context, in *VerifyReloadRequest, opts ...grpc.CallOption) (*VerifyReloadResponse, error)
+	Reload(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type verifyServiceClient struct {
@@ -51,7 +52,7 @@ func NewVerifyServiceClient(cc grpc.ClientConnInterface) VerifyServiceClient {
 	return &verifyServiceClient{cc}
 }
 
-func (c *verifyServiceClient) Describe(ctx context.Context, in *VerifyDescribeRequest, opts ...grpc.CallOption) (*VerifyDescribeResponse, error) {
+func (c *verifyServiceClient) Describe(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*VerifyDescribeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(VerifyDescribeResponse)
 	err := c.cc.Invoke(ctx, VerifyService_Describe_FullMethodName, in, out, cOpts...)
@@ -71,9 +72,9 @@ func (c *verifyServiceClient) Check(ctx context.Context, in *VerifyCheckRequest,
 	return out, nil
 }
 
-func (c *verifyServiceClient) Reload(ctx context.Context, in *VerifyReloadRequest, opts ...grpc.CallOption) (*VerifyReloadResponse, error) {
+func (c *verifyServiceClient) Reload(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(VerifyReloadResponse)
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, VerifyService_Reload_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -87,13 +88,13 @@ func (c *verifyServiceClient) Reload(ctx context.Context, in *VerifyReloadReques
 type VerifyServiceServer interface {
 	// Describe reports the effective policy and trust anchors; key material
 	// is never included.
-	Describe(context.Context, *VerifyDescribeRequest) (*VerifyDescribeResponse, error)
+	Describe(context.Context, *emptypb.Empty) (*VerifyDescribeResponse, error)
 	// Check verifies a reference without creating a job: the preflight for
 	// "would an edge accept this".
 	Check(context.Context, *VerifyCheckRequest) (*VerifyCheckResponse, error)
 	// Reload re-reads the trust store from disk; on failure the previous
 	// verifier stays in effect.
-	Reload(context.Context, *VerifyReloadRequest) (*VerifyReloadResponse, error)
+	Reload(context.Context, *emptypb.Empty) (*emptypb.Empty, error)
 	mustEmbedUnimplementedVerifyServiceServer()
 }
 
@@ -104,13 +105,13 @@ type VerifyServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedVerifyServiceServer struct{}
 
-func (UnimplementedVerifyServiceServer) Describe(context.Context, *VerifyDescribeRequest) (*VerifyDescribeResponse, error) {
+func (UnimplementedVerifyServiceServer) Describe(context.Context, *emptypb.Empty) (*VerifyDescribeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Describe not implemented")
 }
 func (UnimplementedVerifyServiceServer) Check(context.Context, *VerifyCheckRequest) (*VerifyCheckResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Check not implemented")
 }
-func (UnimplementedVerifyServiceServer) Reload(context.Context, *VerifyReloadRequest) (*VerifyReloadResponse, error) {
+func (UnimplementedVerifyServiceServer) Reload(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method Reload not implemented")
 }
 func (UnimplementedVerifyServiceServer) mustEmbedUnimplementedVerifyServiceServer() {}
@@ -135,7 +136,7 @@ func RegisterVerifyServiceServer(s grpc.ServiceRegistrar, srv VerifyServiceServe
 }
 
 func _VerifyService_Describe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VerifyDescribeRequest)
+	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -147,7 +148,7 @@ func _VerifyService_Describe_Handler(srv interface{}, ctx context.Context, dec f
 		FullMethod: VerifyService_Describe_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VerifyServiceServer).Describe(ctx, req.(*VerifyDescribeRequest))
+		return srv.(VerifyServiceServer).Describe(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -171,7 +172,7 @@ func _VerifyService_Check_Handler(srv interface{}, ctx context.Context, dec func
 }
 
 func _VerifyService_Reload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VerifyReloadRequest)
+	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -183,7 +184,7 @@ func _VerifyService_Reload_Handler(srv interface{}, ctx context.Context, dec fun
 		FullMethod: VerifyService_Reload_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VerifyServiceServer).Reload(ctx, req.(*VerifyReloadRequest))
+		return srv.(VerifyServiceServer).Reload(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
