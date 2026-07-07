@@ -73,7 +73,7 @@ func engineWarmer(t *testing.T, eng *fakePullEngine) (*Warmer, Store, string) {
 	return w, js, up
 }
 
-// A job whose `to` is an engine store makes the daemon pull the image: the
+// A job whose `target` is an engine store makes the daemon pull the image: the
 // platform defaults to the daemon host's, the transfer total is estimated from
 // the source manifest, and the pull hook stamps retention.
 func TestJobToEngine(t *testing.T) {
@@ -88,7 +88,7 @@ func TestJobToEngine(t *testing.T) {
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
-	snap, created, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node"})
+	snap, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestJobToEngine(t *testing.T) {
 		t.Errorf("engine pulled ref %q, want %q", eng.ref, src.Name())
 	}
 	tr := done.Transfers[0]
-	if tr.Store != "node" || tr.Kind != "docker" || tr.From != "up" {
+	if tr.Store != "node" || tr.Kind != "docker" || tr.Source != "up" {
 		t.Errorf("transfer identity = %+v", tr)
 	}
 	if tr.State != "done" {
@@ -135,7 +135,7 @@ func TestJobToEngineDaemonErrorFailsJob(t *testing.T) {
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
-	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node", Platforms: []string{"linux/s390x"}})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", Platforms: []string{"linux/s390x"}})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestJobToEngineRejectsMultiplePlatforms(t *testing.T) {
 	pushImage(t, up+"/team/app:1", 1)
 	w.base = context.Background()
 
-	_, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node",
+	_, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node",
 		Platforms: []string{"linux/amd64", "linux/arm64"}})
 	if err == nil || !strings.Contains(err.Error(), "single platform") {
 		t.Fatalf("err = %v, want a single-platform rejection", err)
@@ -168,7 +168,7 @@ func TestJobToEngineRejectsCopyReferrers(t *testing.T) {
 	w.base = context.Background()
 
 	yes := true
-	_, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node", CopyReferrers: &yes})
+	_, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", CopyReferrers: &yes})
 	if err == nil || !strings.Contains(err.Error(), "registry destination") {
 		t.Fatalf("err = %v, want a registry-destination rejection", err)
 	}
@@ -181,11 +181,11 @@ func TestJobToEngineHostPlatformFailureFailsAdmission(t *testing.T) {
 	pushImage(t, up+"/team/app:1", 1)
 	w.base = context.Background()
 
-	if _, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node"}); err == nil {
+	if _, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"}); err == nil {
 		t.Fatal("expected admission to fail when the daemon platform cannot be resolved")
 	}
 	// An explicit platform sidesteps the daemon probe entirely.
-	res, err := w.Plan(context.Background(), Request{Ref: "team/app:1", From: "up", To: "node", Platforms: []string{"linux/arm64"}})
+	res, err := w.Plan(context.Background(), Request{Ref: "team/app:1", Source: "up", Target: "node", Platforms: []string{"linux/arm64"}})
 	if err != nil {
 		t.Fatalf("explicit platform must not need the daemon: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestEnginePullRefHostOverride(t *testing.T) {
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
-	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node"})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestJobToEngineVerifiedDigestAnchor(t *testing.T) {
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
-	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node"})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestJobToEngineDaemonProgressRefinesEstimate(t *testing.T) {
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
-	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node"})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -287,12 +287,12 @@ func TestJobToEngineDedup(t *testing.T) {
 	pushImage(t, up+"/team/app:1", 1)
 	w.base = context.Background() // admit without workers so the first job stays active
 
-	first, created, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node"})
+	first, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
 	if err != nil || !created {
 		t.Fatalf("first submit: %v created=%v", err, created)
 	}
 	t.Cleanup(func() { js.Delete(first.ID) })
-	second, created, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node"})
+	second, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
 	if err != nil {
 		t.Fatalf("second submit: %v", err)
 	}

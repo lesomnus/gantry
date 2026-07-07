@@ -96,7 +96,7 @@ func testJobCopyReferrersVerbatim(t *testing.T, start func(*testing.T) string) {
 	t.Cleanup(func() { cancel(); w.Stop() })
 
 	yes := true
-	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", CopyReferrers: &yes})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "cache", CopyReferrers: &yes})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestJobCopyReferrersSingleManifest(t *testing.T) {
 	t.Cleanup(func() { cancel(); w.Stop() })
 
 	yes := true
-	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", CopyReferrers: &yes})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "cache", CopyReferrers: &yes})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -170,21 +170,21 @@ func TestPlanCopyReferrersConflicts(t *testing.T) {
 	w.base = context.Background()
 	yes := true
 	t.Run("explicit platforms conflict", func(t *testing.T) {
-		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "cache", Platforms: []string{"linux/amd64"}, CopyReferrers: &yes})
+		_, _, err := w.Submit(Request{Ref: "a/x:1", Source: "r.io", Target: "cache", Platforms: []string{"linux/amd64"}, CopyReferrers: &yes})
 		if err == nil {
 			t.Error("narrowed platforms with copy_referrers must be rejected")
 		}
 	})
 	t.Run("proxy destination", func(t *testing.T) {
-		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "ro", CopyReferrers: &yes})
+		_, _, err := w.Submit(Request{Ref: "a/x:1", Source: "r.io", Target: "ro", CopyReferrers: &yes})
 		if err == nil {
 			t.Error("proxy destination with copy_referrers must be rejected")
 		}
 	})
 	t.Run("no destination", func(t *testing.T) {
-		_, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", CopyReferrers: &yes})
+		_, _, err := w.Submit(Request{Ref: "a/x:1", Source: "r.io", CopyReferrers: &yes})
 		if err == nil {
-			t.Error("copy_referrers without `to` must be rejected, not silently ignored")
+			t.Error("copy_referrers without `target` must be rejected, not silently ignored")
 		}
 	})
 }
@@ -209,7 +209,7 @@ func TestCopyReferrersDefault(t *testing.T) {
 		}
 		return ex
 	}
-	base_req := Request{Ref: "a/x:1", From: "r.io", To: "cache"}
+	base_req := Request{Ref: "a/x:1", Source: "r.io", Target: "cache"}
 	t.Run("on when verified and nothing narrowed", func(t *testing.T) {
 		ex := plan_exec(t, &fakeVerifier{dg: verified_hash}, base_req)
 		if !ex.copyReferrers {

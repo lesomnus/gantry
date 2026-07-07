@@ -28,16 +28,16 @@ func (v *verifyService) gate() error {
 
 // srcRef resolves the request's source store and the reference on it, the
 // same way job admission does.
-func (v *verifyService) srcRef(ref, from string) (config.StoreConfig, name.Reference, error) {
+func (v *verifyService) srcRef(ref, source string) (config.StoreConfig, name.Reference, error) {
 	base, err := name.ParseReference(ref)
 	if err != nil {
 		return config.StoreConfig{}, nil, err
 	}
-	fromKey := from
-	if fromKey == "" {
-		fromKey = base.Context().RegistryStr()
+	sourceKey := source
+	if sourceKey == "" {
+		sourceKey = base.Context().RegistryStr()
 	}
-	fromStore, err := v.s.stores.Registry(fromKey)
+	sourceStore, err := v.s.stores.Registry(sourceKey)
 	if err != nil {
 		return config.StoreConfig{}, nil, err
 	}
@@ -45,11 +45,11 @@ func (v *verifyService) srcRef(ref, from string) (config.StoreConfig, name.Refer
 	if d, ok := base.(name.Digest); ok {
 		id = "@" + d.DigestStr()
 	}
-	src, err := name.ParseReference(fromStore.Host + "/" + base.Context().RepositoryStr() + id)
+	src, err := name.ParseReference(sourceStore.Host + "/" + base.Context().RepositoryStr() + id)
 	if err != nil {
 		return config.StoreConfig{}, nil, err
 	}
-	return fromStore, src, nil
+	return sourceStore, src, nil
 }
 
 // Describe reports the effective policy. With verification disabled it still
@@ -84,11 +84,11 @@ func (v *verifyService) Check(ctx context.Context, req *pb.VerifyCheckRequest) (
 	if req.GetRef() == "" {
 		return nil, status.Error(codes.InvalidArgument, "ref is required")
 	}
-	from, src, err := v.srcRef(req.GetRef(), req.GetFrom().GetName())
+	source, src, err := v.srcRef(req.GetRef(), req.GetSource().GetName())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	res, err := v.s.verify.Verify(ctx, from, src)
+	res, err := v.s.verify.Verify(ctx, source, src)
 	switch {
 	case err == nil:
 	case errors.Is(err, verify.ErrUnsigned), errors.Is(err, verify.ErrUntrusted):

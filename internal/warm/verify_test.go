@@ -35,7 +35,7 @@ func TestVerifyRejectsAdmission(t *testing.T) {
 	fv := &fakeVerifier{err: fmt.Errorf("%w: up.example/app/x:1", verify.ErrUnsigned)}
 	w.SetVerifier(fv)
 
-	_, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	_, _, err := w.Submit(Request{Ref: "app/x:1", Source: "up", Target: "cache", Platforms: []string{"linux/amd64"}})
 	if !errors.Is(err, verify.ErrUnsigned) {
 		t.Fatalf("err = %v, want ErrUnsigned", err)
 	}
@@ -58,7 +58,7 @@ func TestVerifyPinKeepsCacheTagged(t *testing.T) {
 	w.SetVerifier(&fakeVerifier{dg: h})
 	w.base = context.Background() // enable Submit without starting workers
 
-	snap, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	snap, _, err := w.Submit(Request{Ref: "app/x:1", Source: "up", Target: "cache", Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestVerifyProxyModeRejected(t *testing.T) {
 	w.SetVerifier(&fakeVerifier{dg: h})
 	w.base = context.Background()
 
-	_, _, err := w.Submit(Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	_, _, err := w.Submit(Request{Ref: "app/x:1", Source: "up", Target: "cache", Platforms: []string{"linux/amd64"}})
 	if err == nil || !strings.Contains(err.Error(), "proxy") {
 		t.Fatalf("err = %v, want a proxy-mode rejection", err)
 	}
@@ -107,11 +107,11 @@ func TestVerifyPinsSourceRef(t *testing.T) {
 	w.SetVerifier(&fakeVerifier{dg: h})
 	w.base = context.Background()
 
-	res, err := w.Plan(context.Background(), Request{Ref: "app/x:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	res, err := w.Plan(context.Background(), Request{Ref: "app/x:1", Source: "up", Target: "cache", Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.SrcRef, "@sha256:"+strings.Repeat("b", 64)) {
-		t.Errorf("src ref = %q, want pinned to the verified digest", res.SrcRef)
+	if !strings.Contains(res.SourceRef, "@sha256:"+strings.Repeat("b", 64)) {
+		t.Errorf("src ref = %q, want pinned to the verified digest", res.SourceRef)
 	}
 }

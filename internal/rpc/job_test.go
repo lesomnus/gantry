@@ -29,9 +29,9 @@ func TestJobAdd(t *testing.T) {
 
 	var trailer metadata.MD
 	job, err := e.client.Job().Add(ctx, pb.JobAddRequest_builder{
-		Ref: "src.local/lib/app:1",
-		To:  pb.StoreByName("node"),
-		As:  []string{"docker.io/lib/app:1"},
+		Ref:    "src.local/lib/app:1",
+		Target: pb.StoreByName("node"),
+		As:     []string{"docker.io/lib/app:1"},
 	}.Build(), grpc.Trailer(&trailer))
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestJobAdd(t *testing.T) {
 	if got := trailer.Get("gantry-coalesced"); len(got) != 1 || got[0] != "false" {
 		t.Errorf("want coalesced=false trailer, got %v", got)
 	}
-	if len(e.warmer.submits) != 1 || e.warmer.submits[0].To != "node" ||
+	if len(e.warmer.submits) != 1 || e.warmer.submits[0].Target != "node" ||
 		len(e.warmer.submits[0].As) != 1 || e.warmer.submits[0].As[0] != "docker.io/lib/app:1" {
 		t.Errorf("submit not forwarded: %+v", e.warmer.submits)
 	}
@@ -50,8 +50,8 @@ func TestJobAdd(t *testing.T) {
 	// Coalesced submit reports through the trailer.
 	e.warmer.created = false
 	_, err = e.client.Job().Add(ctx, pb.JobAddRequest_builder{
-		Ref: "src.local/lib/app:1",
-		To:  pb.StoreByName("node"),
+		Ref:    "src.local/lib/app:1",
+		Target: pb.StoreByName("node"),
 	}.Build(), grpc.Trailer(&trailer))
 	if err != nil {
 		t.Fatal(err)
@@ -305,22 +305,22 @@ func TestJobPlan(t *testing.T) {
 	ctx := context.Background()
 	e.warmer.planRes = warm.PlanResult{
 		Ref:       "src.local/lib/app:1",
-		From:      "src",
-		To:        "node",
-		SrcRef:    "src.local/lib/app@sha256:abc",
-		DstRef:    "src.local/lib/app:1",
+		Source:    "src",
+		Target:    "node",
+		SourceRef: "src.local/lib/app@sha256:abc",
+		TargetRef: "src.local/lib/app:1",
 		As:        []string{"docker.io/lib/app:1"},
 		Coalesces: "job_7",
 	}
 
 	res, err := e.client.Job().Plan(ctx, pb.JobPlanRequest_builder{
-		Ref: proto.String("src.local/lib/app:1"),
-		To:  pb.StoreByName("node"),
+		Ref:    proto.String("src.local/lib/app:1"),
+		Target: pb.StoreByName("node"),
 	}.Build())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.GetSrcRef() != "src.local/lib/app@sha256:abc" || res.GetCoalesces() != "job_7" ||
+	if res.GetSourceRef() != "src.local/lib/app@sha256:abc" || res.GetCoalesces() != "job_7" ||
 		len(res.GetAs()) != 1 || res.GetAs()[0] != "docker.io/lib/app:1" {
 		t.Errorf("unexpected plan: %v", res)
 	}

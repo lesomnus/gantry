@@ -109,7 +109,7 @@ func TestCopySourceWarmCommitAndDedup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewSource(reg("from", up), reg("to", host))
+	s, err := NewSource(reg("source", up), reg("target", host))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestCopySourceResolveFiltersPlatforms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewSource(reg("from", host), reg("to", host))
+	s, err := NewSource(reg("source", host), reg("target", host))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestProxySourceReadsThrough(t *testing.T) {
 	ctx := context.Background()
 	host := startRegistry(t)
 	cache := pushImage(t, host+"/cache/app:1", 3)
-	s, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "to", Kind: "oci", Host: host, Insecure: true, Mode: "proxy"})
+	s, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "target", Kind: "oci", Host: host, Insecure: true, Mode: "proxy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestProxySourceReadsThrough(t *testing.T) {
 }
 
 func TestNewSourceUnknownMode(t *testing.T) {
-	if _, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "to", Kind: "oci", Mode: "bogus"}); err == nil {
+	if _, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "target", Kind: "oci", Mode: "bogus"}); err == nil {
 		t.Error("expected error for unknown mode")
 	}
 }

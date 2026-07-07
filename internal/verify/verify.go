@@ -44,7 +44,7 @@ func (r Result) Verified() bool { return r.Digest.Hex != "" }
 
 // Verifier checks a source image's signature per the effective policy.
 type Verifier interface {
-	// Verify checks src on registry store `from` per the effective mode. It
+	// Verify checks src on registry store `source` per the effective mode. It
 	// returns the effective mode and the verified digest to pin. It returns
 	// ErrUnsigned or ErrUntrusted (wrapped) when the image is rejected, or a
 	// non-sentinel error when verification could not be completed (unreachable

@@ -53,37 +53,37 @@ func newMetrics(ctx context.Context) *metrics {
 	return &metrics{bytes: bytes, duration: duration, active: active}
 }
 
-// Request is a job submission: move Ref from store From into store To. From is
-// a registry store (a declared name or a bare host). To is any declared store —
-// an oci registry (gantry copies the blobs in) or a docker/containerd engine
-// (the daemon is told to pull). The user just "moves" the image; how it lands
-// depends on what the destination can do.
+// Request is a job submission: move Ref from store Source into store Target.
+// Source is a registry store (a declared name or a bare host). Target is any
+// declared store — an oci registry (gantry copies the blobs in) or a
+// docker/containerd engine (the daemon is told to pull). The user just "moves"
+// the image; how it lands depends on what the target can do.
 type Request struct {
 	Ref string
-	// Platforms selects what moves. Registry destination: the platforms copied
-	// (empty = every platform). Engine destination: the single platform the
+	// Platforms selects what moves. Registry target: the platforms copied
+	// (empty = every platform). Engine target: the single platform the
 	// daemon pulls (empty = the daemon host's platform; more than one errors).
 	Platforms []string
-	From      string
-	To        string
+	Source    string
+	Target    string
 	// CopyReferrers copies the source's referrer artifacts (e.g. notation
 	// signatures) into the cache alongside the image, preserving the source
 	// digest so the signatures still verify there. nil defaults to on when
-	// verification is enabled and the destination is a copy-mode cache.
-	// Registry destinations only.
+	// verification is enabled and the target is a copy-mode cache.
+	// Registry targets only.
 	CopyReferrers *bool
 	// As records the pulled image under these names instead of the pull
 	// reference, so a cache-fed engine can keep the image under its upstream
-	// name. Tag references only. Engine destinations only.
+	// name. Tag references only. Engine targets only.
 	As []string
 }
 
 // jobExec is the resolved plan for a job, computed at submit time.
 type jobExec struct {
-	from          config.StoreConfig
-	dst           dest // the destination; pusher or puller by capability
+	source        config.StoreConfig
+	dst           dest // the target; pusher or puller by capability
 	copyReferrers bool
-	src           name.Reference        // source ref; digest-pinned when verified
+	srcRef        name.Reference        // source ref; digest-pinned when verified
 	cacheRef      name.Reference        // pusher dest: the rewritten in-store ref
 	pullRef       string                // puller dest: the ref the engine is told to pull
 	as            []string              // puller dest: names recorded instead of pullRef
@@ -141,7 +141,7 @@ func (w *Warmer) SetVerifier(v verify.Verifier) { w.verifier = v }
 // Recorder receives audit events for admitted and finished jobs. Its methods
 // must not fail the operation they record.
 type Recorder interface {
-	JobAdmitted(ref, from, to, digest string)
+	JobAdmitted(ref, source, target, digest string)
 	JobFinished(id, ref, state, errMsg string, bytes int64)
 }
 
@@ -244,7 +244,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 		return JobSnapshot{}, false, err
 	}
 
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name(), ex.as)
+	key := dedupKey(req.Ref, platforms, ex.source.Name, ex.dst.Name(), ex.as)
 	if snap, ok := w.store.Active(key); ok {
 		return snap, false, nil
 	}
@@ -269,7 +269,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 			if ex.verification != nil {
 				digest = ex.verification.Digest
 			}
-			w.rec.JobAdmitted(req.Ref, ex.from.Name, ex.dst.Name(), digest)
+			w.rec.JobAdmitted(req.Ref, ex.source.Name, ex.dst.Name(), digest)
 		}
 		return snap, true, nil
 	default:
@@ -301,12 +301,12 @@ func (w *Warmer) Retry(id string) (JobSnapshot, bool, error) {
 // refs, and the verification outcome — without moving bytes or creating a job.
 type PlanResult struct {
 	Ref           string                `json:"ref"`
-	From          string                `json:"from"`
-	To            string                `json:"to,omitempty"`
-	SrcRef        string                `json:"src_ref"`           // source ref, digest-pinned when verified
-	DstRef        string                `json:"dst_ref,omitempty"` // destination-side ref: the rewritten cache ref, or the ref the engine is told to pull
-	Platforms     []string              `json:"platforms"`         // registry dest: empty = all platforms; engine dest: the single platform pulled
-	As            []string              `json:"as,omitempty"`      // engine dest: names the image is recorded under
+	Source        string                `json:"source"`
+	Target        string                `json:"target,omitempty"`
+	SourceRef     string                `json:"source_ref"`           // source ref, digest-pinned when verified
+	TargetRef     string                `json:"target_ref,omitempty"` // target-side ref: the rewritten cache ref, or the ref the engine is told to pull
+	Platforms     []string              `json:"platforms"`            // registry target: empty = all platforms; engine target: the single platform pulled
+	As            []string              `json:"as,omitempty"`         // engine target: names the image is recorded under
 	CopyReferrers bool                  `json:"copy_referrers"`
 	Verification  *VerificationSnapshot `json:"verification,omitempty"`
 	Coalesces     string                `json:"coalesces,omitempty"` // active job an identical submit would join
@@ -320,9 +320,9 @@ func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
 	}
 	out := PlanResult{
 		Ref:           req.Ref,
-		From:          ex.from.Name,
-		To:            ex.dst.Name(),
-		SrcRef:        ex.src.Name(),
+		Source:        ex.source.Name,
+		Target:        ex.dst.Name(),
+		SourceRef:     ex.srcRef.Name(),
 		Platforms:     platforms,
 		As:            ex.as,
 		CopyReferrers: ex.copyReferrers,
@@ -330,11 +330,11 @@ func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
 	}
 	switch {
 	case ex.cacheRef != nil:
-		out.DstRef = ex.cacheRef.Name()
+		out.TargetRef = ex.cacheRef.Name()
 	case ex.pullRef != "":
-		out.DstRef = ex.pullRef
+		out.TargetRef = ex.pullRef
 	}
-	key := dedupKey(req.Ref, platforms, ex.from.Name, ex.dst.Name(), ex.as)
+	key := dedupKey(req.Ref, platforms, ex.source.Name, ex.dst.Name(), ex.as)
 	if snap, ok := w.store.Active(key); ok {
 		out.Coalesces = snap.ID
 	}
@@ -351,31 +351,31 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 
 	ex := &jobExec{}
 
-	// source (from)
-	fromKey := req.From
-	if fromKey == "" {
-		fromKey = base.Context().RegistryStr()
+	// source
+	sourceKey := req.Source
+	if sourceKey == "" {
+		sourceKey = base.Context().RegistryStr()
 	}
-	ex.from, err = w.stores.Registry(fromKey)
+	ex.source, err = w.stores.Registry(sourceKey)
 	if err != nil {
-		return nil, nil, nil, z.Err(err, "from")
+		return nil, nil, nil, z.Err(err, "source")
 	}
-	ex.src, err = name.ParseReference(ex.from.Host+"/"+repo+id, w.refOpts(ex.from)...)
+	ex.srcRef, err = name.ParseReference(ex.source.Host+"/"+repo+id, w.refOpts(ex.source)...)
 	if err != nil {
 		return nil, nil, nil, z.Err(err, "source ref")
 	}
 
-	// destination (to): a registry gantry pushes into, or an engine that pulls.
-	if req.To == "" {
-		return nil, nil, nil, fmt.Errorf("job has nothing to do: set `to`")
+	// target: a registry gantry pushes into, or an engine that pulls.
+	if req.Target == "" {
+		return nil, nil, nil, fmt.Errorf("job has nothing to do: set `target`")
 	}
-	ex.dst, err = resolveDest(w.stores, req.To)
+	ex.dst, err = resolveDest(w.stores, req.Target)
 	if err != nil {
-		return nil, nil, nil, z.Err(err, "to")
+		return nil, nil, nil, z.Err(err, "target")
 	}
 
-	// The destination-side reference is derived from the TAG (before any digest
-	// pinning below), so the destination stays tag-named; only the source pull is
+	// The target-side reference is derived from the TAG (before any digest
+	// pinning below), so the target stays tag-named; only the source pull is
 	// anchored to the verified digest.
 	platforms := req.Platforms
 	var transfers []*Transfer
@@ -384,12 +384,12 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		if len(req.As) > 0 {
 			return nil, nil, nil, fmt.Errorf("`as` names the image on an engine; store %q is a registry", d.Name())
 		}
-		ex.cacheRef, err = d.dstRef(ex.src)
+		ex.cacheRef, err = d.dstRef(ex.srcRef)
 		if err != nil {
 			return nil, nil, nil, z.Err(err, "rewrite into %q", d.Name())
 		}
 		transfers = append(transfers, &Transfer{
-			Store: d.Name(), Kind: d.Kind(), From: ex.from.Name,
+			Store: d.Name(), Kind: d.Kind(), Source: ex.source.Name,
 			Ref: ex.cacheRef.Name(), State: "pending",
 		})
 	case puller:
@@ -407,7 +407,7 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 			platforms = []string{p}
 		}
 		ex.platform = platforms[0]
-		ex.pullRef, err = d.pullRef(ex.src, ex.from)
+		ex.pullRef, err = d.pullRef(ex.srcRef, ex.source)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -427,7 +427,7 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 			ex.as = append(ex.as, n)
 		}
 		transfers = append(transfers, &Transfer{
-			Store: d.Name(), Kind: d.Kind(), From: ex.from.Name,
+			Store: d.Name(), Kind: d.Kind(), Source: ex.source.Name,
 			Ref: ex.pullRef, State: "pending",
 		})
 	default:
@@ -435,11 +435,11 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 	}
 
 	// Verify the source signature (fail-closed) before admitting the job, and pin
-	// ex.src to the verified digest so the move covers exactly what was verified.
-	// Runs after the destination ref is derived from the tag (see above).
+	// ex.srcRef to the verified digest so the move covers exactly what was verified.
+	// Runs after the target ref is derived from the tag (see above).
 	verified := false
 	if w.verifier != nil {
-		res, err := w.verifier.Verify(ctx, ex.from, ex.src)
+		res, err := w.verifier.Verify(ctx, ex.source, ex.srcRef)
 		if err != nil {
 			return nil, nil, nil, err // sentinel (ErrUnsigned/ErrUntrusted) preserved for the handler
 		}
@@ -454,9 +454,9 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 			if rd, ok := ex.dst.(*registryDest); ok && rd.isProxy() {
 				return nil, nil, nil, fmt.Errorf("signature verification requires a copy-mode destination; store %q is proxy", rd.Name())
 			}
-			ex.src = ex.src.Context().Digest(dg.String())
+			ex.srcRef = ex.srcRef.Context().Digest(dg.String())
 			log.From(w.rootCtx()).Info("source signature verified",
-				slog.String("ref", req.Ref), slog.String("from", ex.from.Name), slog.String("digest", dg.String()))
+				slog.String("ref", req.Ref), slog.String("source", ex.source.Name), slog.String("digest", dg.String()))
 		}
 	}
 
@@ -566,11 +566,11 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) e
 	t := job.Transfers[0]
 	w.store.Update(job.ID, func(*Job) { t.State = "running" })
 
-	src, err := d.newSource(ex.from)
+	src, err := d.newSource(ex.source)
 	if err != nil {
 		return w.failTransfer(job, t, err)
 	}
-	plan, err := src.Resolve(ctx, ex.src, ex.cacheRef, job.Platforms)
+	plan, err := src.Resolve(ctx, ex.srcRef, ex.cacheRef, job.Platforms)
 	if err != nil {
 		return w.failTransfer(job, t, err)
 	}
@@ -583,7 +583,7 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) e
 	if err := w.copyLayers(ctx, job, t, src, plan, ex); err != nil {
 		return w.failTransfer(job, t, err)
 	}
-	committed, err := src.Commit(ctx, ex.src, ex.cacheRef, job.Platforms, ex.copyReferrers)
+	committed, err := src.Commit(ctx, ex.srcRef, ex.cacheRef, job.Platforms, ex.copyReferrers)
 	if err != nil {
 		return w.failTransfer(job, t, z.Err(err, "commit"))
 	}
@@ -592,7 +592,7 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) e
 		// copy_referrers is only ever planned for a registry destination, and
 		// registryDest is the only pusher; the assertion makes that dependency loud.
 		rd := d.(*registryDest)
-		n, err := copyReferrers(ctx, ex.from, rd.cfg, ex.src, committed, ex.cacheRef.Context())
+		n, err := copyReferrers(ctx, ex.source, rd.cfg, ex.srcRef, committed, ex.cacheRef.Context())
 		if err != nil {
 			// Fail closed: the signatures are the point of referrer propagation.
 			return w.failTransfer(job, t, z.Err(err, "copy referrers"))
@@ -620,7 +620,7 @@ func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 	// Anchor the pull when the source is digest-pinned (a verified job, or a
 	// digest ref): the daemon pulls repo@digest and tags it as the ref.
 	digest := ""
-	if dg, ok := ex.src.(name.Digest); ok {
+	if dg, ok := ex.srcRef.(name.Digest); ok {
 		digest = dg.DigestStr()
 	}
 	w.store.Update(job.ID, func(*Job) {
@@ -630,11 +630,11 @@ func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 
 	// Size estimate from the source manifest; the daemon's layer reports replace
 	// it with actual figures as they arrive.
-	if plan, err := upstreamPlan(ctx, ex.from, ex.src, []string{ex.platform}); err == nil {
+	if plan, err := upstreamPlan(ctx, ex.source, ex.srcRef, []string{ex.platform}); err == nil {
 		w.store.Update(job.ID, func(*Job) { t.BytesTotal = plan.Total })
 	} else {
 		log.From(ctx).Debug("pull size estimate unavailable",
-			slog.String("ref", ex.src.Name()), slog.String("error", err.Error()))
+			slog.String("ref", ex.srcRef.Name()), slog.String("error", err.Error()))
 	}
 
 	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
@@ -726,8 +726,8 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	var once sync.Once
 	var firstErr error
 
-	from := ex.src.Context()
-	to := ex.cacheRef.Context()
+	srcRepo := ex.srcRef.Context()
+	dstRepo := ex.cacheRef.Context()
 	for i := range plan.Layers {
 		select {
 		case sem <- struct{}{}:
@@ -747,7 +747,7 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 			defer func() { <-sem }()
 			w.store.Update(job.ID, func(*Job) { lp.State = "pulling" })
 			sink := &layerSink{w: w, jobID: job.ID, t: t, lp: lp}
-			if err := src.Warm(ctx, from, to, pl, sink); err != nil {
+			if err := src.Warm(ctx, srcRepo, dstRepo, pl, sink); err != nil {
 				w.store.Update(job.ID, func(*Job) { lp.State = "failed" })
 				once.Do(func() {
 					firstErr = err

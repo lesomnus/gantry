@@ -24,8 +24,8 @@ greet:
 
 # Image stores a job can move images between, keyed by name (order does not
 # matter). kind "oci" is an OCI distribution registry gantry reads/writes;
-# kind "docker"/"containerd" is a daemon that pulls. A job moves `from` (oci)
-# -> `to`: an oci registry (gantry copies the blobs in) or an engine (the
+# kind "docker"/"containerd" is a daemon that pulls. A job moves `source` (oci)
+# -> `target`: an oci registry (gantry copies the blobs in) or an engine (the
 # daemon is told to pull — empty `platforms` uses the daemon host's platform).
 # Top-level: shared by every subcommand, not nested under `serve`.
 stores:
@@ -166,7 +166,7 @@ serve:
   #   cap: 10000                          # max entries retained (oldest evicted)
 
   # Source-image signature verification (Notary Project / notation). When enabled,
-  # gantry verifies the `from` image's signature at job creation; a failure rejects
+  # gantry verifies the `source` image's signature at job creation; a failure rejects
   # the job (422) and nothing is created. Disabled unless `mode` is set.
   #
   # Trust model (important): there is no OS/system-root fallback. You must supply

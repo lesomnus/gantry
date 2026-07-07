@@ -92,8 +92,8 @@ func TestVerifyCheckSrcRef(t *testing.T) {
 	// An explicit from re-homes the reference onto the store's host, the
 	// same way job admission resolves it.
 	res, err := c.Check(ctx, pb.VerifyCheckRequest_builder{
-		Ref:  proto.String("other.io/lib/app:1"),
-		From: pb.StoreByName("src"),
+		Ref:    proto.String("other.io/lib/app:1"),
+		Source: pb.StoreByName("src"),
 	}.Build())
 	if err != nil || res.GetRef() != "src.local/lib/app:1" {
 		t.Fatalf("re-homed ref: %v %v", res, err)
@@ -102,8 +102,8 @@ func TestVerifyCheckSrcRef(t *testing.T) {
 	// Digest references keep the digest form.
 	const dig = "@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	res, err = c.Check(ctx, pb.VerifyCheckRequest_builder{
-		Ref:  proto.String("other.io/lib/app" + dig),
-		From: pb.StoreByName("src"),
+		Ref:    proto.String("other.io/lib/app" + dig),
+		Source: pb.StoreByName("src"),
 	}.Build())
 	if err != nil || res.GetRef() != "src.local/lib/app"+dig {
 		t.Fatalf("digest ref: %v %v", res, err)

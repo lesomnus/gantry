@@ -101,21 +101,21 @@ func (j *Job) Canceled() bool { return j.canceled.Load() }
 func (j *Job) DedupKey() string { return j.dedup }
 
 // dedupKey collapses identical moves (same image, platforms, route) onto one job.
-func dedupKey(ref string, platforms []string, from, to string, as []string) string {
+func dedupKey(ref string, platforms []string, source, target string, as []string) string {
 	ps := append([]string(nil), platforms...)
 	sort.Strings(ps)
 	ns := append([]string(nil), as...)
 	sort.Strings(ns)
-	return strings.Join([]string{ref, strings.Join(ps, ","), from, to, strings.Join(ns, ",")}, "\x00")
+	return strings.Join([]string{ref, strings.Join(ps, ","), source, target, strings.Join(ns, ",")}, "\x00")
 }
 
 // Transfer is one step of a job: moving an image into a store. A registry copy
 // (gantry-driven) and an engine pull (daemon-driven) share this shape.
 type Transfer struct {
-	Store string // destination store name (or host)
-	Kind  string // oci | docker | containerd
-	From  string // source store/host
-	Ref   string // the reference placed in the destination
+	Store  string // target store name (or host)
+	Kind   string // oci | docker | containerd
+	Source string // source store/host
+	Ref    string // the reference placed in the target
 	// Digest is the manifest/index digest this transfer is anchored to: the
 	// digest the registry copy committed, and the digest an engine pull was
 	// pinned to. Empty when the step ran by tag alone.
@@ -170,7 +170,7 @@ type JobSnapshot struct {
 type TransferSnapshot struct {
 	Store      string          `json:"store"`
 	Kind       string          `json:"kind" enums:"oci,docker,containerd"` // which store kind ran this step
-	From       string          `json:"from"`
+	Source     string          `json:"source"`
 	Ref        string          `json:"ref"`
 	Digest     string          `json:"digest,omitempty"`                                 // manifest/index digest the step was anchored to
 	State      string          `json:"state" enums:"pending,running,done,exists,failed"` // transfer step state
@@ -208,7 +208,7 @@ func (j *Job) snapshot() JobSnapshot {
 		ts := TransferSnapshot{
 			Store:      t.Store,
 			Kind:       t.Kind,
-			From:       t.From,
+			Source:     t.Source,
 			Ref:        t.Ref,
 			Digest:     t.Digest,
 			State:      t.State,

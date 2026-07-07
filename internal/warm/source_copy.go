@@ -17,20 +17,21 @@ import (
 // cache, skipping blobs the cache already has. Progress reflects bytes actually
 // moved into the cache.
 type copySource struct {
-	from config.StoreConfig
-	to   config.StoreConfig
-	// fromRT/toRT are the resolved outbound transports (nil = library default),
-	// built once by NewSource so the TPM device is not reopened per layer.
-	fromRT http.RoundTripper
-	toRT   http.RoundTripper
+	source config.StoreConfig
+	target config.StoreConfig
+	// sourceRT/targetRT are the resolved outbound transports (nil = library
+	// default), built once by NewSource so the TPM device is not reopened per
+	// layer.
+	sourceRT http.RoundTripper
+	targetRT http.RoundTripper
 }
 
 func (s *copySource) pullOpts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, registryAuth(s.from), s.fromRT)
+	return baseOpts(ctx, registryAuth(s.source), s.sourceRT)
 }
 
 func (s *copySource) pushOpts(ctx context.Context) []remote.Option {
-	return baseOpts(ctx, registryAuth(s.to), s.toRT)
+	return baseOpts(ctx, registryAuth(s.target), s.targetRT)
 }
 
 func (s *copySource) Resolve(ctx context.Context, src, _ name.Reference, platforms []string) (*Plan, error) {

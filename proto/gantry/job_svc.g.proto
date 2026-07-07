@@ -37,8 +37,8 @@ service JobService {
 message JobAddRequest {
   string id = 1;
   string ref = 2 [features.field_presence = IMPLICIT];
-  StoreRef from = 3;
-  StoreRef to = 4;
+  StoreRef source = 3;
+  StoreRef target = 4;
   repeated string platforms = 5;
   bool copy_referrers = 6;
   repeated string as = 14;
@@ -65,8 +65,8 @@ message JobRef {
 message JobSelect {
   bool all = 1;
   bool ref = 2;
-  StoreSelect from = 3;
-  StoreSelect to = 4;
+  StoreSelect source = 3;
+  StoreSelect target = 4;
   bool platforms = 5;
   bool copy_referrers = 6;
   bool as = 14;
@@ -109,30 +109,30 @@ message JobListResponse {
 // The same inputs as JobAddRequest, evaluated without submitting.
 message JobPlanRequest {
   string ref = 1;
-  StoreRef from = 2;
-  StoreRef to = 3;
+  StoreRef source = 2;
+  StoreRef target = 3;
   repeated string platforms = 4;
   bool copy_referrers = 5;
-  // Engine destination only: names the image would be recorded under.
+  // Engine target only: names the image would be recorded under.
   repeated string as = 6;
 }
 
 message JobPlanResponse {
-  // Resolved source and destination store names.
-  string from = 1;
-  string to = 2;
+  // Resolved source and target store names.
+  string source = 1;
+  string target = 2;
   // Source-side ref, digest-pinned when verified.
-  string src_ref = 3;
-  // Destination-side ref: the rewritten cache ref, or the ref the engine
+  string source_ref = 3;
+  // Target-side ref: the rewritten cache ref, or the ref the engine
   // is told to pull.
-  string dst_ref = 4;
-  // Registry destination: empty = all platforms; engine destination: the
+  string target_ref = 4;
+  // Registry target: empty = all platforms; engine target: the
   // single platform pulled.
   repeated string platforms = 5;
   bool copy_referrers = 6;
   Verification verification = 7;
   // The active job an identical submit would coalesce onto, if any.
   string coalesces = 8;
-  // Engine destination: the (normalized) names the image is recorded under.
+  // Engine target: the (normalized) names the image is recorded under.
   repeated string as = 9;
 }

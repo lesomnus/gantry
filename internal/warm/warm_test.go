@@ -62,7 +62,7 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
-	snap, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "cache", Platforms: []string{"linux/amd64"}})
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "cache", Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 		t.Fatalf("transfers = %d, want 1", len(done.Transfers))
 	}
 	tr := done.Transfers[0]
-	if tr.Store != "cache" || tr.From != "up" || tr.Kind != "oci" {
+	if tr.Store != "cache" || tr.Source != "up" || tr.Kind != "oci" {
 		t.Errorf("transfer = %+v", tr)
 	}
 	if tr.BytesTotal == 0 || tr.BytesDone != tr.BytesTotal {
@@ -94,7 +94,7 @@ func TestWarmerDedup(t *testing.T) {
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background() // enqueue without starting workers; jobs stay active
-	req := Request{Ref: "team/app:1", From: "docker.io", To: "cache", Platforms: []string{"linux/amd64"}}
+	req := Request{Ref: "team/app:1", Source: "docker.io", Target: "cache", Platforms: []string{"linux/amd64"}}
 	s1, _, err := w.Submit(req)
 	if err != nil {
 		t.Fatal(err)
@@ -114,10 +114,10 @@ func TestWarmerQueueFull(t *testing.T) {
 	}, true)
 	w.base = context.Background()
 	w.jobs = make(chan *Job, 1)
-	if _, _, err := w.Submit(Request{Ref: "a/x:1", From: "r.io", To: "cache"}); err != nil {
+	if _, _, err := w.Submit(Request{Ref: "a/x:1", Source: "r.io", Target: "cache"}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := w.Submit(Request{Ref: "b/y:1", From: "r.io", To: "cache"})
+	_, _, err := w.Submit(Request{Ref: "b/y:1", Source: "r.io", Target: "cache"})
 	if !errors.Is(err, ErrQueueFull) {
 		t.Errorf("got %v, want ErrQueueFull", err)
 	}
@@ -126,8 +126,8 @@ func TestWarmerQueueFull(t *testing.T) {
 func TestWarmerNothingToDo(t *testing.T) {
 	w, _ := newWarmer(t, nil, true)
 	w.base = context.Background()
-	if _, _, err := w.Submit(Request{Ref: "x/y:1", From: "r.io"}); err == nil {
-		t.Error("expected error when `to` is not set")
+	if _, _, err := w.Submit(Request{Ref: "x/y:1", Source: "r.io"}); err == nil {
+		t.Error("expected error when `target` is not set")
 	}
 }
 
@@ -194,7 +194,7 @@ func TestCopyLayersReportsLayerError(t *testing.T) {
 	}
 	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
 	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
-	ex := &jobExec{src: src_ref, cacheRef: dst_ref}
+	ex := &jobExec{srcRef: src_ref, cacheRef: dst_ref}
 	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}, {Digest: "sha256:2"}, {Digest: "sha256:3"}}}
 
 	// The failing layer self-cancels the job ctx while the dispatcher is still
@@ -253,7 +253,7 @@ func TestActiveSkipsCanceledJob(t *testing.T) {
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background()
-	req := Request{Ref: "team/app:1", From: "docker.io", To: "cache", Platforms: []string{"linux/amd64"}}
+	req := Request{Ref: "team/app:1", Source: "docker.io", Target: "cache", Platforms: []string{"linux/amd64"}}
 	s1, _, err := w.Submit(req)
 	if err != nil {
 		t.Fatal(err)
@@ -276,7 +276,7 @@ func TestRetryRequiresTerminal(t *testing.T) {
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background()
-	s1, _, err := w.Submit(Request{Ref: "team/app:1", From: "docker.io", To: "cache", Platforms: []string{"linux/amd64"}})
+	s1, _, err := w.Submit(Request{Ref: "team/app:1", Source: "docker.io", Target: "cache", Platforms: []string{"linux/amd64"}})
 	if err != nil {
 		t.Fatal(err)
 	}

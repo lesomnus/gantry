@@ -25,7 +25,7 @@ type pusher interface {
 	dest
 	// newSource builds the copy pipeline from the given source store into this
 	// destination (copy or proxy mode).
-	newSource(from config.StoreConfig) (Source, error)
+	newSource(source config.StoreConfig) (Source, error)
 	// dstRef derives the in-store reference for src via the store's rewrite rules.
 	dstRef(src name.Reference) (name.Reference, error)
 }
@@ -37,7 +37,7 @@ type puller interface {
 	// pullRef is the reference the destination is told to pull for src: the
 	// source ref with the engine's pull_host — or the source store's
 	// downstream_host — applied.
-	pullRef(src name.Reference, from config.StoreConfig) (string, error)
+	pullRef(src name.Reference, source config.StoreConfig) (string, error)
 	// pull triggers the fetch. digest anchors it; platform is passed through
 	// as-is (the daemon errors if the image has no such platform).
 	pull(ctx context.Context, ref, digest, platform string, as []string, sink down.Sink) error
@@ -46,19 +46,19 @@ type puller interface {
 	hostPlatform(ctx context.Context) (string, error)
 }
 
-// resolveDest resolves a job's `to` into a destination: a declared engine store
-// becomes a puller; anything else resolves through the registry path (declared
-// oci store, or a bare host when allow_unknown_stores is set) and becomes a
-// pusher.
-func resolveDest(stores *store.Set, to string) (dest, error) {
-	if c, ok := stores.Config(to); ok && c.IsEngine() {
-		eng, err := stores.Engine(to)
+// resolveDest resolves a job's `target` into a destination: a declared engine
+// store becomes a puller; anything else resolves through the registry path
+// (declared oci store, or a bare host when allow_unknown_stores is set) and
+// becomes a pusher.
+func resolveDest(stores *store.Set, target string) (dest, error) {
+	if c, ok := stores.Config(target); ok && c.IsEngine() {
+		eng, err := stores.Engine(target)
 		if err != nil {
 			return nil, err
 		}
 		return &engineDest{cfg: c, eng: eng}, nil
 	}
-	c, err := stores.Registry(to)
+	c, err := stores.Registry(target)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ func (d *registryDest) Kind() string { return "oci" }
 // verification and referrer copying, which need a copy-mode destination.
 func (d *registryDest) isProxy() bool { return d.cfg.Mode == "proxy" }
 
-func (d *registryDest) newSource(from config.StoreConfig) (Source, error) {
-	return NewSource(from, d.cfg)
+func (d *registryDest) newSource(source config.StoreConfig) (Source, error) {
+	return NewSource(source, d.cfg)
 }
 
 func (d *registryDest) dstRef(src name.Reference) (name.Reference, error) {
@@ -93,10 +93,10 @@ type engineDest struct {
 func (d *engineDest) Name() string { return d.cfg.Name }
 func (d *engineDest) Kind() string { return d.eng.Kind() }
 
-func (d *engineDest) pullRef(src name.Reference, from config.StoreConfig) (string, error) {
+func (d *engineDest) pullRef(src name.Reference, source config.StoreConfig) (string, error) {
 	host := d.cfg.PullHost
 	if host == "" {
-		host = from.DownstreamHost
+		host = source.DownstreamHost
 	}
 	if host == "" {
 		return src.Name(), nil

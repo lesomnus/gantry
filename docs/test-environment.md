@@ -110,7 +110,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/v2/   # 200
 ```yaml
 serve:
   addr: "127.0.0.1:18080"
-  allow_unknown_stores: true   # let `from: docker.io` resolve to a bare host
+  allow_unknown_stores: true   # let `source: docker.io` resolve to a bare host
 stores:
   cache:       { kind: "oci", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
   dind-docker: { kind: "docker",     address: "tcp://docker:2375" }
@@ -127,7 +127,7 @@ go run . --config gantry-e2e.yaml serve &
 grpcurl -plaintext 127.0.0.1:18080 gantry.StoreService/List   # 3 stores, capabilities, ready
 
 # 사전에 어디에도 없는 이미지로(content-store 캐시 혼동 방지)
-ID=$(grpcurl -plaintext -d '{"ref":"busybox:latest","from":{"name":"docker.io"},"to":{"name":"cache"}}' \
+ID=$(grpcurl -plaintext -d '{"ref":"busybox:latest","source":{"name":"docker.io"},"target":{"name":"cache"}}' \
        127.0.0.1:18080 gantry.JobService/Add \
      | sed -n 's/.*"id": "\([^"]*\)".*/\1/p')
 

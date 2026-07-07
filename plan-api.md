@@ -57,7 +57,7 @@ plan.md(:244, :589)는 원래 "index digest로 distribute"를 약속했는데 �
 
 `copySource.Commit`(source_copy.go:56-102)이 platform-filter된 index를 **새로 만들어** push하므로
 referrer(notation 서명)가 캐시에서 탈락한다 — 어드미션에서 검증한 바로 그 서명이 첫 hop에서
-사라져, 캐시를 `from`으로 삼는 엣지 gantry는 require 모드에서 전부 ErrUnsigned.
+사라져, 캐시를 `source`로 삼는 엣지 gantry는 require 모드에서 전부 ErrUnsigned.
 
 - `copy_referrers` 플래그(verifier 활성 시 기본 on): 소스의 OCI referrer를 열거해 캐시에 함께 push.
 - **digest 보존이 전제**: referrer copy 시 rebuilt index 대신 원본 index verbatim push
@@ -392,7 +392,7 @@ race/vet clean, 적대 리뷰(4렌즈, 21건 확정 → 10개 고유 결함) 반
   (자식 manifest 전부 push 후 원본 index 바이트 → 소스 digest 보존) + oras CopyGraph로 referrer 복사
   (referrers API/fallback tag 모두, 두 방식 다 E2E 테스트). 기본값: **이 job이 실제 검증됐고**(verifier
   존재만이 아님 — 리뷰 반영) 요청·설정 어느 쪽도 platforms를 좁히지 않았을 때만 on(리뷰: 설정 협소화
-  조용한 무시 방지); 명시적 true는 config 협소화를 이기되 Warn 로그, 요청 platforms·proxy·no-`to`와는
+  조용한 무시 방지); 명시적 true는 config 협소화를 이기되 Warn 로그, 요청 platforms·proxy·no-`target`과는
   400. orasRepo/notation repo 모두 docker keychain + self-signed TLS 패리티(리뷰 반영).
 - [x] **§1.1 digest 앵커링** — `Source.Commit`이 커밋된 digest 반환; 엔진 pull은 `repo@digest` 후
   로컬 재태깅(docker `ImageTag`; containerd는 태그 레코드 생성 후 **digest 레코드 삭제** — 리뷰

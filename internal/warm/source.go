@@ -41,29 +41,29 @@ type Source interface {
 }
 
 // NewSource builds a registry copy/proxy between two registry stores, selected
-// by the destination store's mode. The per-store outbound transport (TPM mTLS or
+// by the target store's mode. The per-store outbound transport (TPM mTLS or
 // a TLS-skip transport for self-signed registries) is resolved once here and
 // reused for every request the source makes.
-func NewSource(from, to config.StoreConfig) (Source, error) {
-	switch to.Mode {
+func NewSource(source, target config.StoreConfig) (Source, error) {
+	switch target.Mode {
 	case "", "copy":
-		fromRT, err := xport.Transport(from)
+		sourceRT, err := xport.Transport(source)
 		if err != nil {
-			return nil, z.Err(err, "store %q outbound transport", from.Name)
+			return nil, z.Err(err, "store %q outbound transport", source.Name)
 		}
-		toRT, err := xport.Transport(to)
+		targetRT, err := xport.Transport(target)
 		if err != nil {
-			return nil, z.Err(err, "store %q outbound transport", to.Name)
+			return nil, z.Err(err, "store %q outbound transport", target.Name)
 		}
-		return &copySource{from: from, to: to, fromRT: fromRT, toRT: toRT}, nil
+		return &copySource{source: source, target: target, sourceRT: sourceRT, targetRT: targetRT}, nil
 	case "proxy":
-		toRT, err := xport.Transport(to)
+		targetRT, err := xport.Transport(target)
 		if err != nil {
-			return nil, z.Err(err, "store %q outbound transport", to.Name)
+			return nil, z.Err(err, "store %q outbound transport", target.Name)
 		}
-		return &proxySource{to: to, toRT: toRT}, nil
+		return &proxySource{target: target, targetRT: targetRT}, nil
 	default:
-		return nil, fmt.Errorf("store %q: unknown mode %q", to.Name, to.Mode)
+		return nil, fmt.Errorf("store %q: unknown mode %q", target.Name, target.Mode)
 	}
 }
 
@@ -97,12 +97,12 @@ func baseOpts(ctx context.Context, auth authn.Authenticator, rt http.RoundTrippe
 
 // upstreamPlan resolves the layer plan for ref directly against its source
 // store — used to estimate an engine pull's size without a copy Source.
-func upstreamPlan(ctx context.Context, from config.StoreConfig, ref name.Reference, platforms []string) (*Plan, error) {
-	rt, err := xport.Transport(from)
+func upstreamPlan(ctx context.Context, source config.StoreConfig, ref name.Reference, platforms []string) (*Plan, error) {
+	rt, err := xport.Transport(source)
 	if err != nil {
 		return nil, err
 	}
-	return resolvePlan(ctx, ref, platforms, baseOpts(ctx, registryAuth(from), rt))
+	return resolvePlan(ctx, ref, platforms, baseOpts(ctx, registryAuth(source), rt))
 }
 
 // resolvePlan walks ref (image or index) restricted to the selected platforms

@@ -435,7 +435,7 @@ type Transfer struct {
 	state                 protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Store      string                 `protobuf:"bytes,1,opt,name=store"`
 	xxx_hidden_Kind       StoreKind              `protobuf:"varint,2,opt,name=kind,enum=gantry.StoreKind"`
-	xxx_hidden_From       string                 `protobuf:"bytes,3,opt,name=from"`
+	xxx_hidden_Source     string                 `protobuf:"bytes,3,opt,name=source"`
 	xxx_hidden_Ref        string                 `protobuf:"bytes,4,opt,name=ref"`
 	xxx_hidden_Digest     string                 `protobuf:"bytes,5,opt,name=digest"`
 	xxx_hidden_State      TransferState          `protobuf:"varint,6,opt,name=state,enum=gantry.TransferState"`
@@ -486,9 +486,9 @@ func (x *Transfer) GetKind() StoreKind {
 	return StoreKind_STORE_KIND_UNSPECIFIED
 }
 
-func (x *Transfer) GetFrom() string {
+func (x *Transfer) GetSource() string {
 	if x != nil {
-		return x.xxx_hidden_From
+		return x.xxx_hidden_Source
 	}
 	return ""
 }
@@ -552,8 +552,8 @@ func (x *Transfer) SetKind(v StoreKind) {
 	x.xxx_hidden_Kind = v
 }
 
-func (x *Transfer) SetFrom(v string) {
-	x.xxx_hidden_From = v
+func (x *Transfer) SetSource(v string) {
+	x.xxx_hidden_Source = v
 }
 
 func (x *Transfer) SetRef(v string) {
@@ -587,10 +587,10 @@ func (x *Transfer) SetError(v string) {
 type Transfer_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Store string
-	Kind  StoreKind
-	From  string
-	// The reference placed in the destination.
+	Store  string
+	Kind   StoreKind
+	Source string
+	// The reference placed in the target.
 	Ref string
 	// Manifest/index digest the step was anchored to, when known.
 	Digest     string
@@ -607,7 +607,7 @@ func (b0 Transfer_builder) Build() *Transfer {
 	_, _ = b, x
 	x.xxx_hidden_Store = b.Store
 	x.xxx_hidden_Kind = b.Kind
-	x.xxx_hidden_From = b.From
+	x.xxx_hidden_Source = b.Source
 	x.xxx_hidden_Ref = b.Ref
 	x.xxx_hidden_Digest = b.Digest
 	x.xxx_hidden_State = b.State
@@ -618,13 +618,13 @@ func (b0 Transfer_builder) Build() *Transfer {
 	return m0
 }
 
-// A move of one image from a source registry into a destination store.
+// A move of one image from a source registry into a target store.
 type Job struct {
 	state                    protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Id            string                 `protobuf:"bytes,1,opt,name=id"`
 	xxx_hidden_Ref           string                 `protobuf:"bytes,2,opt,name=ref"`
-	xxx_hidden_From          *Store                 `protobuf:"bytes,3,opt,name=from"`
-	xxx_hidden_To            *Store                 `protobuf:"bytes,4,opt,name=to"`
+	xxx_hidden_Source        *Store                 `protobuf:"bytes,3,opt,name=source"`
+	xxx_hidden_Target        *Store                 `protobuf:"bytes,4,opt,name=target"`
 	xxx_hidden_Platforms     []string               `protobuf:"bytes,5,rep,name=platforms"`
 	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,6,opt,name=copy_referrers,json=copyReferrers"`
 	xxx_hidden_As            []string               `protobuf:"bytes,14,rep,name=as"`
@@ -680,16 +680,16 @@ func (x *Job) GetRef() string {
 	return ""
 }
 
-func (x *Job) GetFrom() *Store {
+func (x *Job) GetSource() *Store {
 	if x != nil {
-		return x.xxx_hidden_From
+		return x.xxx_hidden_Source
 	}
 	return nil
 }
 
-func (x *Job) GetTo() *Store {
+func (x *Job) GetTarget() *Store {
 	if x != nil {
-		return x.xxx_hidden_To
+		return x.xxx_hidden_Target
 	}
 	return nil
 }
@@ -774,12 +774,12 @@ func (x *Job) SetRef(v string) {
 	x.xxx_hidden_Ref = v
 }
 
-func (x *Job) SetFrom(v *Store) {
-	x.xxx_hidden_From = v
+func (x *Job) SetSource(v *Store) {
+	x.xxx_hidden_Source = v
 }
 
-func (x *Job) SetTo(v *Store) {
-	x.xxx_hidden_To = v
+func (x *Job) SetTarget(v *Store) {
+	x.xxx_hidden_Target = v
 }
 
 func (x *Job) SetPlatforms(v []string) {
@@ -823,18 +823,18 @@ func (x *Job) SetEndedAt(v *timestamppb.Timestamp) {
 	x.xxx_hidden_EndedAt = v
 }
 
-func (x *Job) HasFrom() bool {
+func (x *Job) HasSource() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_From != nil
+	return x.xxx_hidden_Source != nil
 }
 
-func (x *Job) HasTo() bool {
+func (x *Job) HasTarget() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_To != nil
+	return x.xxx_hidden_Target != nil
 }
 
 func (x *Job) HasCopyReferrers() bool {
@@ -872,12 +872,12 @@ func (x *Job) HasEndedAt() bool {
 	return x.xxx_hidden_EndedAt != nil
 }
 
-func (x *Job) ClearFrom() {
-	x.xxx_hidden_From = nil
+func (x *Job) ClearSource() {
+	x.xxx_hidden_Source = nil
 }
 
-func (x *Job) ClearTo() {
-	x.xxx_hidden_To = nil
+func (x *Job) ClearTarget() {
+	x.xxx_hidden_Target = nil
 }
 
 func (x *Job) ClearCopyReferrers() {
@@ -911,16 +911,16 @@ type Job_builder struct {
 	// Source registry; defaults to the ref's registry. Unlike the REST API,
 	// the gRPC surface addresses declared stores only — bare registry hosts
 	// (allow_unknown_stores) are not expressible through a StoreRef.
-	From *Store
-	// Destination store: a registry (gantry copies) or an engine (daemon pulls).
-	To *Store
-	// Registry destination: platforms to copy (empty = all). Engine
-	// destination: the single platform to pull (empty = daemon's).
+	Source *Store
+	// Target store: a registry (gantry copies) or an engine (daemon pulls).
+	Target *Store
+	// Registry target: platforms to copy (empty = all). Engine
+	// target: the single platform to pull (empty = daemon's).
 	Platforms []string
 	// Copy source referrer artifacts (signatures) along with the image.
 	// Absent = server default (on when the job is verified).
 	CopyReferrers *bool
-	// Engine destination only: record the pulled image under these names
+	// Engine target only: record the pulled image under these names
 	// instead of the pull reference, so a cache-fed engine keeps the image
 	// under its upstream name (e.g. "docker.io/library/redis:7"). Tag
 	// references only; non-empty replaces the pull-reference name entirely —
@@ -941,8 +941,8 @@ func (b0 Job_builder) Build() *Job {
 	_, _ = b, x
 	x.xxx_hidden_Id = b.Id
 	x.xxx_hidden_Ref = b.Ref
-	x.xxx_hidden_From = b.From
-	x.xxx_hidden_To = b.To
+	x.xxx_hidden_Source = b.Source
+	x.xxx_hidden_Target = b.Target
 	x.xxx_hidden_Platforms = b.Platforms
 	if b.CopyReferrers != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 14)
@@ -973,11 +973,11 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x14\n" +
 	"\x05total\x18\x03 \x01(\x03R\x05total\x12\x12\n" +
 	"\x04done\x18\x04 \x01(\x03R\x04done\x12(\n" +
-	"\x05state\x18\x05 \x01(\x0e2\x12.gantry.LayerStateR\x05state\"\xaf\x02\n" +
+	"\x05state\x18\x05 \x01(\x0e2\x12.gantry.LayerStateR\x05state\"\xb3\x02\n" +
 	"\bTransfer\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12%\n" +
-	"\x04kind\x18\x02 \x01(\x0e2\x11.gantry.StoreKindR\x04kind\x12\x12\n" +
-	"\x04from\x18\x03 \x01(\tR\x04from\x12\x10\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x11.gantry.StoreKindR\x04kind\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x10\n" +
 	"\x03ref\x18\x04 \x01(\tR\x03ref\x12\x16\n" +
 	"\x06digest\x18\x05 \x01(\tR\x06digest\x12+\n" +
 	"\x05state\x18\x06 \x01(\x0e2\x15.gantry.TransferStateR\x05state\x12\x1f\n" +
@@ -987,12 +987,12 @@ const file_gantry_job_proto_rawDesc = "" +
 	"bytes_done\x18\b \x01(\x03R\tbytesDone\x12%\n" +
 	"\x06layers\x18\t \x03(\v2\r.gantry.LayerR\x06layers\x12\x14\n" +
 	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"\xea\x04\n" +
+	" \x01(\tR\x05error\"\xf6\x04\n" +
 	"\x03Job\x12\x19\n" +
 	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12\x18\n" +
-	"\x03ref\x18\x02 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12+\n" +
-	"\x04from\x18\x03 \x01(\v2\r.gantry.StoreB\b\xf2\x82\x16\x048\x01@\x01R\x04from\x12%\n" +
-	"\x02to\x18\x04 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x02to\x12$\n" +
+	"\x03ref\x18\x02 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12/\n" +
+	"\x06source\x18\x03 \x01(\v2\r.gantry.StoreB\b\xf2\x82\x16\x048\x01@\x01R\x06source\x12-\n" +
+	"\x06target\x18\x04 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x06target\x12$\n" +
 	"\tplatforms\x18\x05 \x03(\tB\x06\xea\x82\x16\x02@\x01R\tplatforms\x122\n" +
 	"\x0ecopy_referrers\x18\x06 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x12\x16\n" +
 	"\x02as\x18\x0e \x03(\tB\x06\xea\x82\x16\x02@\x01R\x02as\x12&\n" +
@@ -1056,8 +1056,8 @@ var file_gantry_job_proto_depIdxs = []int32{
 	8,  // 2: gantry.Transfer.kind:type_name -> gantry.StoreKind
 	2,  // 3: gantry.Transfer.state:type_name -> gantry.TransferState
 	5,  // 4: gantry.Transfer.layers:type_name -> gantry.Layer
-	9,  // 5: gantry.Job.from:type_name -> gantry.Store
-	9,  // 6: gantry.Job.to:type_name -> gantry.Store
+	9,  // 5: gantry.Job.source:type_name -> gantry.Store
+	9,  // 6: gantry.Job.target:type_name -> gantry.Store
 	0,  // 7: gantry.Job.state:type_name -> gantry.JobState
 	4,  // 8: gantry.Job.verification:type_name -> gantry.Verification
 	6,  // 9: gantry.Job.transfers:type_name -> gantry.Transfer

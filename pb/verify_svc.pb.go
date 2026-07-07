@@ -527,7 +527,7 @@ func (b0 VerifyAnchor_builder) Build() *VerifyAnchor {
 type VerifyCheckRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Ref         *string                `protobuf:"bytes,1,opt,name=ref"`
-	xxx_hidden_From        *StoreRef              `protobuf:"bytes,2,opt,name=from"`
+	xxx_hidden_Source      *StoreRef              `protobuf:"bytes,2,opt,name=source"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -569,9 +569,9 @@ func (x *VerifyCheckRequest) GetRef() string {
 	return ""
 }
 
-func (x *VerifyCheckRequest) GetFrom() *StoreRef {
+func (x *VerifyCheckRequest) GetSource() *StoreRef {
 	if x != nil {
-		return x.xxx_hidden_From
+		return x.xxx_hidden_Source
 	}
 	return nil
 }
@@ -581,8 +581,8 @@ func (x *VerifyCheckRequest) SetRef(v string) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
 }
 
-func (x *VerifyCheckRequest) SetFrom(v *StoreRef) {
-	x.xxx_hidden_From = v
+func (x *VerifyCheckRequest) SetSource(v *StoreRef) {
+	x.xxx_hidden_Source = v
 }
 
 func (x *VerifyCheckRequest) HasRef() bool {
@@ -592,11 +592,11 @@ func (x *VerifyCheckRequest) HasRef() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *VerifyCheckRequest) HasFrom() bool {
+func (x *VerifyCheckRequest) HasSource() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_From != nil
+	return x.xxx_hidden_Source != nil
 }
 
 func (x *VerifyCheckRequest) ClearRef() {
@@ -604,8 +604,8 @@ func (x *VerifyCheckRequest) ClearRef() {
 	x.xxx_hidden_Ref = nil
 }
 
-func (x *VerifyCheckRequest) ClearFrom() {
-	x.xxx_hidden_From = nil
+func (x *VerifyCheckRequest) ClearSource() {
+	x.xxx_hidden_Source = nil
 }
 
 type VerifyCheckRequest_builder struct {
@@ -613,7 +613,7 @@ type VerifyCheckRequest_builder struct {
 
 	Ref *string
 	// Source registry; defaults to the ref's registry.
-	From *StoreRef
+	Source *StoreRef
 }
 
 func (b0 VerifyCheckRequest_builder) Build() *VerifyCheckRequest {
@@ -624,7 +624,7 @@ func (b0 VerifyCheckRequest_builder) Build() *VerifyCheckRequest {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
 		x.xxx_hidden_Ref = b.Ref
 	}
-	x.xxx_hidden_From = b.From
+	x.xxx_hidden_Source = b.Source
 	return m0
 }
 
@@ -829,10 +829,10 @@ const file_gantry_verify_svc_proto_rawDesc = "" +
 	"\fVerifyAnchor\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12 \n" +
 	"\vfingerprint\x18\x02 \x01(\tR\vfingerprint\x127\n" +
-	"\tnot_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\"L\n" +
+	"\tnot_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\"P\n" +
 	"\x12VerifyCheckRequest\x12\x10\n" +
-	"\x03ref\x18\x01 \x01(\tR\x03ref\x12$\n" +
-	"\x04from\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x04from\"\x83\x01\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\x12(\n" +
+	"\x06source\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x06source\"\x83\x01\n" +
 	"\x13VerifyCheckResponse\x12\x1a\n" +
 	"\bverified\x18\x01 \x01(\bR\bverified\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x16\n" +
@@ -862,7 +862,7 @@ var file_gantry_verify_svc_proto_depIdxs = []int32{
 	2,  // 2: gantry.VerifyDescribeResponse.anchors:type_name -> gantry.VerifyAnchor
 	5,  // 3: gantry.VerifyDescribeResponse.stores:type_name -> gantry.VerifyDescribeResponse.StoresEntry
 	7,  // 4: gantry.VerifyAnchor.not_after:type_name -> google.protobuf.Timestamp
-	8,  // 5: gantry.VerifyCheckRequest.from:type_name -> gantry.StoreRef
+	8,  // 5: gantry.VerifyCheckRequest.source:type_name -> gantry.StoreRef
 	6,  // 6: gantry.VerifyCheckResponse.mode:type_name -> gantry.VerifyMode
 	6,  // 7: gantry.VerifyDescribeResponse.StoresEntry.value:type_name -> gantry.VerifyMode
 	9,  // 8: gantry.VerifyService.Describe:input_type -> google.protobuf.Empty

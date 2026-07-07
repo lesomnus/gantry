@@ -614,10 +614,10 @@ Phase-1 전부 구현·검증 완료. 약 2,900 LOC + 테스트, race/vet clean.
 phase-1 구현(M0–M7) 후, "warm + downstream trigger"를 **store 간 이미지 이동**으로 일반화함. downstream pull도 per-layer 추적이 되면서 cache fill(remote→cache)과 같은 모양(`Transfer`)이 되기 때문.
 
 - **store** = 이미지 저장소. kind `registry`(gantry가 blob read/write) 또는 `docker`/`containerd`(gantry가 pull trigger). config의 `registry`+`targets`가 단일 `serve.stores`로 통합. `allow_unknown_stores`(기본 false)로 미선언 registry 호스트 허용.
-- **job** = `{ref, from, to, distribute}`: `from`(registry)→`to`(registry) copy 후 `distribute`(engine)들이 pull. from/to는 store 이름 또는 bare host(free-form).
-- **Transfer** = 한 이동 단계의 진행률(`{store, kind, from, ref, state, bytes_total, bytes_done, layers[]}`). cache copy와 각 engine pull이 전부 같은 모양. 응답은 `job.transfers[]`로 통일.
+- **job** = `{ref, source, target, distribute}`: `source`(registry)→`target`(registry) copy 후 `distribute`(engine)들이 pull. source/target은 store 이름 또는 bare host(free-form).
+- **Transfer** = 한 이동 단계의 진행률(`{store, kind, source, ref, state, bytes_total, bytes_done, layers[]}`). cache copy와 각 engine pull이 전부 같은 모양. 응답은 `job.transfers[]`로 통일.
 - **per-layer 진행률**: registry copy는 gantry가 직접 카운트(정확). engine pull은 docker jsonmessage / containerd ContentStore 폴링으로 best-effort(데몬이 byte를 보고할 때만; docker 29 containerd-store는 빠른 로컬 pull 시 byte 미보고 → state-level).
-- **API**: `GET /v1/store`(전체 store + capability + readiness), `POST /v1/job`(from/to/distribute), `GET /v1/job/{id}`(transfers[]), `POST /v1/store/{name}/pull`(수동).
+- **API**: `GET /v1/store`(전체 store + capability + readiness), `POST /v1/job`(source/target/distribute), `GET /v1/job/{id}`(transfers[]), `POST /v1/store/{name}/pull`(수동).
 - **패키지**: `internal/store`(해석+status), `internal/down`(engine: docker/containerd, Sink), `internal/warm`(registry Source copy/proxy + Warmer transfers 오케스트레이션). 실 docker+containerd로 e2e 검증.
 
 위 §HTTP API / §도메인 모델 / §설정은 v1(warm-centric) 기준이며, 실제 구현은 이 v2 모델을 따른다.

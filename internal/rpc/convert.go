@@ -232,7 +232,7 @@ func jobToPB(snap warm.JobSnapshot) *pb.Job {
 		transfers = append(transfers, pb.Transfer_builder{
 			Store:      t.Store,
 			Kind:       storeKindToPB[t.Kind],
-			From:       t.From,
+			Source:     t.Source,
 			Ref:        t.Ref,
 			Digest:     t.Digest,
 			State:      transferStateToPB[t.State],
@@ -257,8 +257,8 @@ func jobToPB(snap warm.JobSnapshot) *pb.Job {
 	}
 	// The snapshot carries the resolved stores inside its transfer step.
 	if len(snap.Transfers) > 0 {
-		b.From = storeByName(snap.Transfers[0].From)
-		b.To = storeByName(snap.Transfers[0].Store)
+		b.Source = storeByName(snap.Transfers[0].Source)
+		b.Target = storeByName(snap.Transfers[0].Store)
 	}
 	return b.Build()
 }
@@ -302,7 +302,7 @@ func eventToPB(e event.Event) *pb.Event {
 	}
 	if len(e.Detail) > 0 {
 		var d struct {
-			From     string `json:"from"`
+			Source   string `json:"source"`
 			Job      string `json:"job"`
 			Bytes    int64  `json:"bytes"`
 			Deleted  int32  `json:"deleted"`
@@ -312,7 +312,7 @@ func eventToPB(e event.Event) *pb.Event {
 		}
 		if json.Unmarshal(e.Detail, &d) == nil {
 			b.Detail = pb.EventDetail_builder{
-				From:     d.From,
+				Source:   d.Source,
 				Job:      d.Job,
 				Bytes:    d.Bytes,
 				Deleted:  d.Deleted,
@@ -410,17 +410,17 @@ func planToPB(res warm.PlanResult) *pb.JobPlanResponse {
 		As:           res.As,
 		Verification: verificationToPB(res.Verification),
 	}
-	if res.From != "" {
-		b.From = proto.String(res.From)
+	if res.Source != "" {
+		b.Source = proto.String(res.Source)
 	}
-	if res.To != "" {
-		b.To = proto.String(res.To)
+	if res.Target != "" {
+		b.Target = proto.String(res.Target)
 	}
-	if res.SrcRef != "" {
-		b.SrcRef = proto.String(res.SrcRef)
+	if res.SourceRef != "" {
+		b.SourceRef = proto.String(res.SourceRef)
 	}
-	if res.DstRef != "" {
-		b.DstRef = proto.String(res.DstRef)
+	if res.TargetRef != "" {
+		b.TargetRef = proto.String(res.TargetRef)
 	}
 	b.CopyReferrers = proto.Bool(res.CopyReferrers)
 	if res.Coalesces != "" {

@@ -6,13 +6,13 @@
 #
 # `stores` is a top-level section (not nested under `serve`).
 stores:
-  # Source registry (remote). Jobs name this as `from`.
+  # Source registry (remote). Jobs name this as `source`.
   remote:
     kind: oci
     host: cr.hday.io
 
   # Local cache registry gantry fills and the daemons pull from.
-  # Jobs name this as `to`.
+  # Jobs name this as `target`.
   local:
     kind: oci
     host: "192.168.10.33:5000"

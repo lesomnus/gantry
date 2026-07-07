@@ -65,8 +65,8 @@ message Layer {
 message Transfer {
   string store = 1;
   StoreKind kind = 2;
-  string from = 3;
-  // The reference placed in the destination.
+  string source = 3;
+  // The reference placed in the target.
   string ref = 4;
   // Manifest/index digest the step was anchored to, when known.
   string digest = 5;
@@ -77,7 +77,7 @@ message Transfer {
   string error = 10;
 }
 
-// A move of one image from a source registry into a destination store.
+// A move of one image from a source registry into a target store.
 message Job {
   // Server-generated, e.g. "job_1f2e...".
   string id = 1 [(orm.field) = {
@@ -89,14 +89,14 @@ message Job {
   // Source registry; defaults to the ref's registry. Unlike the REST API,
   // the gRPC surface addresses declared stores only — bare registry hosts
   // (allow_unknown_stores) are not expressible through a StoreRef.
-  Store from = 3 [(orm.edge) = {
+  Store source = 3 [(orm.edge) = {
     nullable: true
     immutable: true
   }];
-  // Destination store: a registry (gantry copies) or an engine (daemon pulls).
-  Store to = 4 [(orm.edge) = {immutable: true}];
-  // Registry destination: platforms to copy (empty = all). Engine
-  // destination: the single platform to pull (empty = daemon's).
+  // Target store: a registry (gantry copies) or an engine (daemon pulls).
+  Store target = 4 [(orm.edge) = {immutable: true}];
+  // Registry target: platforms to copy (empty = all). Engine
+  // target: the single platform to pull (empty = daemon's).
   repeated string platforms = 5 [(orm.field) = {immutable: true}];
   // Copy source referrer artifacts (signatures) along with the image.
   // Absent = server default (on when the job is verified).
@@ -104,7 +104,7 @@ message Job {
     features.field_presence = EXPLICIT,
     (orm.field) = {immutable: true}
   ];
-  // Engine destination only: record the pulled image under these names
+  // Engine target only: record the pulled image under these names
   // instead of the pull reference, so a cache-fed engine keeps the image
   // under its upstream name (e.g. "docker.io/library/redis:7"). Tag
   // references only; non-empty replaces the pull-reference name entirely —

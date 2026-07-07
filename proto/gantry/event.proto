@@ -23,7 +23,7 @@ enum EventType {
 // Type-specific payload; which fields are set depends on the event type.
 message EventDetail {
   // job_admitted: the source store.
-  string from = 1;
+  string source = 1;
   // job_done: the job id and total bytes moved.
   string job = 2;
   int64 bytes = 3;

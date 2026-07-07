@@ -12,25 +12,25 @@ containerd (a daemon that pulls). A **job** moves an image from a registry into
 any store:
 
 ```
-JobService.Add {ref, from, to}
-   from (registry) ──copy──▶ to (registry/cache)     # oci: gantry copies blobs
-   from (registry) ──pull──▶ to (docker/containerd)  # engine: the daemon pulls
+JobService.Add {ref, source, target}
+   source (registry) ──copy──▶ target (registry/cache)     # oci: gantry copies blobs
+   source (registry) ──pull──▶ target (docker/containerd)  # engine: the daemon pulls
         the transfer reports per-layer byte progress
 JobService.Get  ·  JobService.Watch (server stream)
 ```
 
-- The `from`→`to` copy is gantry-driven: it pulls each blob and pushes it,
-  skipping blobs the destination already has, so progress reflects bytes actually
-  moved (**copy** mode). **proxy** mode reads through `to` so a pull-through cache
-  self-fills instead.
-- An engine `to` pulls exactly one platform: the request's, or the daemon
+- The `source`→`target` copy is gantry-driven: it pulls each blob and pushes it,
+  skipping blobs the target already has, so progress reflects bytes actually
+  moved (**copy** mode). **proxy** mode reads through `target` so a pull-through
+  cache self-fills instead.
+- An engine `target` pulls exactly one platform: the request's, or the daemon
   host's when omitted. The daemon's progress is folded into the same transfer
   (totals estimated upfront from the source manifest, refined as the daemon
   reports). `StoreService.Pull` remains for ad-hoc, job-less pulls.
 - Optionally, gantry reclaims space on the engines it feeds: it tracks each
   image's last-used time from the daemon's container events and runs an adaptive,
   policy-driven GC (per-store `retention`). See [Configuration](#configuration).
-- Optionally, gantry verifies the `from` image's signature (Notary Project /
+- Optionally, gantry verifies the `source` image's signature (Notary Project /
   notation) at job creation and rejects the job on failure — pinning the verified
   digest so it moves exactly what was verified (`serve.verify`). The signature can
   travel with the image into the cache (`copy_referrers`), so it still verifies
@@ -39,9 +39,9 @@ JobService.Get  ·  JobService.Watch (server stream)
   pins, manual ops — that survives restarts (`serve.events`), and exports metrics
   and traces over OTLP (`otel`).
 
-The cache-side reference is derived from the destination store's `rewrite` rules
-(ordered `{glob: template}`, first match wins). `from`/`to` may be a declared
-store name or a bare registry host (when `allow_unknown_stores` is set).
+The cache-side reference is derived from the target store's `rewrite` rules
+(ordered `{glob: template}`, first match wins). `source`/`target` may be a
+declared store name or a bare registry host (when `allow_unknown_stores` is set).
 
 ## Quick start
 
@@ -56,15 +56,15 @@ $ grpcurl -plaintext localhost:8080 gantry.StoreService/List
 # Copy redis from docker.io into the cache.
 $ grpcurl -plaintext -d '{
     "ref": "library/redis:7",
-    "from": {"name": "docker.io"}, "to": {"name": "cache"},
+    "source": {"name": "docker.io"}, "target": {"name": "cache"},
     "platforms": ["linux/amd64"]
   }' localhost:8080 gantry.JobService/Add
 
-# Move the cached image onto the k3s node — same job shape, engine destination.
+# Move the cached image onto the k3s node — same job shape, engine target.
 # The daemon pulls it; platform defaults to the node's own.
 $ grpcurl -plaintext -d '{
     "ref": "library/redis:7",
-    "from": {"name": "cache"}, "to": {"name": "k3s"}
+    "source": {"name": "cache"}, "target": {"name": "k3s"}
   }' localhost:8080 gantry.JobService/Add
 
 # Watch progress (every transfer carries per-layer bytes); the stream ends

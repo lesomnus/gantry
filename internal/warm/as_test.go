@@ -28,7 +28,7 @@ func TestJobToEngineAs(t *testing.T) {
 	t.Cleanup(func() { cancel(); w.Stop() })
 
 	as := []string{"docker.io/team/app:1", "legacy.io/team/app:stable"}
-	snap, created, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node", As: as})
+	snap, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", As: as})
 	if err != nil || !created {
 		t.Fatalf("submit: created=%v err=%v", created, err)
 	}
@@ -62,14 +62,14 @@ func TestAsValidation(t *testing.T) {
 	w.SetBaseContext(context.Background()) // admission only; no workers
 
 	// A registry destination has no naming step.
-	_, _, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "up", As: []string{"docker.io/team/app:1"}})
+	_, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "up", As: []string{"docker.io/team/app:1"}})
 	if err == nil || !strings.Contains(err.Error(), "registry") {
 		t.Errorf("registry dest must reject as, got %v", err)
 	}
 
 	// A digest is content identity, not a name.
 	_, _, err = w.Submit(Request{
-		Ref: "team/app:1", From: "up", To: "node",
+		Ref: "team/app:1", Source: "up", Target: "node",
 		As: []string{"docker.io/team/app@sha256:0000000000000000000000000000000000000000000000000000000000000000"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "digest") {
@@ -84,15 +84,15 @@ func TestAsDedup(t *testing.T) {
 	pushImage(t, up+"/team/app:1", 1)
 	w.SetBaseContext(context.Background()) // jobs stay pending: dedup is observable
 
-	first, created, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node", As: []string{"a.example.com/team/app:1"}})
+	first, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", As: []string{"a.example.com/team/app:1"}})
 	if err != nil || !created {
 		t.Fatalf("first: created=%v err=%v", created, err)
 	}
-	same, created, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node", As: []string{"a.example.com/team/app:1"}})
+	same, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", As: []string{"a.example.com/team/app:1"}})
 	if err != nil || created || same.ID != first.ID {
 		t.Fatalf("identical submit must coalesce: created=%v id=%s err=%v", created, same.ID, err)
 	}
-	other, created, err := w.Submit(Request{Ref: "team/app:1", From: "up", To: "node", As: []string{"b.example.com/team/app:1"}})
+	other, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", As: []string{"b.example.com/team/app:1"}})
 	if err != nil || !created || other.ID == first.ID {
 		t.Fatalf("different as must not coalesce: created=%v err=%v", created, err)
 	}

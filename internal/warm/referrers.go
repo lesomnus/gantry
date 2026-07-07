@@ -77,12 +77,12 @@ func orasRepo(c config.StoreConfig, repo name.Repository) (*remote.Repository, e
 // already exist in the destination (Commit runs first). oras handles both the
 // referrers API and the fallback-tag scheme, whichever the registry supports.
 // Returns the number of referrers copied.
-func copyReferrers(ctx context.Context, from, to config.StoreConfig, src name.Reference, subject v1.Hash, dst name.Repository) (int, error) {
-	src_repo, err := orasRepo(from, src.Context())
+func copyReferrers(ctx context.Context, source, target config.StoreConfig, src name.Reference, subject v1.Hash, dst name.Repository) (int, error) {
+	src_repo, err := orasRepo(source, src.Context())
 	if err != nil {
 		return 0, z.Err(err, "source repo")
 	}
-	dst_repo, err := orasRepo(to, dst)
+	dst_repo, err := orasRepo(target, dst)
 	if err != nil {
 		return 0, z.Err(err, "destination repo")
 	}

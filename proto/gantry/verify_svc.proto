@@ -54,7 +54,7 @@ message VerifyAnchor {
 message VerifyCheckRequest {
   string ref = 1;
   // Source registry; defaults to the ref's registry.
-  StoreRef from = 2;
+  StoreRef source = 2;
 }
 
 message VerifyCheckResponse {

@@ -84,7 +84,7 @@ func (x EventType) Number() protoreflect.EnumNumber {
 // Type-specific payload; which fields are set depends on the event type.
 type EventDetail struct {
 	state               protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_From     string                 `protobuf:"bytes,1,opt,name=from"`
+	xxx_hidden_Source   string                 `protobuf:"bytes,1,opt,name=source"`
 	xxx_hidden_Job      string                 `protobuf:"bytes,2,opt,name=job"`
 	xxx_hidden_Bytes    int64                  `protobuf:"varint,3,opt,name=bytes"`
 	xxx_hidden_Deleted  int32                  `protobuf:"varint,4,opt,name=deleted"`
@@ -120,9 +120,9 @@ func (x *EventDetail) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-func (x *EventDetail) GetFrom() string {
+func (x *EventDetail) GetSource() string {
 	if x != nil {
-		return x.xxx_hidden_From
+		return x.xxx_hidden_Source
 	}
 	return ""
 }
@@ -169,8 +169,8 @@ func (x *EventDetail) GetErrors() int32 {
 	return 0
 }
 
-func (x *EventDetail) SetFrom(v string) {
-	x.xxx_hidden_From = v
+func (x *EventDetail) SetSource(v string) {
+	x.xxx_hidden_Source = v
 }
 
 func (x *EventDetail) SetJob(v string) {
@@ -201,7 +201,7 @@ type EventDetail_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
 	// job_admitted: the source store.
-	From string
+	Source string
 	// job_done: the job id and total bytes moved.
 	Job   string
 	Bytes int64
@@ -216,7 +216,7 @@ func (b0 EventDetail_builder) Build() *EventDetail {
 	m0 := &EventDetail{}
 	b, x := &b0, m0
 	_, _ = b, x
-	x.xxx_hidden_From = b.From
+	x.xxx_hidden_Source = b.Source
 	x.xxx_hidden_Job = b.Job
 	x.xxx_hidden_Bytes = b.Bytes
 	x.xxx_hidden_Deleted = b.Deleted
@@ -431,9 +431,9 @@ var File_gantry_event_proto protoreflect.FileDescriptor
 
 const file_gantry_event_proto_rawDesc = "" +
 	"\n" +
-	"\x12gantry/event.proto\x12\x06gantry\x1a\x10gantry/job.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xaf\x01\n" +
-	"\vEventDetail\x12\x12\n" +
-	"\x04from\x18\x01 \x01(\tR\x04from\x12\x10\n" +
+	"\x12gantry/event.proto\x12\x06gantry\x1a\x10gantry/job.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xb3\x01\n" +
+	"\vEventDetail\x12\x16\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\x12\x10\n" +
 	"\x03job\x18\x02 \x01(\tR\x03job\x12\x14\n" +
 	"\x05bytes\x18\x03 \x01(\x03R\x05bytes\x12\x18\n" +
 	"\adeleted\x18\x04 \x01(\x05R\adeleted\x12\x1a\n" +
