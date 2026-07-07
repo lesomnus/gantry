@@ -37,6 +37,9 @@ message Image {
 
   // Derived: whether any pin currently protects this record.
   bool pinned = 10;
+  // Derived: whether a live container on the engine currently references
+  // this image (by tag ref or image ID).
+  bool in_use = 11;
 
   option (orm.message) = {
     rpc: {crud: true}

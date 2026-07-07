@@ -6,6 +6,7 @@ edition = "2023";
 package gantry;
 
 import "gantry/job.proto";
+import "gantry/store_svc.g.proto";
 import "google/protobuf/timestamp.proto";
 
 service JobService {
@@ -14,7 +15,15 @@ service JobService {
   // Watch streams snapshots of the job as its transfers progress and ends
   // after the snapshot that carries a terminal state. The gRPC counterpart
   // of the REST SSE endpoint GET /v1/job/{id}/progress.
-  rpc Watch(JobRef) returns (stream Job);
+  rpc Watch(JobWatchRequest) returns (stream Job);
+  // Plan runs admission for a would-be job without submitting it: store
+  // binding, rewrite, verification, and coalescing are all evaluated.
+  rpc Plan(JobPlanRequest) returns (JobPlanResponse);
+  // Cancel stops a running job but keeps its record for inspection.
+  rpc Cancel(JobCancelRequest) returns (JobCancelResponse);
+  // Retry re-submits a terminal job's original request as a new job, with
+  // fresh resolution and verification.
+  rpc Retry(JobRetryRequest) returns (JobRetryResponse);
 }
 
 message JobListRequest {
@@ -31,4 +40,53 @@ message JobListRequest {
 message JobListResponse {
   repeated Job items = 1;
   string next_page_token = 2;
+}
+
+message JobWatchRequest {
+  JobRef ref = 1;
+}
+
+// The same inputs as JobAddRequest, evaluated without submitting.
+message JobPlanRequest {
+  string ref = 1;
+  StoreRef from = 2;
+  StoreRef to = 3;
+  repeated string platforms = 4;
+  bool copy_referrers = 5;
+}
+
+message JobPlanResponse {
+  // Resolved source and destination store names.
+  string from = 1;
+  string to = 2;
+  // Source-side ref, digest-pinned when verified.
+  string src_ref = 3;
+  // Destination-side ref: the rewritten cache ref, or the ref the engine
+  // is told to pull.
+  string dst_ref = 4;
+  // Registry destination: empty = all platforms; engine destination: the
+  // single platform pulled.
+  repeated string platforms = 5;
+  bool copy_referrers = 6;
+  Verification verification = 7;
+  // The active job an identical submit would coalesce onto, if any.
+  string coalesces = 8;
+}
+
+message JobCancelRequest {
+  JobRef ref = 1;
+}
+
+message JobCancelResponse {
+  // Snapshot taken right after the cancel was signaled.
+  Job job = 1;
+}
+
+message JobRetryRequest {
+  JobRef ref = 1;
+}
+
+message JobRetryResponse {
+  // The newly submitted job.
+  Job job = 1;
 }

@@ -27,6 +27,8 @@ message ImageListRequest {
   // Exact match on the full reference.
   string ref = 3;
   bool pinned = 4;
+  // Filter on live container usage; replaces the REST /inuse endpoint.
+  bool in_use = 5;
 
   int32 page_size = 10;
   string page_token = 11;

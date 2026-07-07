@@ -6,10 +6,21 @@ edition = "2023";
 package gantry;
 
 import "gantry/store.proto";
+import "google/protobuf/timestamp.proto";
 
 service StoreService {
   // List returns the declared stores, sorted by name.
   rpc List(StoreListRequest) returns (StoreListResponse);
+  // Pull tells an engine store to pull an image, job-less and synchronous.
+  rpc Pull(StorePullRequest) returns (StorePullResponse);
+  // Remove deletes an image from an engine store and syncs the retention
+  // index.
+  rpc Remove(StoreRemoveRequest) returns (StoreRemoveResponse);
+  // Health probes the store, served from a short-lived cache.
+  rpc Health(StoreHealthRequest) returns (StoreHealthResponse);
+  // Watcher reports the health of the usage-event stream that stamps
+  // last_used on the store's images.
+  rpc Watcher(StoreWatcherRequest) returns (StoreWatcherResponse);
 }
 
 message StoreListRequest {
@@ -22,4 +33,58 @@ message StoreListRequest {
 message StoreListResponse {
   repeated Store items = 1;
   string next_page_token = 2;
+}
+
+message StorePullRequest {
+  StoreRef store = 1;
+  string ref = 2;
+  // Platform to pull ("os/arch"); empty uses the daemon's default.
+  string platform = 3;
+}
+
+message StorePullResponse {
+  // The reference the engine pulled.
+  string ref = 1;
+}
+
+message StoreRemoveRequest {
+  StoreRef store = 1;
+  string ref = 2;
+}
+
+message StoreRemoveResponse {
+  // Tag refs removed; disk is freed only when the last tag and its content
+  // are gone.
+  repeated string untagged = 1;
+  // Content IDs whose bytes were actually deleted.
+  repeated string deleted = 2;
+}
+
+message StoreHealthRequest {
+  StoreRef store = 1;
+}
+
+message StoreHealthResponse {
+  bool healthy = 1;
+  StoreKind kind = 2;
+  int64 latency_ms = 3;
+  string error = 4;
+  google.protobuf.Timestamp checked_at = 5;
+  // True when served from the TTL cache rather than probed for this call.
+  bool cached = 6;
+}
+
+message StoreWatcherRequest {
+  StoreRef store = 1;
+}
+
+message StoreWatcherResponse {
+  bool connected = 1;
+  google.protobuf.Timestamp watching_since = 2;
+  // Receipt time of the last usage event.
+  google.protobuf.Timestamp last_event_at = 3;
+  google.protobuf.Timestamp last_seed_at = 4;
+  // Times the event stream ended and was re-established.
+  int32 reconnects = 5;
+  string last_error = 6;
 }

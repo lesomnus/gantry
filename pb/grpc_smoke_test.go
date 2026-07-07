@@ -20,6 +20,10 @@ func TestGeneratedWiring(t *testing.T) {
 	l := bufconn.Listen(1 << 20)
 	g := grpc.NewServer()
 	pb.RegisterServer(g, pb.UnimplementedServer{})
+	// Non-entity services are not part of the orm-generated wiring and
+	// register individually.
+	pb.RegisterGcServiceServer(g, pb.UnimplementedGcServiceServer{})
+	pb.RegisterVerifyServiceServer(g, pb.UnimplementedVerifyServiceServer{})
 	go g.Serve(l)
 	defer g.Stop()
 
@@ -32,6 +36,8 @@ func TestGeneratedWiring(t *testing.T) {
 		"gantry.ImageService",
 		"gantry.PinService",
 		"gantry.EventService",
+		"gantry.GcService",
+		"gantry.VerifyService",
 	} {
 		if _, ok := info[name]; !ok {
 			t.Errorf("service %s is not registered", name)
@@ -73,9 +79,17 @@ func TestGeneratedWiring(t *testing.T) {
 	if _, err := c.Event().List(ctx, &pb.EventListRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("Event.List: want Unimplemented, got %v", err)
 	}
-	if w, err := c.Job().Watch(ctx, pb.JobById("job_0")); err != nil {
+	if w, err := c.Job().Watch(ctx, pb.JobWatchRequest_builder{
+		Ref: pb.JobById("job_0"),
+	}.Build()); err != nil {
 		t.Errorf("Job.Watch: %v", err)
 	} else if _, err := w.Recv(); status.Code(err) != codes.Unimplemented {
 		t.Errorf("Job.Watch recv: want Unimplemented, got %v", err)
+	}
+	if _, err := pb.NewGcServiceClient(conn).Status(ctx, &pb.GcStatusRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("Gc.Status: want Unimplemented, got %v", err)
+	}
+	if _, err := pb.NewVerifyServiceClient(conn).Describe(ctx, &pb.VerifyDescribeRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("Verify.Describe: want Unimplemented, got %v", err)
 	}
 }

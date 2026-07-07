@@ -37,6 +37,7 @@ type Image struct {
 	xxx_hidden_LastUsed        *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_used,json=lastUsed"`
 	xxx_hidden_LastDistributed *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_distributed,json=lastDistributed"`
 	xxx_hidden_Pinned          bool                   `protobuf:"varint,10,opt,name=pinned"`
+	xxx_hidden_InUse           bool                   `protobuf:"varint,11,opt,name=in_use,json=inUse"`
 	unknownFields              protoimpl.UnknownFields
 	sizeCache                  protoimpl.SizeCache
 }
@@ -136,6 +137,13 @@ func (x *Image) GetPinned() bool {
 	return false
 }
 
+func (x *Image) GetInUse() bool {
+	if x != nil {
+		return x.xxx_hidden_InUse
+	}
+	return false
+}
+
 func (x *Image) SetId(v []byte) {
 	if v == nil {
 		v = []byte{}
@@ -177,6 +185,10 @@ func (x *Image) SetLastDistributed(v *timestamppb.Timestamp) {
 
 func (x *Image) SetPinned(v bool) {
 	x.xxx_hidden_Pinned = v
+}
+
+func (x *Image) SetInUse(v bool) {
+	x.xxx_hidden_InUse = v
 }
 
 func (x *Image) HasStore() bool {
@@ -243,6 +255,9 @@ type Image_builder struct {
 	LastDistributed *timestamppb.Timestamp
 	// Derived: whether any pin currently protects this record.
 	Pinned bool
+	// Derived: whether a live container on the engine currently references
+	// this image (by tag ref or image ID).
+	InUse bool
 }
 
 func (b0 Image_builder) Build() *Image {
@@ -259,6 +274,7 @@ func (b0 Image_builder) Build() *Image {
 	x.xxx_hidden_LastUsed = b.LastUsed
 	x.xxx_hidden_LastDistributed = b.LastDistributed
 	x.xxx_hidden_Pinned = b.Pinned
+	x.xxx_hidden_InUse = b.InUse
 	return m0
 }
 
@@ -266,7 +282,7 @@ var File_gantry_image_proto protoreflect.FileDescriptor
 
 const file_gantry_image_proto_rawDesc = "" +
 	"\n" +
-	"\x12gantry/image.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xbf\x03\n" +
+	"\x12gantry/image.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xd6\x03\n" +
 	"\x05Image\x12\x1b\n" +
 	"\x02id\x18\x01 \x01(\fB\v\xea\x82\x16\a\x10@(\x01\x82\x01\x00R\x02id\x12+\n" +
 	"\x05store\x18\x02 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x05store\x12\x18\n" +
@@ -279,7 +295,8 @@ const file_gantry_image_proto_rawDesc = "" +
 	"\tlast_used\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\blastUsed\x12E\n" +
 	"\x10last_distributed\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0flastDistributed\x12\x16\n" +
 	"\x06pinned\x18\n" +
-	" \x01(\bR\x06pinned:)\xca\xfc\x15%\x12\x02\x10\x01\x1a\x1f\x12\alocator\x1a\t\n" +
+	" \x01(\bR\x06pinned\x12\x15\n" +
+	"\x06in_use\x18\v \x01(\bR\x05inUse:)\xca\xfc\x15%\x12\x02\x10\x01\x1a\x1f\x12\alocator\x1a\t\n" +
 	"\x05store\x10\x02\x1a\a\n" +
 	"\x03ref\x10\x030\x01B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
 

@@ -10,6 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	unsafe "unsafe"
 )
@@ -1285,11 +1286,981 @@ func (b0 StoreListResponse_builder) Build() *StoreListResponse {
 	return m0
 }
 
+type StorePullRequest struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Store       *StoreRef              `protobuf:"bytes,1,opt,name=store"`
+	xxx_hidden_Ref         *string                `protobuf:"bytes,2,opt,name=ref"`
+	xxx_hidden_Platform    *string                `protobuf:"bytes,3,opt,name=platform"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *StorePullRequest) Reset() {
+	*x = StorePullRequest{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorePullRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorePullRequest) ProtoMessage() {}
+
+func (x *StorePullRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StorePullRequest) GetStore() *StoreRef {
+	if x != nil {
+		return x.xxx_hidden_Store
+	}
+	return nil
+}
+
+func (x *StorePullRequest) GetRef() string {
+	if x != nil {
+		if x.xxx_hidden_Ref != nil {
+			return *x.xxx_hidden_Ref
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *StorePullRequest) GetPlatform() string {
+	if x != nil {
+		if x.xxx_hidden_Platform != nil {
+			return *x.xxx_hidden_Platform
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *StorePullRequest) SetStore(v *StoreRef) {
+	x.xxx_hidden_Store = v
+}
+
+func (x *StorePullRequest) SetRef(v string) {
+	x.xxx_hidden_Ref = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
+}
+
+func (x *StorePullRequest) SetPlatform(v string) {
+	x.xxx_hidden_Platform = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
+}
+
+func (x *StorePullRequest) HasStore() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Store != nil
+}
+
+func (x *StorePullRequest) HasRef() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *StorePullRequest) HasPlatform() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *StorePullRequest) ClearStore() {
+	x.xxx_hidden_Store = nil
+}
+
+func (x *StorePullRequest) ClearRef() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_Ref = nil
+}
+
+func (x *StorePullRequest) ClearPlatform() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_Platform = nil
+}
+
+type StorePullRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Store *StoreRef
+	Ref   *string
+	// Platform to pull ("os/arch"); empty uses the daemon's default.
+	Platform *string
+}
+
+func (b0 StorePullRequest_builder) Build() *StorePullRequest {
+	m0 := &StorePullRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Store = b.Store
+	if b.Ref != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
+		x.xxx_hidden_Ref = b.Ref
+	}
+	if b.Platform != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		x.xxx_hidden_Platform = b.Platform
+	}
+	return m0
+}
+
+type StorePullResponse struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Ref         *string                `protobuf:"bytes,1,opt,name=ref"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *StorePullResponse) Reset() {
+	*x = StorePullResponse{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorePullResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorePullResponse) ProtoMessage() {}
+
+func (x *StorePullResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StorePullResponse) GetRef() string {
+	if x != nil {
+		if x.xxx_hidden_Ref != nil {
+			return *x.xxx_hidden_Ref
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *StorePullResponse) SetRef(v string) {
+	x.xxx_hidden_Ref = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 1)
+}
+
+func (x *StorePullResponse) HasRef() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *StorePullResponse) ClearRef() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_Ref = nil
+}
+
+type StorePullResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// The reference the engine pulled.
+	Ref *string
+}
+
+func (b0 StorePullResponse_builder) Build() *StorePullResponse {
+	m0 := &StorePullResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.Ref != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 1)
+		x.xxx_hidden_Ref = b.Ref
+	}
+	return m0
+}
+
+type StoreRemoveRequest struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Store       *StoreRef              `protobuf:"bytes,1,opt,name=store"`
+	xxx_hidden_Ref         *string                `protobuf:"bytes,2,opt,name=ref"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *StoreRemoveRequest) Reset() {
+	*x = StoreRemoveRequest{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreRemoveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreRemoveRequest) ProtoMessage() {}
+
+func (x *StoreRemoveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StoreRemoveRequest) GetStore() *StoreRef {
+	if x != nil {
+		return x.xxx_hidden_Store
+	}
+	return nil
+}
+
+func (x *StoreRemoveRequest) GetRef() string {
+	if x != nil {
+		if x.xxx_hidden_Ref != nil {
+			return *x.xxx_hidden_Ref
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *StoreRemoveRequest) SetStore(v *StoreRef) {
+	x.xxx_hidden_Store = v
+}
+
+func (x *StoreRemoveRequest) SetRef(v string) {
+	x.xxx_hidden_Ref = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 2)
+}
+
+func (x *StoreRemoveRequest) HasStore() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Store != nil
+}
+
+func (x *StoreRemoveRequest) HasRef() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *StoreRemoveRequest) ClearStore() {
+	x.xxx_hidden_Store = nil
+}
+
+func (x *StoreRemoveRequest) ClearRef() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_Ref = nil
+}
+
+type StoreRemoveRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Store *StoreRef
+	Ref   *string
+}
+
+func (b0 StoreRemoveRequest_builder) Build() *StoreRemoveRequest {
+	m0 := &StoreRemoveRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Store = b.Store
+	if b.Ref != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 2)
+		x.xxx_hidden_Ref = b.Ref
+	}
+	return m0
+}
+
+type StoreRemoveResponse struct {
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Untagged []string               `protobuf:"bytes,1,rep,name=untagged"`
+	xxx_hidden_Deleted  []string               `protobuf:"bytes,2,rep,name=deleted"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *StoreRemoveResponse) Reset() {
+	*x = StoreRemoveResponse{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreRemoveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreRemoveResponse) ProtoMessage() {}
+
+func (x *StoreRemoveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StoreRemoveResponse) GetUntagged() []string {
+	if x != nil {
+		return x.xxx_hidden_Untagged
+	}
+	return nil
+}
+
+func (x *StoreRemoveResponse) GetDeleted() []string {
+	if x != nil {
+		return x.xxx_hidden_Deleted
+	}
+	return nil
+}
+
+func (x *StoreRemoveResponse) SetUntagged(v []string) {
+	x.xxx_hidden_Untagged = v
+}
+
+func (x *StoreRemoveResponse) SetDeleted(v []string) {
+	x.xxx_hidden_Deleted = v
+}
+
+type StoreRemoveResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Tag refs removed; disk is freed only when the last tag and its content
+	// are gone.
+	Untagged []string
+	// Content IDs whose bytes were actually deleted.
+	Deleted []string
+}
+
+func (b0 StoreRemoveResponse_builder) Build() *StoreRemoveResponse {
+	m0 := &StoreRemoveResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Untagged = b.Untagged
+	x.xxx_hidden_Deleted = b.Deleted
+	return m0
+}
+
+type StoreHealthRequest struct {
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Store *StoreRef              `protobuf:"bytes,1,opt,name=store"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *StoreHealthRequest) Reset() {
+	*x = StoreHealthRequest{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreHealthRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreHealthRequest) ProtoMessage() {}
+
+func (x *StoreHealthRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StoreHealthRequest) GetStore() *StoreRef {
+	if x != nil {
+		return x.xxx_hidden_Store
+	}
+	return nil
+}
+
+func (x *StoreHealthRequest) SetStore(v *StoreRef) {
+	x.xxx_hidden_Store = v
+}
+
+func (x *StoreHealthRequest) HasStore() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Store != nil
+}
+
+func (x *StoreHealthRequest) ClearStore() {
+	x.xxx_hidden_Store = nil
+}
+
+type StoreHealthRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Store *StoreRef
+}
+
+func (b0 StoreHealthRequest_builder) Build() *StoreHealthRequest {
+	m0 := &StoreHealthRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Store = b.Store
+	return m0
+}
+
+type StoreHealthResponse struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Healthy     bool                   `protobuf:"varint,1,opt,name=healthy"`
+	xxx_hidden_Kind        StoreKind              `protobuf:"varint,2,opt,name=kind,enum=gantry.StoreKind"`
+	xxx_hidden_LatencyMs   int64                  `protobuf:"varint,3,opt,name=latency_ms,json=latencyMs"`
+	xxx_hidden_Error       *string                `protobuf:"bytes,4,opt,name=error"`
+	xxx_hidden_CheckedAt   *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=checked_at,json=checkedAt"`
+	xxx_hidden_Cached      bool                   `protobuf:"varint,6,opt,name=cached"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *StoreHealthResponse) Reset() {
+	*x = StoreHealthResponse{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreHealthResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreHealthResponse) ProtoMessage() {}
+
+func (x *StoreHealthResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StoreHealthResponse) GetHealthy() bool {
+	if x != nil {
+		return x.xxx_hidden_Healthy
+	}
+	return false
+}
+
+func (x *StoreHealthResponse) GetKind() StoreKind {
+	if x != nil {
+		if protoimpl.X.Present(&(x.XXX_presence[0]), 1) {
+			return x.xxx_hidden_Kind
+		}
+	}
+	return StoreKind_STORE_KIND_UNSPECIFIED
+}
+
+func (x *StoreHealthResponse) GetLatencyMs() int64 {
+	if x != nil {
+		return x.xxx_hidden_LatencyMs
+	}
+	return 0
+}
+
+func (x *StoreHealthResponse) GetError() string {
+	if x != nil {
+		if x.xxx_hidden_Error != nil {
+			return *x.xxx_hidden_Error
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *StoreHealthResponse) GetCheckedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_CheckedAt
+	}
+	return nil
+}
+
+func (x *StoreHealthResponse) GetCached() bool {
+	if x != nil {
+		return x.xxx_hidden_Cached
+	}
+	return false
+}
+
+func (x *StoreHealthResponse) SetHealthy(v bool) {
+	x.xxx_hidden_Healthy = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 6)
+}
+
+func (x *StoreHealthResponse) SetKind(v StoreKind) {
+	x.xxx_hidden_Kind = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 6)
+}
+
+func (x *StoreHealthResponse) SetLatencyMs(v int64) {
+	x.xxx_hidden_LatencyMs = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 6)
+}
+
+func (x *StoreHealthResponse) SetError(v string) {
+	x.xxx_hidden_Error = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 6)
+}
+
+func (x *StoreHealthResponse) SetCheckedAt(v *timestamppb.Timestamp) {
+	x.xxx_hidden_CheckedAt = v
+}
+
+func (x *StoreHealthResponse) SetCached(v bool) {
+	x.xxx_hidden_Cached = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 6)
+}
+
+func (x *StoreHealthResponse) HasHealthy() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *StoreHealthResponse) HasKind() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *StoreHealthResponse) HasLatencyMs() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *StoreHealthResponse) HasError() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
+}
+
+func (x *StoreHealthResponse) HasCheckedAt() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_CheckedAt != nil
+}
+
+func (x *StoreHealthResponse) HasCached() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 5)
+}
+
+func (x *StoreHealthResponse) ClearHealthy() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_Healthy = false
+}
+
+func (x *StoreHealthResponse) ClearKind() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_Kind = StoreKind_STORE_KIND_UNSPECIFIED
+}
+
+func (x *StoreHealthResponse) ClearLatencyMs() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_LatencyMs = 0
+}
+
+func (x *StoreHealthResponse) ClearError() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_Error = nil
+}
+
+func (x *StoreHealthResponse) ClearCheckedAt() {
+	x.xxx_hidden_CheckedAt = nil
+}
+
+func (x *StoreHealthResponse) ClearCached() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
+	x.xxx_hidden_Cached = false
+}
+
+type StoreHealthResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Healthy   *bool
+	Kind      *StoreKind
+	LatencyMs *int64
+	Error     *string
+	CheckedAt *timestamppb.Timestamp
+	// True when served from the TTL cache rather than probed for this call.
+	Cached *bool
+}
+
+func (b0 StoreHealthResponse_builder) Build() *StoreHealthResponse {
+	m0 := &StoreHealthResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.Healthy != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 6)
+		x.xxx_hidden_Healthy = *b.Healthy
+	}
+	if b.Kind != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 6)
+		x.xxx_hidden_Kind = *b.Kind
+	}
+	if b.LatencyMs != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 6)
+		x.xxx_hidden_LatencyMs = *b.LatencyMs
+	}
+	if b.Error != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 6)
+		x.xxx_hidden_Error = b.Error
+	}
+	x.xxx_hidden_CheckedAt = b.CheckedAt
+	if b.Cached != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 6)
+		x.xxx_hidden_Cached = *b.Cached
+	}
+	return m0
+}
+
+type StoreWatcherRequest struct {
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Store *StoreRef              `protobuf:"bytes,1,opt,name=store"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *StoreWatcherRequest) Reset() {
+	*x = StoreWatcherRequest{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreWatcherRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreWatcherRequest) ProtoMessage() {}
+
+func (x *StoreWatcherRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StoreWatcherRequest) GetStore() *StoreRef {
+	if x != nil {
+		return x.xxx_hidden_Store
+	}
+	return nil
+}
+
+func (x *StoreWatcherRequest) SetStore(v *StoreRef) {
+	x.xxx_hidden_Store = v
+}
+
+func (x *StoreWatcherRequest) HasStore() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Store != nil
+}
+
+func (x *StoreWatcherRequest) ClearStore() {
+	x.xxx_hidden_Store = nil
+}
+
+type StoreWatcherRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Store *StoreRef
+}
+
+func (b0 StoreWatcherRequest_builder) Build() *StoreWatcherRequest {
+	m0 := &StoreWatcherRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Store = b.Store
+	return m0
+}
+
+type StoreWatcherResponse struct {
+	state                    protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Connected     bool                   `protobuf:"varint,1,opt,name=connected"`
+	xxx_hidden_WatchingSince *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=watching_since,json=watchingSince"`
+	xxx_hidden_LastEventAt   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_event_at,json=lastEventAt"`
+	xxx_hidden_LastSeedAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_seed_at,json=lastSeedAt"`
+	xxx_hidden_Reconnects    int32                  `protobuf:"varint,5,opt,name=reconnects"`
+	xxx_hidden_LastError     *string                `protobuf:"bytes,6,opt,name=last_error,json=lastError"`
+	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
+	XXX_presence             [1]uint32
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *StoreWatcherResponse) Reset() {
+	*x = StoreWatcherResponse{}
+	mi := &file_gantry_store_svc_g_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoreWatcherResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoreWatcherResponse) ProtoMessage() {}
+
+func (x *StoreWatcherResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_store_svc_g_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *StoreWatcherResponse) GetConnected() bool {
+	if x != nil {
+		return x.xxx_hidden_Connected
+	}
+	return false
+}
+
+func (x *StoreWatcherResponse) GetWatchingSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_WatchingSince
+	}
+	return nil
+}
+
+func (x *StoreWatcherResponse) GetLastEventAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_LastEventAt
+	}
+	return nil
+}
+
+func (x *StoreWatcherResponse) GetLastSeedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_LastSeedAt
+	}
+	return nil
+}
+
+func (x *StoreWatcherResponse) GetReconnects() int32 {
+	if x != nil {
+		return x.xxx_hidden_Reconnects
+	}
+	return 0
+}
+
+func (x *StoreWatcherResponse) GetLastError() string {
+	if x != nil {
+		if x.xxx_hidden_LastError != nil {
+			return *x.xxx_hidden_LastError
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *StoreWatcherResponse) SetConnected(v bool) {
+	x.xxx_hidden_Connected = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 6)
+}
+
+func (x *StoreWatcherResponse) SetWatchingSince(v *timestamppb.Timestamp) {
+	x.xxx_hidden_WatchingSince = v
+}
+
+func (x *StoreWatcherResponse) SetLastEventAt(v *timestamppb.Timestamp) {
+	x.xxx_hidden_LastEventAt = v
+}
+
+func (x *StoreWatcherResponse) SetLastSeedAt(v *timestamppb.Timestamp) {
+	x.xxx_hidden_LastSeedAt = v
+}
+
+func (x *StoreWatcherResponse) SetReconnects(v int32) {
+	x.xxx_hidden_Reconnects = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 6)
+}
+
+func (x *StoreWatcherResponse) SetLastError(v string) {
+	x.xxx_hidden_LastError = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 6)
+}
+
+func (x *StoreWatcherResponse) HasConnected() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *StoreWatcherResponse) HasWatchingSince() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_WatchingSince != nil
+}
+
+func (x *StoreWatcherResponse) HasLastEventAt() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_LastEventAt != nil
+}
+
+func (x *StoreWatcherResponse) HasLastSeedAt() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_LastSeedAt != nil
+}
+
+func (x *StoreWatcherResponse) HasReconnects() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
+}
+
+func (x *StoreWatcherResponse) HasLastError() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 5)
+}
+
+func (x *StoreWatcherResponse) ClearConnected() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_Connected = false
+}
+
+func (x *StoreWatcherResponse) ClearWatchingSince() {
+	x.xxx_hidden_WatchingSince = nil
+}
+
+func (x *StoreWatcherResponse) ClearLastEventAt() {
+	x.xxx_hidden_LastEventAt = nil
+}
+
+func (x *StoreWatcherResponse) ClearLastSeedAt() {
+	x.xxx_hidden_LastSeedAt = nil
+}
+
+func (x *StoreWatcherResponse) ClearReconnects() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	x.xxx_hidden_Reconnects = 0
+}
+
+func (x *StoreWatcherResponse) ClearLastError() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
+	x.xxx_hidden_LastError = nil
+}
+
+type StoreWatcherResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Connected     *bool
+	WatchingSince *timestamppb.Timestamp
+	// Receipt time of the last usage event.
+	LastEventAt *timestamppb.Timestamp
+	LastSeedAt  *timestamppb.Timestamp
+	// Times the event stream ended and was re-established.
+	Reconnects *int32
+	LastError  *string
+}
+
+func (b0 StoreWatcherResponse_builder) Build() *StoreWatcherResponse {
+	m0 := &StoreWatcherResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.Connected != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 6)
+		x.xxx_hidden_Connected = *b.Connected
+	}
+	x.xxx_hidden_WatchingSince = b.WatchingSince
+	x.xxx_hidden_LastEventAt = b.LastEventAt
+	x.xxx_hidden_LastSeedAt = b.LastSeedAt
+	if b.Reconnects != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 6)
+		x.xxx_hidden_Reconnects = *b.Reconnects
+	}
+	if b.LastError != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 6)
+		x.xxx_hidden_LastError = b.LastError
+	}
+	return m0
+}
+
 var File_gantry_store_svc_g_proto protoreflect.FileDescriptor
 
 const file_gantry_store_svc_g_proto_rawDesc = "" +
 	"\n" +
-	"\x18gantry/store_svc.g.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1bgoogle/protobuf/empty.proto\"\xe2\x02\n" +
+	"\x18gantry/store_svc.g.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe2\x02\n" +
 	"\x0fStoreAddRequest\x12\x19\n" +
 	"\x04name\x18\x01 \x01(\tB\x05\xaa\x01\x02\b\x02R\x04name\x12,\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x11.gantry.StoreKindB\x05\xaa\x01\x02\b\x02R\x04kind\x12\x19\n" +
@@ -1334,55 +2305,121 @@ const file_gantry_store_svc_g_proto_rawDesc = "" +
 	"page_token\x18\v \x01(\tR\tpageToken\"`\n" +
 	"\x11StoreListResponse\x12#\n" +
 	"\x05items\x18\x01 \x03(\v2\r.gantry.StoreR\x05items\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x8f\x02\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"h\n" +
+	"\x10StorePullRequest\x12&\n" +
+	"\x05store\x18\x01 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x1a\n" +
+	"\bplatform\x18\x03 \x01(\tR\bplatform\"%\n" +
+	"\x11StorePullResponse\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\"N\n" +
+	"\x12StoreRemoveRequest\x12&\n" +
+	"\x05store\x18\x01 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\"K\n" +
+	"\x13StoreRemoveResponse\x12\x1a\n" +
+	"\buntagged\x18\x01 \x03(\tR\buntagged\x12\x18\n" +
+	"\adeleted\x18\x02 \x03(\tR\adeleted\"<\n" +
+	"\x12StoreHealthRequest\x12&\n" +
+	"\x05store\x18\x01 \x01(\v2\x10.gantry.StoreRefR\x05store\"\xde\x01\n" +
+	"\x13StoreHealthResponse\x12\x18\n" +
+	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12%\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x11.gantry.StoreKindR\x04kind\x12\x1d\n" +
+	"\n" +
+	"latency_ms\x18\x03 \x01(\x03R\tlatencyMs\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x129\n" +
+	"\n" +
+	"checked_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcheckedAt\x12\x16\n" +
+	"\x06cached\x18\x06 \x01(\bR\x06cached\"=\n" +
+	"\x13StoreWatcherRequest\x12&\n" +
+	"\x05store\x18\x01 \x01(\v2\x10.gantry.StoreRefR\x05store\"\xb4\x02\n" +
+	"\x14StoreWatcherResponse\x12\x1c\n" +
+	"\tconnected\x18\x01 \x01(\bR\tconnected\x12A\n" +
+	"\x0ewatching_since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\rwatchingSince\x12>\n" +
+	"\rlast_event_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vlastEventAt\x12<\n" +
+	"\flast_seed_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"lastSeedAt\x12\x1e\n" +
+	"\n" +
+	"reconnects\x18\x05 \x01(\x05R\n" +
+	"reconnects\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\x06 \x01(\tR\tlastError2\x98\x04\n" +
 	"\fStoreService\x12-\n" +
 	"\x03Add\x12\x17.gantry.StoreAddRequest\x1a\r.gantry.Store\x12-\n" +
 	"\x03Get\x12\x17.gantry.StoreGetRequest\x1a\r.gantry.Store\x121\n" +
 	"\x05Patch\x12\x19.gantry.StorePatchRequest\x1a\r.gantry.Store\x121\n" +
 	"\x05Erase\x12\x10.gantry.StoreRef\x1a\x16.google.protobuf.Empty\x12;\n" +
-	"\x04List\x12\x18.gantry.StoreListRequest\x1a\x19.gantry.StoreListResponseB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
+	"\x04List\x12\x18.gantry.StoreListRequest\x1a\x19.gantry.StoreListResponse\x12;\n" +
+	"\x04Pull\x12\x18.gantry.StorePullRequest\x1a\x19.gantry.StorePullResponse\x12A\n" +
+	"\x06Remove\x12\x1a.gantry.StoreRemoveRequest\x1a\x1b.gantry.StoreRemoveResponse\x12A\n" +
+	"\x06Health\x12\x1a.gantry.StoreHealthRequest\x1a\x1b.gantry.StoreHealthResponse\x12D\n" +
+	"\aWatcher\x12\x1b.gantry.StoreWatcherRequest\x1a\x1c.gantry.StoreWatcherResponseB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
 
-var file_gantry_store_svc_g_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_gantry_store_svc_g_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_gantry_store_svc_g_proto_goTypes = []any{
-	(*StoreAddRequest)(nil),   // 0: gantry.StoreAddRequest
-	(*StoreGetRequest)(nil),   // 1: gantry.StoreGetRequest
-	(*StoreRef)(nil),          // 2: gantry.StoreRef
-	(*StoreSelect)(nil),       // 3: gantry.StoreSelect
-	(*StorePatchRequest)(nil), // 4: gantry.StorePatchRequest
-	(*StoreListRequest)(nil),  // 5: gantry.StoreListRequest
-	(*StoreListResponse)(nil), // 6: gantry.StoreListResponse
-	(StoreKind)(0),            // 7: gantry.StoreKind
-	(StoreMode)(0),            // 8: gantry.StoreMode
-	(*StoreCapabilities)(nil), // 9: gantry.StoreCapabilities
-	(*Store)(nil),             // 10: gantry.Store
-	(*emptypb.Empty)(nil),     // 11: google.protobuf.Empty
+	(*StoreAddRequest)(nil),       // 0: gantry.StoreAddRequest
+	(*StoreGetRequest)(nil),       // 1: gantry.StoreGetRequest
+	(*StoreRef)(nil),              // 2: gantry.StoreRef
+	(*StoreSelect)(nil),           // 3: gantry.StoreSelect
+	(*StorePatchRequest)(nil),     // 4: gantry.StorePatchRequest
+	(*StoreListRequest)(nil),      // 5: gantry.StoreListRequest
+	(*StoreListResponse)(nil),     // 6: gantry.StoreListResponse
+	(*StorePullRequest)(nil),      // 7: gantry.StorePullRequest
+	(*StorePullResponse)(nil),     // 8: gantry.StorePullResponse
+	(*StoreRemoveRequest)(nil),    // 9: gantry.StoreRemoveRequest
+	(*StoreRemoveResponse)(nil),   // 10: gantry.StoreRemoveResponse
+	(*StoreHealthRequest)(nil),    // 11: gantry.StoreHealthRequest
+	(*StoreHealthResponse)(nil),   // 12: gantry.StoreHealthResponse
+	(*StoreWatcherRequest)(nil),   // 13: gantry.StoreWatcherRequest
+	(*StoreWatcherResponse)(nil),  // 14: gantry.StoreWatcherResponse
+	(StoreKind)(0),                // 15: gantry.StoreKind
+	(StoreMode)(0),                // 16: gantry.StoreMode
+	(*StoreCapabilities)(nil),     // 17: gantry.StoreCapabilities
+	(*Store)(nil),                 // 18: gantry.Store
+	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),         // 20: google.protobuf.Empty
 }
 var file_gantry_store_svc_g_proto_depIdxs = []int32{
-	7,  // 0: gantry.StoreAddRequest.kind:type_name -> gantry.StoreKind
-	8,  // 1: gantry.StoreAddRequest.mode:type_name -> gantry.StoreMode
-	9,  // 2: gantry.StoreAddRequest.capabilities:type_name -> gantry.StoreCapabilities
+	15, // 0: gantry.StoreAddRequest.kind:type_name -> gantry.StoreKind
+	16, // 1: gantry.StoreAddRequest.mode:type_name -> gantry.StoreMode
+	17, // 2: gantry.StoreAddRequest.capabilities:type_name -> gantry.StoreCapabilities
 	2,  // 3: gantry.StoreGetRequest.ref:type_name -> gantry.StoreRef
 	3,  // 4: gantry.StoreGetRequest.select:type_name -> gantry.StoreSelect
 	2,  // 5: gantry.StorePatchRequest.ref:type_name -> gantry.StoreRef
-	8,  // 6: gantry.StorePatchRequest.mode:type_name -> gantry.StoreMode
-	9,  // 7: gantry.StorePatchRequest.capabilities:type_name -> gantry.StoreCapabilities
-	7,  // 8: gantry.StoreListRequest.kind:type_name -> gantry.StoreKind
-	10, // 9: gantry.StoreListResponse.items:type_name -> gantry.Store
-	0,  // 10: gantry.StoreService.Add:input_type -> gantry.StoreAddRequest
-	1,  // 11: gantry.StoreService.Get:input_type -> gantry.StoreGetRequest
-	4,  // 12: gantry.StoreService.Patch:input_type -> gantry.StorePatchRequest
-	2,  // 13: gantry.StoreService.Erase:input_type -> gantry.StoreRef
-	5,  // 14: gantry.StoreService.List:input_type -> gantry.StoreListRequest
-	10, // 15: gantry.StoreService.Add:output_type -> gantry.Store
-	10, // 16: gantry.StoreService.Get:output_type -> gantry.Store
-	10, // 17: gantry.StoreService.Patch:output_type -> gantry.Store
-	11, // 18: gantry.StoreService.Erase:output_type -> google.protobuf.Empty
-	6,  // 19: gantry.StoreService.List:output_type -> gantry.StoreListResponse
-	15, // [15:20] is the sub-list for method output_type
-	10, // [10:15] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	16, // 6: gantry.StorePatchRequest.mode:type_name -> gantry.StoreMode
+	17, // 7: gantry.StorePatchRequest.capabilities:type_name -> gantry.StoreCapabilities
+	15, // 8: gantry.StoreListRequest.kind:type_name -> gantry.StoreKind
+	18, // 9: gantry.StoreListResponse.items:type_name -> gantry.Store
+	2,  // 10: gantry.StorePullRequest.store:type_name -> gantry.StoreRef
+	2,  // 11: gantry.StoreRemoveRequest.store:type_name -> gantry.StoreRef
+	2,  // 12: gantry.StoreHealthRequest.store:type_name -> gantry.StoreRef
+	15, // 13: gantry.StoreHealthResponse.kind:type_name -> gantry.StoreKind
+	19, // 14: gantry.StoreHealthResponse.checked_at:type_name -> google.protobuf.Timestamp
+	2,  // 15: gantry.StoreWatcherRequest.store:type_name -> gantry.StoreRef
+	19, // 16: gantry.StoreWatcherResponse.watching_since:type_name -> google.protobuf.Timestamp
+	19, // 17: gantry.StoreWatcherResponse.last_event_at:type_name -> google.protobuf.Timestamp
+	19, // 18: gantry.StoreWatcherResponse.last_seed_at:type_name -> google.protobuf.Timestamp
+	0,  // 19: gantry.StoreService.Add:input_type -> gantry.StoreAddRequest
+	1,  // 20: gantry.StoreService.Get:input_type -> gantry.StoreGetRequest
+	4,  // 21: gantry.StoreService.Patch:input_type -> gantry.StorePatchRequest
+	2,  // 22: gantry.StoreService.Erase:input_type -> gantry.StoreRef
+	5,  // 23: gantry.StoreService.List:input_type -> gantry.StoreListRequest
+	7,  // 24: gantry.StoreService.Pull:input_type -> gantry.StorePullRequest
+	9,  // 25: gantry.StoreService.Remove:input_type -> gantry.StoreRemoveRequest
+	11, // 26: gantry.StoreService.Health:input_type -> gantry.StoreHealthRequest
+	13, // 27: gantry.StoreService.Watcher:input_type -> gantry.StoreWatcherRequest
+	18, // 28: gantry.StoreService.Add:output_type -> gantry.Store
+	18, // 29: gantry.StoreService.Get:output_type -> gantry.Store
+	18, // 30: gantry.StoreService.Patch:output_type -> gantry.Store
+	20, // 31: gantry.StoreService.Erase:output_type -> google.protobuf.Empty
+	6,  // 32: gantry.StoreService.List:output_type -> gantry.StoreListResponse
+	8,  // 33: gantry.StoreService.Pull:output_type -> gantry.StorePullResponse
+	10, // 34: gantry.StoreService.Remove:output_type -> gantry.StoreRemoveResponse
+	12, // 35: gantry.StoreService.Health:output_type -> gantry.StoreHealthResponse
+	14, // 36: gantry.StoreService.Watcher:output_type -> gantry.StoreWatcherResponse
+	28, // [28:37] is the sub-list for method output_type
+	19, // [19:28] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_gantry_store_svc_g_proto_init() }
@@ -1400,7 +2437,7 @@ func file_gantry_store_svc_g_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gantry_store_svc_g_proto_rawDesc), len(file_gantry_store_svc_g_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

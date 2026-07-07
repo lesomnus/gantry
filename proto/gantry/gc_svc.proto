@@ -1,0 +1,137 @@
+// Hand-written service; not generated. Retention GC control and visibility,
+// the gRPC counterpart of GET /v1/gc and GET|POST /v1/store/{name}/gc.
+edition = "2023";
+
+package gantry;
+
+import "gantry/store_svc.g.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+enum GcDeleteReason {
+  GC_DELETE_REASON_UNSPECIFIED = 0;
+  GC_DELETE_REASON_AGE_EXCEEDED = 1;
+  GC_DELETE_REASON_MAX_N_EXCEEDED = 2;
+  GC_DELETE_REASON_UNTAGGED = 3;
+}
+
+enum GcKeepReason {
+  GC_KEEP_REASON_UNSPECIFIED = 0;
+  GC_KEEP_REASON_IN_USE = 1;
+  GC_KEEP_REASON_PINNED = 2;
+  GC_KEEP_REASON_KEEP_N_RECENT = 3;
+  GC_KEEP_REASON_WITHIN_MAX_AGE = 4;
+  GC_KEEP_REASON_GRACE = 5;
+  GC_KEEP_REASON_AGE_GC_DISABLED = 6;
+  GC_KEEP_REASON_UNMANAGED = 7;
+  GC_KEEP_REASON_UNTAGGED_GRACE = 8;
+  GC_KEEP_REASON_DIGEST_TRACKED = 9;
+}
+
+service GcService {
+  // Status reports the GC scheduler across all managed stores.
+  rpc Status(GcStatusRequest) returns (GcStatusResponse);
+  // Plan evaluates the store's retention policy without deleting anything.
+  rpc Plan(GcPlanRequest) returns (GcPlanResponse);
+  // Apply evaluates and executes the deletions.
+  rpc Apply(GcApplyRequest) returns (GcApplyResponse);
+}
+
+message GcStatusRequest {}
+
+message GcStatusResponse {
+  // At least one store has scheduling on.
+  bool enabled = 1;
+  // Keyed by store name.
+  map<string, GcStoreStatus> stores = 2;
+}
+
+message GcStoreStatus {
+  bool running = 1;
+  google.protobuf.Timestamp started = 2;
+  google.protobuf.Timestamp last_run = 3;
+  google.protobuf.Timestamp next_wake = 4;
+  google.protobuf.Timestamp grace_until = 5;
+  GcSchedule schedule = 6;
+  repeated GcRule rules = 7;
+  int32 records = 8;
+  int32 pins = 9;
+  // Tracked untagged images (reap clocks running).
+  int32 untagged = 10;
+  // Reap delay; absent when the reaper is off.
+  google.protobuf.Duration untagged_after = 11;
+}
+
+message GcSchedule {
+  google.protobuf.Duration interval = 1;
+  google.protobuf.Duration min_interval = 2;
+  google.protobuf.Duration grace = 3;
+}
+
+message GcRule {
+  string repo = 1;
+  google.protobuf.Duration max_age = 2;
+  int32 keep_n = 3;
+  int32 max_n = 4;
+  repeated string pins = 5;
+}
+
+// One-shot policy override; unset fields keep the store's configured value,
+// zero values disable the corresponding mechanism.
+message GcOverride {
+  google.protobuf.Duration max_age = 1;
+  int32 keep_n = 2;
+  int32 max_n = 3;
+  repeated string pins = 4;
+  google.protobuf.Duration untagged_after = 5;
+}
+
+message GcPlanRequest {
+  StoreRef store = 1;
+  GcOverride override = 2;
+}
+
+message GcPlanResponse {
+  repeated GcCandidate delete = 1;
+  repeated GcKept keep = 2;
+  // The soonest a currently-kept record could become age-deletable; absent
+  // when nothing is on an age path.
+  google.protobuf.Timestamp next_age_out = 3;
+}
+
+message GcCandidate {
+  string ref = 1;
+  string digest = 2;
+  // Set for untagged-reap candidates.
+  string image_id = 3;
+  google.protobuf.Timestamp last_used = 4;
+  GcDeleteReason reason = 5;
+}
+
+message GcKept {
+  string ref = 1;
+  GcKeepReason reason = 2;
+}
+
+message GcApplyRequest {
+  StoreRef store = 1;
+  GcOverride override = 2;
+}
+
+message GcApplyResponse {
+  // Number of records considered (delete + keep).
+  int32 evaluated = 1;
+  // Tag refs removed.
+  repeated string untagged = 2;
+  // Content-hash IDs whose bytes were freed.
+  repeated string deleted = 3;
+  // Untagged image IDs whose content was reaped.
+  repeated string reaped = 4;
+  // Untagged image IDs not reapable right now (re-tagged, container ref,
+  // in-flight pull).
+  repeated string skipped = 5;
+  // Per-ref removal failures, "<ref>: <err>".
+  repeated string errors = 6;
+}

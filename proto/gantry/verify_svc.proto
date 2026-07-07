@@ -1,0 +1,74 @@
+// Hand-written service; not generated. Signature-verification policy
+// introspection and control, the gRPC counterpart of GET|POST /v1/verify
+// and POST /v1/verify/reload.
+edition = "2023";
+
+package gantry;
+
+import "gantry/job.proto";
+import "gantry/store_svc.g.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/lesomnus/gantry/pb";
+
+service VerifyService {
+  // Describe reports the effective policy and trust anchors; key material
+  // is never included.
+  rpc Describe(VerifyDescribeRequest) returns (VerifyDescribeResponse);
+  // Check verifies a reference without creating a job: the preflight for
+  // "would an edge accept this".
+  rpc Check(VerifyCheckRequest) returns (VerifyCheckResponse);
+  // Reload re-reads the trust store from disk; on failure the previous
+  // verifier stays in effect.
+  rpc Reload(VerifyReloadRequest) returns (VerifyReloadResponse);
+}
+
+message VerifyDescribeRequest {}
+
+message VerifyDescribeResponse {
+  bool enabled = 1;
+  string provider = 2;
+  // Global default mode.
+  VerifyMode mode = 3;
+  string level = 4;
+  repeated VerifyPolicy policies = 5;
+  repeated VerifyAnchor anchors = 6;
+  // Effective mode per source registry store (per-store override or the
+  // global default), keyed by store name.
+  map<string, VerifyMode> stores = 7;
+}
+
+message VerifyPolicy {
+  string name = 1;
+  repeated string registry_scopes = 2;
+  repeated string trusted_identities = 3;
+  string verification_level = 4;
+}
+
+message VerifyAnchor {
+  string subject = 1;
+  // sha256 over the DER encoding.
+  string fingerprint = 2;
+  google.protobuf.Timestamp not_after = 3;
+}
+
+message VerifyCheckRequest {
+  string ref = 1;
+  // Source registry; defaults to the ref's registry.
+  StoreRef from = 2;
+}
+
+message VerifyCheckResponse {
+  // A signature was verified.
+  bool verified = 1;
+  // The resolved source reference that was checked.
+  string ref = 2;
+  // The verified digest.
+  string digest = 3;
+  // Effective mode for the source store.
+  VerifyMode mode = 4;
+}
+
+message VerifyReloadRequest {}
+
+message VerifyReloadResponse {}

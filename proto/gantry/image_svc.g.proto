@@ -32,6 +32,7 @@ message ImageAddRequest {
   google.protobuf.Timestamp last_used = 8;
   google.protobuf.Timestamp last_distributed = 9;
   bool pinned = 10 [features.field_presence = IMPLICIT];
+  bool in_use = 11 [features.field_presence = IMPLICIT];
 }
 
 message ImageGetRequest {
@@ -62,6 +63,7 @@ message ImageSelect {
   bool last_used = 8;
   bool last_distributed = 9;
   bool pinned = 10;
+  bool in_use = 11;
 }
 
 message ImagePatchRequest {
@@ -70,6 +72,7 @@ message ImagePatchRequest {
   google.protobuf.Timestamp last_used = 15;
   google.protobuf.Timestamp last_distributed = 17;
   bool pinned = 19;
+  bool in_use = 21;
 }
 
 message ImageListRequest {
@@ -79,6 +82,8 @@ message ImageListRequest {
   // Exact match on the full reference.
   string ref = 3;
   bool pinned = 4;
+  // Filter on live container usage; replaces the REST /inuse endpoint.
+  bool in_use = 5;
 
   int32 page_size = 10;
   string page_token = 11;

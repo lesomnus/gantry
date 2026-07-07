@@ -1543,6 +1543,807 @@ func (b0 JobListResponse_builder) Build() *JobListResponse {
 	return m0
 }
 
+type JobWatchRequest struct {
+	state          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Ref *JobRef                `protobuf:"bytes,1,opt,name=ref"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *JobWatchRequest) Reset() {
+	*x = JobWatchRequest{}
+	mi := &file_gantry_job_svc_g_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobWatchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobWatchRequest) ProtoMessage() {}
+
+func (x *JobWatchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_job_svc_g_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *JobWatchRequest) GetRef() *JobRef {
+	if x != nil {
+		return x.xxx_hidden_Ref
+	}
+	return nil
+}
+
+func (x *JobWatchRequest) SetRef(v *JobRef) {
+	x.xxx_hidden_Ref = v
+}
+
+func (x *JobWatchRequest) HasRef() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Ref != nil
+}
+
+func (x *JobWatchRequest) ClearRef() {
+	x.xxx_hidden_Ref = nil
+}
+
+type JobWatchRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Ref *JobRef
+}
+
+func (b0 JobWatchRequest_builder) Build() *JobWatchRequest {
+	m0 := &JobWatchRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Ref = b.Ref
+	return m0
+}
+
+// The same inputs as JobAddRequest, evaluated without submitting.
+type JobPlanRequest struct {
+	state                    protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Ref           *string                `protobuf:"bytes,1,opt,name=ref"`
+	xxx_hidden_From          *StoreRef              `protobuf:"bytes,2,opt,name=from"`
+	xxx_hidden_To            *StoreRef              `protobuf:"bytes,3,opt,name=to"`
+	xxx_hidden_Platforms     []string               `protobuf:"bytes,4,rep,name=platforms"`
+	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,5,opt,name=copy_referrers,json=copyReferrers"`
+	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
+	XXX_presence             [1]uint32
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *JobPlanRequest) Reset() {
+	*x = JobPlanRequest{}
+	mi := &file_gantry_job_svc_g_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobPlanRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobPlanRequest) ProtoMessage() {}
+
+func (x *JobPlanRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_job_svc_g_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *JobPlanRequest) GetRef() string {
+	if x != nil {
+		if x.xxx_hidden_Ref != nil {
+			return *x.xxx_hidden_Ref
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *JobPlanRequest) GetFrom() *StoreRef {
+	if x != nil {
+		return x.xxx_hidden_From
+	}
+	return nil
+}
+
+func (x *JobPlanRequest) GetTo() *StoreRef {
+	if x != nil {
+		return x.xxx_hidden_To
+	}
+	return nil
+}
+
+func (x *JobPlanRequest) GetPlatforms() []string {
+	if x != nil {
+		return x.xxx_hidden_Platforms
+	}
+	return nil
+}
+
+func (x *JobPlanRequest) GetCopyReferrers() bool {
+	if x != nil {
+		return x.xxx_hidden_CopyReferrers
+	}
+	return false
+}
+
+func (x *JobPlanRequest) SetRef(v string) {
+	x.xxx_hidden_Ref = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 5)
+}
+
+func (x *JobPlanRequest) SetFrom(v *StoreRef) {
+	x.xxx_hidden_From = v
+}
+
+func (x *JobPlanRequest) SetTo(v *StoreRef) {
+	x.xxx_hidden_To = v
+}
+
+func (x *JobPlanRequest) SetPlatforms(v []string) {
+	x.xxx_hidden_Platforms = v
+}
+
+func (x *JobPlanRequest) SetCopyReferrers(v bool) {
+	x.xxx_hidden_CopyReferrers = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 5)
+}
+
+func (x *JobPlanRequest) HasRef() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *JobPlanRequest) HasFrom() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_From != nil
+}
+
+func (x *JobPlanRequest) HasTo() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_To != nil
+}
+
+func (x *JobPlanRequest) HasCopyReferrers() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
+}
+
+func (x *JobPlanRequest) ClearRef() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_Ref = nil
+}
+
+func (x *JobPlanRequest) ClearFrom() {
+	x.xxx_hidden_From = nil
+}
+
+func (x *JobPlanRequest) ClearTo() {
+	x.xxx_hidden_To = nil
+}
+
+func (x *JobPlanRequest) ClearCopyReferrers() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	x.xxx_hidden_CopyReferrers = false
+}
+
+type JobPlanRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Ref           *string
+	From          *StoreRef
+	To            *StoreRef
+	Platforms     []string
+	CopyReferrers *bool
+}
+
+func (b0 JobPlanRequest_builder) Build() *JobPlanRequest {
+	m0 := &JobPlanRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.Ref != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 5)
+		x.xxx_hidden_Ref = b.Ref
+	}
+	x.xxx_hidden_From = b.From
+	x.xxx_hidden_To = b.To
+	x.xxx_hidden_Platforms = b.Platforms
+	if b.CopyReferrers != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 5)
+		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
+	}
+	return m0
+}
+
+type JobPlanResponse struct {
+	state                    protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_From          *string                `protobuf:"bytes,1,opt,name=from"`
+	xxx_hidden_To            *string                `protobuf:"bytes,2,opt,name=to"`
+	xxx_hidden_SrcRef        *string                `protobuf:"bytes,3,opt,name=src_ref,json=srcRef"`
+	xxx_hidden_DstRef        *string                `protobuf:"bytes,4,opt,name=dst_ref,json=dstRef"`
+	xxx_hidden_Platforms     []string               `protobuf:"bytes,5,rep,name=platforms"`
+	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,6,opt,name=copy_referrers,json=copyReferrers"`
+	xxx_hidden_Verification  *Verification          `protobuf:"bytes,7,opt,name=verification"`
+	xxx_hidden_Coalesces     *string                `protobuf:"bytes,8,opt,name=coalesces"`
+	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
+	XXX_presence             [1]uint32
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *JobPlanResponse) Reset() {
+	*x = JobPlanResponse{}
+	mi := &file_gantry_job_svc_g_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobPlanResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobPlanResponse) ProtoMessage() {}
+
+func (x *JobPlanResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_job_svc_g_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *JobPlanResponse) GetFrom() string {
+	if x != nil {
+		if x.xxx_hidden_From != nil {
+			return *x.xxx_hidden_From
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *JobPlanResponse) GetTo() string {
+	if x != nil {
+		if x.xxx_hidden_To != nil {
+			return *x.xxx_hidden_To
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *JobPlanResponse) GetSrcRef() string {
+	if x != nil {
+		if x.xxx_hidden_SrcRef != nil {
+			return *x.xxx_hidden_SrcRef
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *JobPlanResponse) GetDstRef() string {
+	if x != nil {
+		if x.xxx_hidden_DstRef != nil {
+			return *x.xxx_hidden_DstRef
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *JobPlanResponse) GetPlatforms() []string {
+	if x != nil {
+		return x.xxx_hidden_Platforms
+	}
+	return nil
+}
+
+func (x *JobPlanResponse) GetCopyReferrers() bool {
+	if x != nil {
+		return x.xxx_hidden_CopyReferrers
+	}
+	return false
+}
+
+func (x *JobPlanResponse) GetVerification() *Verification {
+	if x != nil {
+		return x.xxx_hidden_Verification
+	}
+	return nil
+}
+
+func (x *JobPlanResponse) GetCoalesces() string {
+	if x != nil {
+		if x.xxx_hidden_Coalesces != nil {
+			return *x.xxx_hidden_Coalesces
+		}
+		return ""
+	}
+	return ""
+}
+
+func (x *JobPlanResponse) SetFrom(v string) {
+	x.xxx_hidden_From = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 8)
+}
+
+func (x *JobPlanResponse) SetTo(v string) {
+	x.xxx_hidden_To = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 8)
+}
+
+func (x *JobPlanResponse) SetSrcRef(v string) {
+	x.xxx_hidden_SrcRef = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 8)
+}
+
+func (x *JobPlanResponse) SetDstRef(v string) {
+	x.xxx_hidden_DstRef = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 8)
+}
+
+func (x *JobPlanResponse) SetPlatforms(v []string) {
+	x.xxx_hidden_Platforms = v
+}
+
+func (x *JobPlanResponse) SetCopyReferrers(v bool) {
+	x.xxx_hidden_CopyReferrers = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 8)
+}
+
+func (x *JobPlanResponse) SetVerification(v *Verification) {
+	x.xxx_hidden_Verification = v
+}
+
+func (x *JobPlanResponse) SetCoalesces(v string) {
+	x.xxx_hidden_Coalesces = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 8)
+}
+
+func (x *JobPlanResponse) HasFrom() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
+}
+
+func (x *JobPlanResponse) HasTo() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *JobPlanResponse) HasSrcRef() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *JobPlanResponse) HasDstRef() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
+}
+
+func (x *JobPlanResponse) HasCopyReferrers() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 5)
+}
+
+func (x *JobPlanResponse) HasVerification() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Verification != nil
+}
+
+func (x *JobPlanResponse) HasCoalesces() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 7)
+}
+
+func (x *JobPlanResponse) ClearFrom() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
+	x.xxx_hidden_From = nil
+}
+
+func (x *JobPlanResponse) ClearTo() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_To = nil
+}
+
+func (x *JobPlanResponse) ClearSrcRef() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_SrcRef = nil
+}
+
+func (x *JobPlanResponse) ClearDstRef() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_DstRef = nil
+}
+
+func (x *JobPlanResponse) ClearCopyReferrers() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
+	x.xxx_hidden_CopyReferrers = false
+}
+
+func (x *JobPlanResponse) ClearVerification() {
+	x.xxx_hidden_Verification = nil
+}
+
+func (x *JobPlanResponse) ClearCoalesces() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 7)
+	x.xxx_hidden_Coalesces = nil
+}
+
+type JobPlanResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Resolved source and destination store names.
+	From *string
+	To   *string
+	// Source-side ref, digest-pinned when verified.
+	SrcRef *string
+	// Destination-side ref: the rewritten cache ref, or the ref the engine
+	// is told to pull.
+	DstRef *string
+	// Registry destination: empty = all platforms; engine destination: the
+	// single platform pulled.
+	Platforms     []string
+	CopyReferrers *bool
+	Verification  *Verification
+	// The active job an identical submit would coalesce onto, if any.
+	Coalesces *string
+}
+
+func (b0 JobPlanResponse_builder) Build() *JobPlanResponse {
+	m0 := &JobPlanResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.From != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 8)
+		x.xxx_hidden_From = b.From
+	}
+	if b.To != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 8)
+		x.xxx_hidden_To = b.To
+	}
+	if b.SrcRef != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 8)
+		x.xxx_hidden_SrcRef = b.SrcRef
+	}
+	if b.DstRef != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 8)
+		x.xxx_hidden_DstRef = b.DstRef
+	}
+	x.xxx_hidden_Platforms = b.Platforms
+	if b.CopyReferrers != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 8)
+		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
+	}
+	x.xxx_hidden_Verification = b.Verification
+	if b.Coalesces != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 8)
+		x.xxx_hidden_Coalesces = b.Coalesces
+	}
+	return m0
+}
+
+type JobCancelRequest struct {
+	state          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Ref *JobRef                `protobuf:"bytes,1,opt,name=ref"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *JobCancelRequest) Reset() {
+	*x = JobCancelRequest{}
+	mi := &file_gantry_job_svc_g_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobCancelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobCancelRequest) ProtoMessage() {}
+
+func (x *JobCancelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_job_svc_g_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *JobCancelRequest) GetRef() *JobRef {
+	if x != nil {
+		return x.xxx_hidden_Ref
+	}
+	return nil
+}
+
+func (x *JobCancelRequest) SetRef(v *JobRef) {
+	x.xxx_hidden_Ref = v
+}
+
+func (x *JobCancelRequest) HasRef() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Ref != nil
+}
+
+func (x *JobCancelRequest) ClearRef() {
+	x.xxx_hidden_Ref = nil
+}
+
+type JobCancelRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Ref *JobRef
+}
+
+func (b0 JobCancelRequest_builder) Build() *JobCancelRequest {
+	m0 := &JobCancelRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Ref = b.Ref
+	return m0
+}
+
+type JobCancelResponse struct {
+	state          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Job *Job                   `protobuf:"bytes,1,opt,name=job"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *JobCancelResponse) Reset() {
+	*x = JobCancelResponse{}
+	mi := &file_gantry_job_svc_g_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobCancelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobCancelResponse) ProtoMessage() {}
+
+func (x *JobCancelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_job_svc_g_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *JobCancelResponse) GetJob() *Job {
+	if x != nil {
+		return x.xxx_hidden_Job
+	}
+	return nil
+}
+
+func (x *JobCancelResponse) SetJob(v *Job) {
+	x.xxx_hidden_Job = v
+}
+
+func (x *JobCancelResponse) HasJob() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Job != nil
+}
+
+func (x *JobCancelResponse) ClearJob() {
+	x.xxx_hidden_Job = nil
+}
+
+type JobCancelResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Snapshot taken right after the cancel was signaled.
+	Job *Job
+}
+
+func (b0 JobCancelResponse_builder) Build() *JobCancelResponse {
+	m0 := &JobCancelResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Job = b.Job
+	return m0
+}
+
+type JobRetryRequest struct {
+	state          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Ref *JobRef                `protobuf:"bytes,1,opt,name=ref"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *JobRetryRequest) Reset() {
+	*x = JobRetryRequest{}
+	mi := &file_gantry_job_svc_g_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobRetryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobRetryRequest) ProtoMessage() {}
+
+func (x *JobRetryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_job_svc_g_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *JobRetryRequest) GetRef() *JobRef {
+	if x != nil {
+		return x.xxx_hidden_Ref
+	}
+	return nil
+}
+
+func (x *JobRetryRequest) SetRef(v *JobRef) {
+	x.xxx_hidden_Ref = v
+}
+
+func (x *JobRetryRequest) HasRef() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Ref != nil
+}
+
+func (x *JobRetryRequest) ClearRef() {
+	x.xxx_hidden_Ref = nil
+}
+
+type JobRetryRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Ref *JobRef
+}
+
+func (b0 JobRetryRequest_builder) Build() *JobRetryRequest {
+	m0 := &JobRetryRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Ref = b.Ref
+	return m0
+}
+
+type JobRetryResponse struct {
+	state          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Job *Job                   `protobuf:"bytes,1,opt,name=job"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *JobRetryResponse) Reset() {
+	*x = JobRetryResponse{}
+	mi := &file_gantry_job_svc_g_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobRetryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobRetryResponse) ProtoMessage() {}
+
+func (x *JobRetryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gantry_job_svc_g_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *JobRetryResponse) GetJob() *Job {
+	if x != nil {
+		return x.xxx_hidden_Job
+	}
+	return nil
+}
+
+func (x *JobRetryResponse) SetJob(v *Job) {
+	x.xxx_hidden_Job = v
+}
+
+func (x *JobRetryResponse) HasJob() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Job != nil
+}
+
+func (x *JobRetryResponse) ClearJob() {
+	x.xxx_hidden_Job = nil
+}
+
+type JobRetryResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// The newly submitted job.
+	Job *Job
+}
+
+func (b0 JobRetryResponse_builder) Build() *JobRetryResponse {
+	m0 := &JobRetryResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Job = b.Job
+	return m0
+}
+
 var File_gantry_job_svc_g_proto protoreflect.FileDescriptor
 
 const file_gantry_job_svc_g_proto_rawDesc = "" +
@@ -1608,17 +2409,45 @@ const file_gantry_job_svc_g_proto_rawDesc = "" +
 	"page_token\x18\v \x01(\tR\tpageToken\"\\\n" +
 	"\x0fJobListResponse\x12!\n" +
 	"\x05items\x18\x01 \x03(\v2\v.gantry.JobR\x05items\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xa3\x02\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"3\n" +
+	"\x0fJobWatchRequest\x12 \n" +
+	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.JobRefR\x03ref\"\xaf\x01\n" +
+	"\x0eJobPlanRequest\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\x12$\n" +
+	"\x04from\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x04from\x12 \n" +
+	"\x02to\x18\x03 \x01(\v2\x10.gantry.StoreRefR\x02to\x12\x1c\n" +
+	"\tplatforms\x18\x04 \x03(\tR\tplatforms\x12%\n" +
+	"\x0ecopy_referrers\x18\x05 \x01(\bR\rcopyReferrers\"\x84\x02\n" +
+	"\x0fJobPlanResponse\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\x12\x17\n" +
+	"\asrc_ref\x18\x03 \x01(\tR\x06srcRef\x12\x17\n" +
+	"\adst_ref\x18\x04 \x01(\tR\x06dstRef\x12\x1c\n" +
+	"\tplatforms\x18\x05 \x03(\tR\tplatforms\x12%\n" +
+	"\x0ecopy_referrers\x18\x06 \x01(\bR\rcopyReferrers\x128\n" +
+	"\fverification\x18\a \x01(\v2\x14.gantry.VerificationR\fverification\x12\x1c\n" +
+	"\tcoalesces\x18\b \x01(\tR\tcoalesces\"4\n" +
+	"\x10JobCancelRequest\x12 \n" +
+	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.JobRefR\x03ref\"2\n" +
+	"\x11JobCancelResponse\x12\x1d\n" +
+	"\x03job\x18\x01 \x01(\v2\v.gantry.JobR\x03job\"3\n" +
+	"\x0fJobRetryRequest\x12 \n" +
+	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.JobRefR\x03ref\"1\n" +
+	"\x10JobRetryResponse\x12\x1d\n" +
+	"\x03job\x18\x01 \x01(\v2\v.gantry.JobR\x03job2\xe0\x03\n" +
 	"\n" +
 	"JobService\x12)\n" +
 	"\x03Add\x12\x15.gantry.JobAddRequest\x1a\v.gantry.Job\x12)\n" +
 	"\x03Get\x12\x15.gantry.JobGetRequest\x1a\v.gantry.Job\x12-\n" +
 	"\x05Patch\x12\x17.gantry.JobPatchRequest\x1a\v.gantry.Job\x12/\n" +
 	"\x05Erase\x12\x0e.gantry.JobRef\x1a\x16.google.protobuf.Empty\x127\n" +
-	"\x04List\x12\x16.gantry.JobListRequest\x1a\x17.gantry.JobListResponse\x12&\n" +
-	"\x05Watch\x12\x0e.gantry.JobRef\x1a\v.gantry.Job0\x01B\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
+	"\x04List\x12\x16.gantry.JobListRequest\x1a\x17.gantry.JobListResponse\x12/\n" +
+	"\x05Watch\x12\x17.gantry.JobWatchRequest\x1a\v.gantry.Job0\x01\x127\n" +
+	"\x04Plan\x12\x16.gantry.JobPlanRequest\x1a\x17.gantry.JobPlanResponse\x12=\n" +
+	"\x06Cancel\x12\x18.gantry.JobCancelRequest\x1a\x19.gantry.JobCancelResponse\x12:\n" +
+	"\x05Retry\x12\x17.gantry.JobRetryRequest\x1a\x18.gantry.JobRetryResponseB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
 
-var file_gantry_job_svc_g_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_gantry_job_svc_g_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_gantry_job_svc_g_proto_goTypes = []any{
 	(*JobAddRequest)(nil),         // 0: gantry.JobAddRequest
 	(*JobGetRequest)(nil),         // 1: gantry.JobGetRequest
@@ -1627,54 +2456,75 @@ var file_gantry_job_svc_g_proto_goTypes = []any{
 	(*JobPatchRequest)(nil),       // 4: gantry.JobPatchRequest
 	(*JobListRequest)(nil),        // 5: gantry.JobListRequest
 	(*JobListResponse)(nil),       // 6: gantry.JobListResponse
-	(*StoreRef)(nil),              // 7: gantry.StoreRef
-	(JobState)(0),                 // 8: gantry.JobState
-	(*Verification)(nil),          // 9: gantry.Verification
-	(*Transfer)(nil),              // 10: gantry.Transfer
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
-	(*StoreSelect)(nil),           // 12: gantry.StoreSelect
-	(*Job)(nil),                   // 13: gantry.Job
-	(*emptypb.Empty)(nil),         // 14: google.protobuf.Empty
+	(*JobWatchRequest)(nil),       // 7: gantry.JobWatchRequest
+	(*JobPlanRequest)(nil),        // 8: gantry.JobPlanRequest
+	(*JobPlanResponse)(nil),       // 9: gantry.JobPlanResponse
+	(*JobCancelRequest)(nil),      // 10: gantry.JobCancelRequest
+	(*JobCancelResponse)(nil),     // 11: gantry.JobCancelResponse
+	(*JobRetryRequest)(nil),       // 12: gantry.JobRetryRequest
+	(*JobRetryResponse)(nil),      // 13: gantry.JobRetryResponse
+	(*StoreRef)(nil),              // 14: gantry.StoreRef
+	(JobState)(0),                 // 15: gantry.JobState
+	(*Verification)(nil),          // 16: gantry.Verification
+	(*Transfer)(nil),              // 17: gantry.Transfer
+	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(*StoreSelect)(nil),           // 19: gantry.StoreSelect
+	(*Job)(nil),                   // 20: gantry.Job
+	(*emptypb.Empty)(nil),         // 21: google.protobuf.Empty
 }
 var file_gantry_job_svc_g_proto_depIdxs = []int32{
-	7,  // 0: gantry.JobAddRequest.from:type_name -> gantry.StoreRef
-	7,  // 1: gantry.JobAddRequest.to:type_name -> gantry.StoreRef
-	8,  // 2: gantry.JobAddRequest.state:type_name -> gantry.JobState
-	9,  // 3: gantry.JobAddRequest.verification:type_name -> gantry.Verification
-	10, // 4: gantry.JobAddRequest.transfers:type_name -> gantry.Transfer
-	11, // 5: gantry.JobAddRequest.created_at:type_name -> google.protobuf.Timestamp
-	11, // 6: gantry.JobAddRequest.started_at:type_name -> google.protobuf.Timestamp
-	11, // 7: gantry.JobAddRequest.ended_at:type_name -> google.protobuf.Timestamp
+	14, // 0: gantry.JobAddRequest.from:type_name -> gantry.StoreRef
+	14, // 1: gantry.JobAddRequest.to:type_name -> gantry.StoreRef
+	15, // 2: gantry.JobAddRequest.state:type_name -> gantry.JobState
+	16, // 3: gantry.JobAddRequest.verification:type_name -> gantry.Verification
+	17, // 4: gantry.JobAddRequest.transfers:type_name -> gantry.Transfer
+	18, // 5: gantry.JobAddRequest.created_at:type_name -> google.protobuf.Timestamp
+	18, // 6: gantry.JobAddRequest.started_at:type_name -> google.protobuf.Timestamp
+	18, // 7: gantry.JobAddRequest.ended_at:type_name -> google.protobuf.Timestamp
 	2,  // 8: gantry.JobGetRequest.ref:type_name -> gantry.JobRef
 	3,  // 9: gantry.JobGetRequest.select:type_name -> gantry.JobSelect
-	12, // 10: gantry.JobSelect.from:type_name -> gantry.StoreSelect
-	12, // 11: gantry.JobSelect.to:type_name -> gantry.StoreSelect
+	19, // 10: gantry.JobSelect.from:type_name -> gantry.StoreSelect
+	19, // 11: gantry.JobSelect.to:type_name -> gantry.StoreSelect
 	2,  // 12: gantry.JobPatchRequest.ref:type_name -> gantry.JobRef
-	8,  // 13: gantry.JobPatchRequest.state:type_name -> gantry.JobState
-	9,  // 14: gantry.JobPatchRequest.verification:type_name -> gantry.Verification
-	10, // 15: gantry.JobPatchRequest.transfers:type_name -> gantry.Transfer
-	11, // 16: gantry.JobPatchRequest.started_at:type_name -> google.protobuf.Timestamp
-	11, // 17: gantry.JobPatchRequest.ended_at:type_name -> google.protobuf.Timestamp
-	8,  // 18: gantry.JobListRequest.state:type_name -> gantry.JobState
-	11, // 19: gantry.JobListRequest.since:type_name -> google.protobuf.Timestamp
-	13, // 20: gantry.JobListResponse.items:type_name -> gantry.Job
-	0,  // 21: gantry.JobService.Add:input_type -> gantry.JobAddRequest
-	1,  // 22: gantry.JobService.Get:input_type -> gantry.JobGetRequest
-	4,  // 23: gantry.JobService.Patch:input_type -> gantry.JobPatchRequest
-	2,  // 24: gantry.JobService.Erase:input_type -> gantry.JobRef
-	5,  // 25: gantry.JobService.List:input_type -> gantry.JobListRequest
-	2,  // 26: gantry.JobService.Watch:input_type -> gantry.JobRef
-	13, // 27: gantry.JobService.Add:output_type -> gantry.Job
-	13, // 28: gantry.JobService.Get:output_type -> gantry.Job
-	13, // 29: gantry.JobService.Patch:output_type -> gantry.Job
-	14, // 30: gantry.JobService.Erase:output_type -> google.protobuf.Empty
-	6,  // 31: gantry.JobService.List:output_type -> gantry.JobListResponse
-	13, // 32: gantry.JobService.Watch:output_type -> gantry.Job
-	27, // [27:33] is the sub-list for method output_type
-	21, // [21:27] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	15, // 13: gantry.JobPatchRequest.state:type_name -> gantry.JobState
+	16, // 14: gantry.JobPatchRequest.verification:type_name -> gantry.Verification
+	17, // 15: gantry.JobPatchRequest.transfers:type_name -> gantry.Transfer
+	18, // 16: gantry.JobPatchRequest.started_at:type_name -> google.protobuf.Timestamp
+	18, // 17: gantry.JobPatchRequest.ended_at:type_name -> google.protobuf.Timestamp
+	15, // 18: gantry.JobListRequest.state:type_name -> gantry.JobState
+	18, // 19: gantry.JobListRequest.since:type_name -> google.protobuf.Timestamp
+	20, // 20: gantry.JobListResponse.items:type_name -> gantry.Job
+	2,  // 21: gantry.JobWatchRequest.ref:type_name -> gantry.JobRef
+	14, // 22: gantry.JobPlanRequest.from:type_name -> gantry.StoreRef
+	14, // 23: gantry.JobPlanRequest.to:type_name -> gantry.StoreRef
+	16, // 24: gantry.JobPlanResponse.verification:type_name -> gantry.Verification
+	2,  // 25: gantry.JobCancelRequest.ref:type_name -> gantry.JobRef
+	20, // 26: gantry.JobCancelResponse.job:type_name -> gantry.Job
+	2,  // 27: gantry.JobRetryRequest.ref:type_name -> gantry.JobRef
+	20, // 28: gantry.JobRetryResponse.job:type_name -> gantry.Job
+	0,  // 29: gantry.JobService.Add:input_type -> gantry.JobAddRequest
+	1,  // 30: gantry.JobService.Get:input_type -> gantry.JobGetRequest
+	4,  // 31: gantry.JobService.Patch:input_type -> gantry.JobPatchRequest
+	2,  // 32: gantry.JobService.Erase:input_type -> gantry.JobRef
+	5,  // 33: gantry.JobService.List:input_type -> gantry.JobListRequest
+	7,  // 34: gantry.JobService.Watch:input_type -> gantry.JobWatchRequest
+	8,  // 35: gantry.JobService.Plan:input_type -> gantry.JobPlanRequest
+	10, // 36: gantry.JobService.Cancel:input_type -> gantry.JobCancelRequest
+	12, // 37: gantry.JobService.Retry:input_type -> gantry.JobRetryRequest
+	20, // 38: gantry.JobService.Add:output_type -> gantry.Job
+	20, // 39: gantry.JobService.Get:output_type -> gantry.Job
+	20, // 40: gantry.JobService.Patch:output_type -> gantry.Job
+	21, // 41: gantry.JobService.Erase:output_type -> google.protobuf.Empty
+	6,  // 42: gantry.JobService.List:output_type -> gantry.JobListResponse
+	20, // 43: gantry.JobService.Watch:output_type -> gantry.Job
+	9,  // 44: gantry.JobService.Plan:output_type -> gantry.JobPlanResponse
+	11, // 45: gantry.JobService.Cancel:output_type -> gantry.JobCancelResponse
+	13, // 46: gantry.JobService.Retry:output_type -> gantry.JobRetryResponse
+	38, // [38:47] is the sub-list for method output_type
+	29, // [29:38] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_gantry_job_svc_g_proto_init() }
@@ -1693,7 +2543,7 @@ func file_gantry_job_svc_g_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gantry_job_svc_g_proto_rawDesc), len(file_gantry_job_svc_g_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
