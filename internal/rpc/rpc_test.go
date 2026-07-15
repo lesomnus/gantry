@@ -270,7 +270,15 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 // addJob seeds a job record in the real in-memory job store.
 func (e *env) addJob(t *testing.T, id, ref string, state warm.JobState, at time.Time) *warm.Job {
 	t.Helper()
+	return e.addLabeledJob(t, id, ref, state, at, nil)
+}
+
+// addLabeledJob seeds a job carrying labels; the labels are fixed at Add time
+// (they seed the primary handle), so they must be set before the store sees it.
+func (e *env) addLabeledJob(t *testing.T, id, ref string, state warm.JobState, at time.Time, labels map[string]string) *warm.Job {
+	t.Helper()
 	j := warm.NewJob(id, ref, nil, at)
+	j.Labels = labels
 	_, cancel := context.WithCancel(context.Background())
 	j.SetCancel(cancel)
 	if err := e.jobs.Add(j); err != nil {

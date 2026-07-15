@@ -76,6 +76,9 @@ type Request struct {
 	// reference, so a cache-fed engine can keep the image under its upstream
 	// name. Tag references only. Engine targets only.
 	As []string
+	// Labels is caller metadata attached to the job for List filtering; it does
+	// not affect the move or coalescing. Each coalesced caller keeps its own.
+	Labels map[string]string
 }
 
 // jobExec is the resolved plan for a job, computed at submit time.
@@ -245,17 +248,27 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 	}
 
 	key := dedupKey(req.Ref, platforms, ex.source.Name, ex.dst.Name(), ex.as)
-	if snap, ok := w.store.Active(key); ok {
+	now := time.Now()
+	id := w.idgen()
+	// Coalesce onto an identical in-flight move, but hand this caller its own
+	// handle so its labels and its cancel stay independent of the others'.
+	if snap, ok := w.store.Attach(key, id, req.Labels, now); ok {
 		return snap, false, nil
 	}
 
-	id := w.idgen()
+	// id doubles as the new execution's id and its primary handle's id.
 	ctx, cancel := context.WithCancel(w.base)
-	job := NewJob(id, req.Ref, platforms, time.Now())
+	job := NewJob(id, req.Ref, platforms, now)
 	job.ctx, job.cancel, job.dedup, job.exec, job.req = ctx, cancel, key, ex, req
 	job.As = ex.as
+	job.Labels = req.Labels
 	job.Verification = ex.verification
 	job.Transfers = transfers
+	// Publish but keep it un-coalescable until it is safely queued: a racing
+	// identical submit must not attach to a job that then fails to enqueue and
+	// is rolled back below, which would strand the coalescer on a job that
+	// never runs.
+	job.enqueuing = true
 	if err := w.store.Add(job); err != nil {
 		cancel()
 		return JobSnapshot{}, false, err
@@ -263,6 +276,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 
 	select {
 	case w.jobs <- job:
+		w.store.Update(id, func(j *Job) { j.enqueuing = false })
 		snap, _ := w.store.Snapshot(id)
 		if w.rec != nil {
 			digest := ""
@@ -282,13 +296,11 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 // fresh signature verification, fresh digest pin — never the stored plan, whose
 // digest was pinned at the original admission.
 func (w *Warmer) Retry(id string) (JobSnapshot, bool, error) {
-	var req Request
-	var state JobState
-	// Read state and the original request together under the store lock.
-	if ok := w.store.Update(id, func(j *Job) {
-		state = j.State
-		req = j.req
-	}); !ok {
+	// Read this handle's request and its per-caller state: a coalesced caller
+	// retries with its own labels and its own (possibly canceled) view, not the
+	// originating submit's — which is what every other RPC reports for this id.
+	req, state, ok := w.store.RetrySource(id)
+	if !ok {
 		return JobSnapshot{}, false, ErrJobNotFound
 	}
 	if !state.Terminal() {

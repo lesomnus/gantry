@@ -110,6 +110,13 @@ message Job {
   // references only; non-empty replaces the pull-reference name entirely —
   // include it in the list to keep it.
   repeated string as = 14 [(orm.field) = {immutable: true}];
+  // Free-form key/value labels for organizing and selecting jobs. Purely
+  // caller metadata — they do not change how the move runs, only how it is
+  // found (List label matching). Fixed at submission and not changed through
+  // the client surface (JobService.Patch is not a client operation); coalesced
+  // callers still keep their own labels, since each holds a distinct job handle
+  // server-side.
+  map<string, string> labels = 15;
 
   JobState state = 7;
   string error = 8;

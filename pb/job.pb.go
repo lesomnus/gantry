@@ -628,6 +628,7 @@ type Job struct {
 	xxx_hidden_Platforms     []string               `protobuf:"bytes,5,rep,name=platforms"`
 	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,6,opt,name=copy_referrers,json=copyReferrers"`
 	xxx_hidden_As            []string               `protobuf:"bytes,14,rep,name=as"`
+	xxx_hidden_Labels        map[string]string      `protobuf:"bytes,15,rep,name=labels" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	xxx_hidden_State         JobState               `protobuf:"varint,7,opt,name=state,enum=gantry.JobState"`
 	xxx_hidden_Error         string                 `protobuf:"bytes,8,opt,name=error"`
 	xxx_hidden_Verification  *Verification          `protobuf:"bytes,9,opt,name=verification"`
@@ -715,6 +716,13 @@ func (x *Job) GetAs() []string {
 	return nil
 }
 
+func (x *Job) GetLabels() map[string]string {
+	if x != nil {
+		return x.xxx_hidden_Labels
+	}
+	return nil
+}
+
 func (x *Job) GetState() JobState {
 	if x != nil {
 		return x.xxx_hidden_State
@@ -788,11 +796,15 @@ func (x *Job) SetPlatforms(v []string) {
 
 func (x *Job) SetCopyReferrers(v bool) {
 	x.xxx_hidden_CopyReferrers = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 14)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 15)
 }
 
 func (x *Job) SetAs(v []string) {
 	x.xxx_hidden_As = v
+}
+
+func (x *Job) SetLabels(v map[string]string) {
+	x.xxx_hidden_Labels = v
 }
 
 func (x *Job) SetState(v JobState) {
@@ -925,7 +937,14 @@ type Job_builder struct {
 	// under its upstream name (e.g. "docker.io/library/redis:7"). Tag
 	// references only; non-empty replaces the pull-reference name entirely —
 	// include it in the list to keep it.
-	As           []string
+	As []string
+	// Free-form key/value labels for organizing and selecting jobs. Purely
+	// caller metadata — they do not change how the move runs, only how it is
+	// found (List label matching). Fixed at submission and not changed through
+	// the client surface (JobService.Patch is not a client operation); coalesced
+	// callers still keep their own labels, since each holds a distinct job handle
+	// server-side.
+	Labels       map[string]string
 	State        JobState
 	Error        string
 	Verification *Verification
@@ -945,10 +964,11 @@ func (b0 Job_builder) Build() *Job {
 	x.xxx_hidden_Target = b.Target
 	x.xxx_hidden_Platforms = b.Platforms
 	if b.CopyReferrers != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 14)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 15)
 		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
 	}
 	x.xxx_hidden_As = b.As
+	x.xxx_hidden_Labels = b.Labels
 	x.xxx_hidden_State = b.State
 	x.xxx_hidden_Error = b.Error
 	x.xxx_hidden_Verification = b.Verification
@@ -987,7 +1007,7 @@ const file_gantry_job_proto_rawDesc = "" +
 	"bytes_done\x18\b \x01(\x03R\tbytesDone\x12%\n" +
 	"\x06layers\x18\t \x03(\v2\r.gantry.LayerR\x06layers\x12\x14\n" +
 	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"\xf6\x04\n" +
+	" \x01(\tR\x05error\"\xe2\x05\n" +
 	"\x03Job\x12\x19\n" +
 	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12\x18\n" +
 	"\x03ref\x18\x02 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12/\n" +
@@ -995,7 +1015,8 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\x06target\x18\x04 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x06target\x12$\n" +
 	"\tplatforms\x18\x05 \x03(\tB\x06\xea\x82\x16\x02@\x01R\tplatforms\x122\n" +
 	"\x0ecopy_referrers\x18\x06 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x12\x16\n" +
-	"\x02as\x18\x0e \x03(\tB\x06\xea\x82\x16\x02@\x01R\x02as\x12&\n" +
+	"\x02as\x18\x0e \x03(\tB\x06\xea\x82\x16\x02@\x01R\x02as\x12/\n" +
+	"\x06labels\x18\x0f \x03(\v2\x17.gantry.Job.LabelsEntryR\x06labels\x12&\n" +
 	"\x05state\x18\a \x01(\x0e2\x10.gantry.JobStateR\x05state\x12\x14\n" +
 	"\x05error\x18\b \x01(\tR\x05error\x128\n" +
 	"\fverification\x18\t \x01(\v2\x14.gantry.VerificationR\fverification\x12.\n" +
@@ -1005,7 +1026,10 @@ const file_gantry_job_proto_rawDesc = "" +
 	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampB\t\xea\x82\x16\x05@\x01\x82\x01\x00R\tcreatedAt\x129\n" +
 	"\n" +
 	"started_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
-	"\bended_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\x95\x01\n" +
+	"\bended_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\x95\x01\n" +
 	"\bJobState\x12\x19\n" +
 	"\x15JOB_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11JOB_STATE_PENDING\x10\x01\x12\x15\n" +
@@ -1036,7 +1060,7 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\x12LAYER_STATE_FAILED\x10\x05B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
 
 var file_gantry_job_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_gantry_job_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_gantry_job_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_gantry_job_proto_goTypes = []any{
 	(JobState)(0),                 // 0: gantry.JobState
 	(VerifyMode)(0),               // 1: gantry.VerifyMode
@@ -1046,29 +1070,31 @@ var file_gantry_job_proto_goTypes = []any{
 	(*Layer)(nil),                 // 5: gantry.Layer
 	(*Transfer)(nil),              // 6: gantry.Transfer
 	(*Job)(nil),                   // 7: gantry.Job
-	(StoreKind)(0),                // 8: gantry.StoreKind
-	(*Store)(nil),                 // 9: gantry.Store
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	nil,                           // 8: gantry.Job.LabelsEntry
+	(StoreKind)(0),                // 9: gantry.StoreKind
+	(*Store)(nil),                 // 10: gantry.Store
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
 }
 var file_gantry_job_proto_depIdxs = []int32{
 	1,  // 0: gantry.Verification.mode:type_name -> gantry.VerifyMode
 	3,  // 1: gantry.Layer.state:type_name -> gantry.LayerState
-	8,  // 2: gantry.Transfer.kind:type_name -> gantry.StoreKind
+	9,  // 2: gantry.Transfer.kind:type_name -> gantry.StoreKind
 	2,  // 3: gantry.Transfer.state:type_name -> gantry.TransferState
 	5,  // 4: gantry.Transfer.layers:type_name -> gantry.Layer
-	9,  // 5: gantry.Job.source:type_name -> gantry.Store
-	9,  // 6: gantry.Job.target:type_name -> gantry.Store
-	0,  // 7: gantry.Job.state:type_name -> gantry.JobState
-	4,  // 8: gantry.Job.verification:type_name -> gantry.Verification
-	6,  // 9: gantry.Job.transfers:type_name -> gantry.Transfer
-	10, // 10: gantry.Job.created_at:type_name -> google.protobuf.Timestamp
-	10, // 11: gantry.Job.started_at:type_name -> google.protobuf.Timestamp
-	10, // 12: gantry.Job.ended_at:type_name -> google.protobuf.Timestamp
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	10, // 5: gantry.Job.source:type_name -> gantry.Store
+	10, // 6: gantry.Job.target:type_name -> gantry.Store
+	8,  // 7: gantry.Job.labels:type_name -> gantry.Job.LabelsEntry
+	0,  // 8: gantry.Job.state:type_name -> gantry.JobState
+	4,  // 9: gantry.Job.verification:type_name -> gantry.Verification
+	6,  // 10: gantry.Job.transfers:type_name -> gantry.Transfer
+	11, // 11: gantry.Job.created_at:type_name -> google.protobuf.Timestamp
+	11, // 12: gantry.Job.started_at:type_name -> google.protobuf.Timestamp
+	11, // 13: gantry.Job.ended_at:type_name -> google.protobuf.Timestamp
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_gantry_job_proto_init() }
@@ -1083,7 +1109,7 @@ func file_gantry_job_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gantry_job_proto_rawDesc), len(file_gantry_job_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

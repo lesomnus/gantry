@@ -89,8 +89,11 @@ func TestAsDedup(t *testing.T) {
 		t.Fatalf("first: created=%v err=%v", created, err)
 	}
 	same, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", As: []string{"a.example.com/team/app:1"}})
-	if err != nil || created || same.ID != first.ID {
+	if err != nil || created {
 		t.Fatalf("identical submit must coalesce: created=%v id=%s err=%v", created, same.ID, err)
+	}
+	if same.ID == first.ID {
+		t.Fatalf("coalesced submit should get its own handle, got %s twice", same.ID)
 	}
 	other, created, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node", As: []string{"b.example.com/team/app:1"}})
 	if err != nil || !created || other.ID == first.ID {

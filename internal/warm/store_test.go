@@ -85,6 +85,184 @@ func TestStoreListFilter(t *testing.T) {
 	}
 }
 
+func TestStoreCoalesceKeepsLabels(t *testing.T) {
+	s := NewMemStore()
+	a := mkJob("a", "img:1", []string{"linux/amd64"})
+	a.Labels = map[string]string{"team": "x"}
+	if err := s.Add(a); err != nil {
+		t.Fatal(err)
+	}
+	snap, ok := s.Attach(a.dedup, "h2", map[string]string{"team": "y"}, time.Now())
+	if !ok {
+		t.Fatal("attach onto active job failed")
+	}
+	if snap.ID != "h2" || snap.Labels["team"] != "y" {
+		t.Errorf("attach snapshot = %+v", snap)
+	}
+	// Both handles resolve to the one execution, each with its own labels.
+	if p, _ := s.Snapshot("a"); p.Labels["team"] != "x" {
+		t.Errorf("primary handle labels = %v", p.Labels)
+	}
+	if got := s.List(Filter{}); len(got) != 2 {
+		t.Errorf("list = %d, want 2 handles", len(got))
+	}
+	if total := countTotal(s.Counts()); total != 1 {
+		t.Errorf("executions = %d, want 1", total)
+	}
+	// A dead execution is not a coalescing target.
+	s.Update("a", func(j *Job) { j.State = JobDone })
+	if _, ok := s.Attach(a.dedup, "h3", nil, time.Now()); ok {
+		t.Error("attached onto a terminal execution")
+	}
+}
+
+func TestStoreCancelDetachesSharedExecution(t *testing.T) {
+	s := NewMemStore()
+	canceled := false
+	a := mkJob("a", "img:1", nil)
+	a.SetCancel(func() { canceled = true })
+	if err := s.Add(a); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Attach(a.dedup, "h2", nil, time.Now()); !ok {
+		t.Fatal("attach failed")
+	}
+	// One caller canceling must not stop work another still wants.
+	snap, ok, already := s.Cancel("h2")
+	if !ok || already {
+		t.Fatalf("cancel h2 = ok:%v already:%v", ok, already)
+	}
+	if snap.State != JobCanceled {
+		t.Errorf("canceled handle state = %q, want canceled", snap.State)
+	}
+	if canceled {
+		t.Error("shared work stopped while another caller still holds it")
+	}
+	if p, _ := s.Snapshot("a"); p.State == JobCanceled {
+		t.Error("the other handle wrongly reads canceled")
+	}
+	// Re-canceling the same handle is a precondition failure, not a re-signal.
+	if _, _, already := s.Cancel("h2"); !already {
+		t.Error("second cancel should report already canceled")
+	}
+	// The last caller canceling stops the execution, keeping the record.
+	if _, ok, already := s.Cancel("a"); !ok || already {
+		t.Fatalf("cancel primary = ok:%v already:%v", ok, already)
+	}
+	if !canceled {
+		t.Error("last caller cancel did not stop the shared work")
+	}
+	if _, ok := s.Snapshot("a"); !ok {
+		t.Error("canceled record should be kept for inspection")
+	}
+}
+
+func TestStoreEraseHandleKeepsSharedExecution(t *testing.T) {
+	s := NewMemStore()
+	canceled := false
+	a := mkJob("a", "img:1", nil)
+	a.SetCancel(func() { canceled = true })
+	_ = s.Add(a)
+	if _, ok := s.Attach(a.dedup, "h2", nil, time.Now()); !ok {
+		t.Fatal("attach failed")
+	}
+	// Erasing one handle leaves the shared execution for the other.
+	if !s.Delete("h2") {
+		t.Fatal("delete h2 returned false")
+	}
+	if canceled {
+		t.Error("execution canceled while a handle remains")
+	}
+	if _, ok := s.Snapshot("a"); !ok {
+		t.Error("shared execution wrongly evicted")
+	}
+	// Erasing the last handle evicts and cancels the execution.
+	if !s.Delete("a") {
+		t.Fatal("delete a returned false")
+	}
+	if !canceled {
+		t.Error("last handle erase did not cancel the execution")
+	}
+	if _, ok := s.Snapshot("a"); ok {
+		t.Error("execution not evicted after its last handle was erased")
+	}
+}
+
+func TestStoreListLabelFilter(t *testing.T) {
+	s := NewMemStore()
+	a := mkJob("a", "img:1", nil)
+	a.Labels = map[string]string{"team": "x", "env": "prod"}
+	b := mkJob("b", "img:2", nil)
+	b.Labels = map[string]string{"team": "y", "env": "prod"}
+	_ = s.Add(a)
+	_ = s.Add(b)
+	if got := s.List(Filter{Labels: map[string]string{"env": "prod"}}); len(got) != 2 {
+		t.Errorf("env=prod = %d, want 2", len(got))
+	}
+	if got := s.List(Filter{Labels: map[string]string{"team": "x"}}); len(got) != 1 || got[0].ID != "a" {
+		t.Errorf("team=x = %+v", got)
+	}
+	if got := s.List(Filter{Labels: map[string]string{"team": "x", "env": "prod"}}); len(got) != 1 || got[0].ID != "a" {
+		t.Errorf("subset both = %+v", got)
+	}
+	if got := s.List(Filter{Labels: map[string]string{"team": "x", "env": "stage"}}); len(got) != 0 {
+		t.Errorf("non-matching value = %+v", got)
+	}
+}
+
+func TestStoreErasedHandleDoesNotResurrect(t *testing.T) {
+	s := NewMemStore()
+	a := mkJob("a", "img:1", nil)
+	_ = s.Add(a)
+	if _, ok := s.Attach(a.dedup, "h2", nil, time.Now()); !ok {
+		t.Fatal("attach failed")
+	}
+	// Erasing the primary handle leaves the shared execution alive for h2, but
+	// the erased id must read as gone rather than resolve back to the execution.
+	if !s.Delete("a") {
+		t.Fatal("delete a returned false")
+	}
+	if _, ok := s.Snapshot("a"); ok {
+		t.Error("erased handle id resurrected the surviving execution")
+	}
+	if _, ok := s.Snapshot("h2"); !ok {
+		t.Error("surviving handle lost")
+	}
+	// The worker still addresses the execution by its id through Update.
+	if !s.Update("a", func(j *Job) { j.State = JobRunning }) {
+		t.Error("execution not updatable by its id after the primary handle was erased")
+	}
+	if snap, _ := s.Snapshot("h2"); snap.State != JobRunning {
+		t.Errorf("update via execution id not seen by surviving handle: %q", snap.State)
+	}
+}
+
+func TestStoreEnqueuingJobNotCoalesceable(t *testing.T) {
+	s := NewMemStore()
+	a := mkJob("a", "img:1", nil)
+	a.enqueuing = true // mid-enqueue: published but not yet on the run queue
+	_ = s.Add(a)
+	if _, ok := s.Attach(a.dedup, "h2", nil, time.Now()); ok {
+		t.Error("coalesced onto a job that is still enqueuing")
+	}
+	if _, ok := s.Active(a.dedup); ok {
+		t.Error("enqueuing job reported active")
+	}
+	// Once queued it becomes a coalescing target.
+	s.Update("a", func(j *Job) { j.enqueuing = false })
+	if _, ok := s.Attach(a.dedup, "h2", nil, time.Now()); !ok {
+		t.Error("job not coalesceable after enqueue was confirmed")
+	}
+}
+
+func countTotal(m map[JobState]int) int {
+	n := 0
+	for _, c := range m {
+		n += c
+	}
+	return n
+}
+
 func TestStoreDeleteCancels(t *testing.T) {
 	s := NewMemStore()
 	j := mkJob("a", "img:1", nil)

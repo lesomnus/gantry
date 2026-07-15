@@ -42,6 +42,7 @@ message JobAddRequest {
   repeated string platforms = 5;
   bool copy_referrers = 6;
   repeated string as = 14;
+  map<string, string> labels = 15;
   JobState state = 7 [features.field_presence = IMPLICIT];
   string error = 8 [features.field_presence = IMPLICIT];
   Verification verification = 9;
@@ -70,6 +71,7 @@ message JobSelect {
   bool platforms = 5;
   bool copy_referrers = 6;
   bool as = 14;
+  bool labels = 15;
   bool state = 7;
   bool error = 8;
   bool verification = 9;
@@ -81,6 +83,7 @@ message JobSelect {
 
 message JobPatchRequest {
   JobRef ref = 1;
+  map<string, string> labels = 29;
   JobState state = 13;
   string error = 15;
   Verification verification = 17;
@@ -96,6 +99,9 @@ message JobListRequest {
   string ref = 2;
   // Jobs created at or after this instant.
   google.protobuf.Timestamp since = 3;
+  // Label selector: a job matches when it carries every key with the given
+  // value (subset match). An empty map matches everything.
+  map<string, string> labels = 4;
 
   int32 page_size = 10;
   string page_token = 11;

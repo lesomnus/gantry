@@ -57,6 +57,10 @@ type Job struct {
 	Ref       string // the requested image reference
 	Platforms []string
 	As        []string // engine dest: names the image is recorded under
+	// Labels is the seed metadata of the job's originating handle; per-caller
+	// labels live on the handles (see the store), so a coalesced move keeps
+	// each caller's own set. Not used to run the move, only to find it.
+	Labels map[string]string
 
 	State        JobState
 	Err          string
@@ -74,6 +78,20 @@ type Job struct {
 	exec     *jobExec
 	req      Request     // the original request, for Retry's fresh re-plan
 	canceled atomic.Bool // Cancel was requested; Active must not coalesce onto it
+
+	// refs and pins track the handles pointing at this shared execution, both
+	// guarded by the store mutex. refs counts handles that still want the move
+	// to run (a canceled handle drops out); reaching zero cancels the work.
+	// pins counts handle records that reference it (canceled ones included);
+	// reaching zero evicts the record. See memStore.
+	refs int
+	pins int
+	// enqueuing marks the brief window between publishing a Submit-created job
+	// and confirming it onto the run queue; while set, coalescing skips it so a
+	// racing identical submit cannot attach to a job that may still fail to
+	// enqueue and be rolled back. Guarded by the store mutex; zero value (a
+	// directly-added job) is immediately coalesceable.
+	enqueuing bool
 }
 
 func NewJob(id, ref string, platforms []string, now time.Time) *Job {
@@ -158,6 +176,7 @@ type JobSnapshot struct {
 	Ref          string                `json:"ref"`
 	Platforms    []string              `json:"platforms"`
 	As           []string              `json:"as,omitempty"`
+	Labels       map[string]string     `json:"labels,omitempty"`
 	State        JobState              `json:"state"`
 	Err          string                `json:"error"`
 	Verification *VerificationSnapshot `json:"verification,omitempty"`
@@ -194,6 +213,7 @@ func (j *Job) snapshot() JobSnapshot {
 		Ref:       j.Ref,
 		Platforms: j.Platforms,
 		As:        j.As,
+		Labels:    j.Labels,
 		State:     j.State,
 		Err:       j.Err,
 		CreatedAt: j.CreatedAt,
@@ -232,30 +252,52 @@ func (j *Job) snapshot() JobSnapshot {
 
 // Filter narrows List results.
 type Filter struct {
-	State JobState
-	Ref   string
-	Since time.Time // only jobs created at/after this instant
-	Limit int       // truncate after sorting (newest first); 0 = no limit
+	State  JobState
+	Ref    string
+	Since  time.Time         // only jobs created at/after this instant
+	Labels map[string]string // subset match: a job must carry every pair
+	Limit  int               // truncate after sorting (newest first); 0 = no limit
 }
 
 // Store holds jobs. The in-memory implementation is ephemeral; the interface
 // lets a persistent backend drop in without touching the API layer.
+//
+// A job is a shared execution addressed by one or more per-caller handles: an
+// identical submit coalesces onto the running job but gets its own handle, so
+// its labels and its cancel stay independent. Handle ids and execution ids
+// share one namespace and every method that takes an id resolves through it —
+// Add seeds a job with a primary handle whose id equals the job's, so a
+// single-caller job behaves exactly like a plain record.
 type Store interface {
+	// Add registers a new execution and its primary handle (both keyed by j.ID).
 	Add(j *Job) error
+	// Attach adds a handle to an in-flight execution matching key, returning
+	// that handle's snapshot. It is how an identical submit coalesces without
+	// losing the caller's labels. ok=false when no such execution is active.
+	Attach(key, handleID string, labels map[string]string, createdAt time.Time) (JobSnapshot, bool)
 	Job(id string) (*Job, bool)
 	Snapshot(id string) (JobSnapshot, bool)
 	List(f Filter) []JobSnapshot
-	// Counts tallies job records by state without materializing snapshots
+	// Counts tallies executions by state without materializing snapshots
 	// (polled by the metrics observer on every collection).
 	Counts() map[JobState]int
 	Active(key string) (JobSnapshot, bool)
 	Update(id string, fn func(*Job)) bool
+	// RetrySource returns the request to resubmit for a handle and that
+	// handle's effective (per-caller) state, so a retry honors the caller's own
+	// canceled view and carries the caller's own labels rather than the
+	// originating submit's. ok=false when no such handle exists.
+	RetrySource(id string) (req Request, state JobState, ok bool)
+	// Cancel detaches the handle and, when it was the execution's last active
+	// handle, stops the shared work; the record is kept. already reports the
+	// handle was already canceled or the execution already terminal.
+	Cancel(id string) (snap JobSnapshot, ok bool, already bool)
 	Delete(id string) bool
 	Sweep(now time.Time, ttl time.Duration) int
 
-	// Remember maps a client idempotency key to a job; Idem returns that job
-	// while its record survives, letting a retried POST return the same job
-	// instead of re-running the move.
+	// Remember maps a client idempotency key to a handle; Idem returns that
+	// handle while its record survives, letting a retried submit return the same
+	// job instead of re-running the move.
 	Remember(key, id string)
 	Idem(key string) (JobSnapshot, bool)
 }

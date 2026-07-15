@@ -32,6 +32,7 @@ func TestJobAdd(t *testing.T) {
 		Ref:    "src.local/lib/app:1",
 		Target: pb.StoreByName("node"),
 		As:     []string{"docker.io/lib/app:1"},
+		Labels: map[string]string{"team": "infra"},
 	}.Build(), grpc.Trailer(&trailer))
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +44,8 @@ func TestJobAdd(t *testing.T) {
 		t.Errorf("want coalesced=false trailer, got %v", got)
 	}
 	if len(e.warmer.submits) != 1 || e.warmer.submits[0].Target != "node" ||
-		len(e.warmer.submits[0].As) != 1 || e.warmer.submits[0].As[0] != "docker.io/lib/app:1" {
+		len(e.warmer.submits[0].As) != 1 || e.warmer.submits[0].As[0] != "docker.io/lib/app:1" ||
+		e.warmer.submits[0].Labels["team"] != "infra" {
 		t.Errorf("submit not forwarded: %+v", e.warmer.submits)
 	}
 
@@ -154,6 +156,41 @@ func TestJobGetListErase(t *testing.T) {
 	}
 	_, err = e.client.Job().Erase(ctx, pb.JobById("job_1"))
 	wantCode(t, err, codes.NotFound)
+}
+
+func TestJobListByLabel(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	now := time.Now()
+	e.addLabeledJob(t, "job_1", "a:1", warm.JobRunning, now, map[string]string{"team": "x", "env": "prod"})
+	e.addLabeledJob(t, "job_2", "b:1", warm.JobRunning, now, map[string]string{"team": "y", "env": "prod"})
+
+	// A single key selects; the matched job echoes its full label set back.
+	res, err := e.client.Job().List(ctx, pb.JobListRequest_builder{
+		Labels: map[string]string{"team": "x"},
+	}.Build())
+	if err != nil || len(res.GetItems()) != 1 || res.GetItems()[0].GetId() != "job_1" {
+		t.Fatalf("label filter: %v %v", res, err)
+	}
+	if res.GetItems()[0].GetLabels()["env"] != "prod" {
+		t.Errorf("labels not echoed back: %v", res.GetItems()[0].GetLabels())
+	}
+
+	// Subset semantics: every pair must match, so a wrong value excludes.
+	res, err = e.client.Job().List(ctx, pb.JobListRequest_builder{
+		Labels: map[string]string{"team": "x", "env": "stage"},
+	}.Build())
+	if err != nil || len(res.GetItems()) != 0 {
+		t.Fatalf("non-matching subset: %v %v", res, err)
+	}
+
+	// A shared key matches both.
+	res, err = e.client.Job().List(ctx, pb.JobListRequest_builder{
+		Labels: map[string]string{"env": "prod"},
+	}.Build())
+	if err != nil || len(res.GetItems()) != 2 {
+		t.Fatalf("shared key: %v %v", res, err)
+	}
 }
 
 func TestJobWatch(t *testing.T) {

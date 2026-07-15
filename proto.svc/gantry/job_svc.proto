@@ -9,6 +9,11 @@ import "gantry/job.proto";
 import "gantry/store_svc.g.proto";
 import "google/protobuf/timestamp.proto";
 
+// Add/Get/Erase (merged in from the orm crud option) plus the actions below are
+// the client surface. The crud-generated Patch is intentionally NOT a client
+// operation — a submitted job is fixed, labels included. It is retained in the
+// generated API only as a test affordance, so a harness can seed or rewrite a
+// job's initial state; production keeps it off the client surface.
 service JobService {
   // List returns jobs newest-first.
   rpc List(JobListRequest) returns (JobListResponse);
@@ -33,6 +38,9 @@ message JobListRequest {
   string ref = 2;
   // Jobs created at or after this instant.
   google.protobuf.Timestamp since = 3;
+  // Label selector: a job matches when it carries every key with the given
+  // value (subset match). An empty map matches everything.
+  map<string, string> labels = 4;
 
   int32 page_size = 10;
   string page_token = 11;

@@ -247,6 +247,7 @@ func jobToPB(snap warm.JobSnapshot) *pb.Job {
 		Ref:          snap.Ref,
 		Platforms:    snap.Platforms,
 		As:           snap.As,
+		Labels:       snap.Labels,
 		State:        jobStateToPB[snap.State],
 		Error:        snap.Err,
 		Verification: verificationToPB(snap.Verification),

@@ -90,22 +90,84 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 }
 
 func TestWarmerDedup(t *testing.T) {
-	w, _ := newWarmer(t, []config.StoreConfig{
+	w, js := newWarmer(t, []config.StoreConfig{
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background() // enqueue without starting workers; jobs stay active
-	req := Request{Ref: "team/app:1", Source: "docker.io", Target: "cache", Platforms: []string{"linux/amd64"}}
-	s1, _, err := w.Submit(req)
+	req := Request{Ref: "team/app:1", Source: "docker.io", Target: "cache", Platforms: []string{"linux/amd64"}, Labels: map[string]string{"team": "a"}}
+	s1, c1, err := w.Submit(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, _, err := w.Submit(req)
+	// An identical submit coalesces onto the running move but still gets its own
+	// handle, so its id and its labels stay independent of the first caller's.
+	req2 := req
+	req2.Labels = map[string]string{"team": "b"}
+	s2, c2, err := w.Submit(req2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s1.ID != s2.ID {
-		t.Errorf("expected dedup onto one job, got %s and %s", s1.ID, s2.ID)
+	if !c1 || c2 {
+		t.Errorf("created flags = %v, %v; want true, false (second coalesces)", c1, c2)
 	}
+	if s1.ID == s2.ID {
+		t.Errorf("coalesced submit should get its own handle, got %s twice", s1.ID)
+	}
+	if s1.Labels["team"] != "a" || s2.Labels["team"] != "b" {
+		t.Errorf("handles must keep their own labels, got %v and %v", s1.Labels, s2.Labels)
+	}
+	// The two handles share a single execution.
+	total := 0
+	for _, c := range js.Counts() {
+		total += c
+	}
+	if total != 1 {
+		t.Errorf("executions = %d, want 1 shared job", total)
+	}
+	if got := js.List(Filter{}); len(got) != 2 {
+		t.Errorf("list = %d handles, want 2", len(got))
+	}
+}
+
+func TestRetryHonorsHandleViewAndLabels(t *testing.T) {
+	w, js := newWarmer(t, []config.StoreConfig{
+		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
+	}, true)
+	w.base = context.Background() // no workers: the shared job stays active
+	reqA := Request{Ref: "team/app:1", Source: "docker.io", Target: "cache", Platforms: []string{"linux/amd64"}, Labels: map[string]string{"who": "a"}}
+	sA, _, err := w.Submit(reqA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqB := reqA
+	reqB.Labels = map[string]string{"who": "b"}
+	sB, coalesced, err := w.Submit(reqB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coalesced {
+		t.Fatal("second submit should coalesce onto the first")
+	}
+
+	// B cancels its handle; A's execution keeps running, so from B's side the
+	// job now reads terminal (canceled) while the execution is still active.
+	if _, ok, already := js.Cancel(sB.ID); !ok || already {
+		t.Fatalf("cancel B: ok=%v already=%v", ok, already)
+	}
+
+	// Retry must honor B's own terminal view (not the still-running execution)
+	// and resubmit under B's own labels (not A's).
+	rB, _, err := w.Retry(sB.ID)
+	if err != nil {
+		t.Fatalf("retry of a canceled handle should be allowed, got %v", err)
+	}
+	if rB.ID == sB.ID {
+		t.Error("retry should mint a fresh handle")
+	}
+	if rB.Labels["who"] != "b" {
+		t.Errorf("retry labels = %v, want the caller's own who=b", rB.Labels)
+	}
+	_ = sA
 }
 
 func TestWarmerQueueFull(t *testing.T) {

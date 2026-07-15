@@ -296,7 +296,10 @@ func TestJobToEngineDedup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second submit: %v", err)
 	}
-	if created || second.ID != first.ID {
-		t.Errorf("identical engine move should coalesce: created=%v id=%s want %s", created, second.ID, first.ID)
+	if created {
+		t.Errorf("identical engine move should coalesce: created=%v", created)
+	}
+	if second.ID == first.ID {
+		t.Errorf("coalesced submit should get its own handle, got %s twice", second.ID)
 	}
 }
