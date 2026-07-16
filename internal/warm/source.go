@@ -2,9 +2,11 @@ package warm
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -12,6 +14,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/z"
 )
@@ -103,6 +106,34 @@ func upstreamPlan(ctx context.Context, source config.StoreConfig, ref name.Refer
 		return nil, err
 	}
 	return resolvePlan(ctx, ref, platforms, baseOpts(ctx, registryAuth(source), rt))
+}
+
+// fetchAnchor fetches the raw manifest/index bytes the digest reference names
+// from the source store — the cache for an engine job, keeping the two-hop
+// promise: the origin registry is never contacted. The bytes are hashed here
+// against the reference's digest rather than trusting the transport (ggcr
+// skips content verification for some legacy media types), because they are
+// about to be registered on a node under that digest's name.
+func fetchAnchor(ctx context.Context, source config.StoreConfig, ref name.Digest) (*down.AnchorBlob, error) {
+	rt, err := xport.Transport(source)
+	if err != nil {
+		return nil, err
+	}
+	desc, err := remote.Get(ref, baseOpts(ctx, registryAuth(source), rt)...)
+	if err != nil {
+		return nil, z.Err(err, "get anchor manifest %q", ref.Name())
+	}
+	if !strings.HasPrefix(ref.DigestStr(), "sha256:") {
+		return nil, fmt.Errorf("digest `as` supports sha256 references; got %q", ref.DigestStr())
+	}
+	if got := fmt.Sprintf("sha256:%x", sha256.Sum256(desc.Manifest)); got != ref.DigestStr() {
+		return nil, fmt.Errorf("anchor manifest for %q hashes to %s", ref.Name(), got)
+	}
+	return &down.AnchorBlob{
+		MediaType: string(desc.MediaType),
+		Digest:    ref.DigestStr(),
+		Bytes:     desc.Manifest,
+	}, nil
 }
 
 // resolvePlan walks ref (image or index) restricted to the selected platforms

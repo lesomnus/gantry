@@ -116,7 +116,7 @@ func TestDockerReapRemovesDigestRefsOnly(t *testing.T) {
 		containers: `[]`,
 	}
 	eng := fakeDockerEngine(t, d)
-	rr, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb")
+	rr, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb", nil)
 	if err != nil || !ok {
 		t.Fatalf("reap = ok %v err %v, want ok", ok, err)
 	}
@@ -142,7 +142,7 @@ func TestDockerReapRefLessRemovesByID(t *testing.T) {
 		containers: `[]`,
 	}
 	eng := fakeDockerEngine(t, d)
-	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb")
+	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb", nil)
 	if err != nil || !ok {
 		t.Fatalf("reap = ok %v err %v, want ok", ok, err)
 	}
@@ -159,7 +159,7 @@ func TestDockerReapConflictIsTransientSkip(t *testing.T) {
 		deleteCode: map[string]int{"r/a@sha256:x": http.StatusConflict},
 	}
 	eng := fakeDockerEngine(t, d)
-	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb")
+	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb", nil)
 	if err != nil || ok {
 		t.Fatalf("reap = ok %v err %v, want a transient skip (no error) on 409", ok, err)
 	}
@@ -171,7 +171,7 @@ func TestDockerReapSkipsRetagged(t *testing.T) {
 		containers: `[]`,
 	}
 	eng := fakeDockerEngine(t, d)
-	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb")
+	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb", nil)
 	if err != nil || ok {
 		t.Fatalf("reap = ok %v err %v, want a skip", ok, err)
 	}
@@ -186,7 +186,7 @@ func TestDockerReapSkipsContainerRef(t *testing.T) {
 		containers: `[{"Id":"c1","Image":"sha256:bbb","ImageID":"sha256:bbb","State":"exited"}]`,
 	}
 	eng := fakeDockerEngine(t, d)
-	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb")
+	_, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb", nil)
 	if err != nil || ok {
 		t.Fatalf("reap = ok %v err %v, want a skip", ok, err)
 	}
@@ -206,21 +206,21 @@ func TestDockerReapSkipsInFlightPull(t *testing.T) {
 	}
 	eng := fakeDockerEngine(t, d)
 	done := eng.trackPull("index.docker.io/library/nginx@" + dg)
-	if _, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb"); err != nil || ok {
+	if _, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb", nil); err != nil || ok {
 		t.Fatalf("reap = ok %v err %v, want a skip while the pull is in flight", ok, err)
 	}
 	if got := d.removed(); len(got) != 0 {
 		t.Errorf("no delete while a pull holds the digest: %v", got)
 	}
 	done()
-	if _, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb"); err != nil || !ok {
+	if _, ok, err := eng.ReapUntagged(context.Background(), "sha256:bbb", nil); err != nil || !ok {
 		t.Fatalf("reap after the pull = ok %v err %v, want ok", ok, err)
 	}
 }
 
 func TestDockerReapGoneIsConverged(t *testing.T) {
 	eng := fakeDockerEngine(t, &fakeDaemon{inspect: map[string]string{}})
-	rr, ok, err := eng.ReapUntagged(context.Background(), "sha256:gone")
+	rr, ok, err := eng.ReapUntagged(context.Background(), "sha256:gone", nil)
 	if err != nil || !ok {
 		t.Fatalf("reap = ok %v err %v, want ok for an image already gone", ok, err)
 	}

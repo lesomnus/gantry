@@ -553,9 +553,10 @@ func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 }
 
 // reapOne executes one untagged-image reap. The engine re-checks reapability
-// right before removing (re-tagged, container reference, in-flight pull) and
-// reports not-ok without error for a transient hold — the entry stays tracked
-// and the next pass retries; the next scan drops it if the image was re-tagged.
+// right before removing (re-tagged, container reference, in-flight pull,
+// index-owned digest reference) and reports not-ok without error for a
+// transient hold — the entry stays tracked and the next pass retries; the next
+// scan drops it if the image was re-tagged.
 func (u *unit) reapOne(ctx context.Context, id string, res *ApplyResult) {
 	if u.recon == nil {
 		return
@@ -566,7 +567,24 @@ func (u *unit) reapOne(ctx context.Context, id string, res *ApplyResult) {
 		res.Skipped = append(res.Skipped, id)
 		return
 	}
-	rr, ok, err := u.recon.ReapUntagged(ctx, id)
+	// Re-read digest ownership at apply time: a digest-`as` job finishing
+	// between the plan and this reap names the content only through a
+	// RepoDigest + an index record — invisible to the engine's RepoTags
+	// re-check, so the veto has to come from the live index.
+	owned := func(string) bool { return false }
+	if recs, err := u.ix.List(u.name); err == nil {
+		byDigest := make(map[string]bool, len(recs))
+		for _, r := range recs {
+			if r.Digest != "" && r.Tag == "" {
+				byDigest[r.Repo+"@"+r.Digest] = true
+			}
+		}
+		owned = func(ref string) bool {
+			repo, _, dg := parseRef(ref)
+			return dg != "" && byDigest[repo+"@"+dg]
+		}
+	}
+	rr, ok, err := u.recon.ReapUntagged(ctx, id, owned)
 	res.Deleted = append(res.Deleted, rr.Deleted...)
 	res.Untagged = append(res.Untagged, rr.Untagged...)
 	if err != nil {

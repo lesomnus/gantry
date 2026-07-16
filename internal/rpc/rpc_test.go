@@ -64,12 +64,15 @@ func (e *fakeEngine) Ready(context.Context) error {
 func (e *fakeEngine) Platform(context.Context) (string, error) { return "linux/amd64", nil }
 func (e *fakeEngine) Close() error                             { return nil }
 
-func (e *fakeEngine) Pull(_ context.Context, ref, digest, platform string, as []string, _ down.Sink) error {
+func (e *fakeEngine) Pull(_ context.Context, ref, digest, platform string, as []string, _ *down.AnchorBlob, _ down.Sink) ([]string, error) {
 	if e.pullErr != nil {
-		return e.pullErr
+		return nil, e.pullErr
 	}
 	e.pulled = append(e.pulled, pullCall{ref, digest, platform, as})
-	return nil
+	if len(as) == 0 {
+		return []string{ref}, nil
+	}
+	return as, nil
 }
 
 func (e *fakeEngine) InUse(context.Context) (map[string]bool, error) {

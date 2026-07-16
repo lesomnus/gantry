@@ -47,7 +47,7 @@ func TestContainerdEngineLive(t *testing.T) {
 		t.Skipf("no reachable containerd (%s): %v", containerdAddr(), err)
 	}
 
-	if err := eng.Pull(ctx, "docker.io/library/busybox:latest", "", "", nil, &recSink{}); err != nil {
+	if _, err := eng.Pull(ctx, "docker.io/library/busybox:latest", "", "", nil, nil, &recSink{}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 }
@@ -77,7 +77,7 @@ func TestContainerdAnchoredPull(t *testing.T) {
 	const ref = "docker.io/library/busybox:latest"
 	// Resolve the tag's manifest digest first (via a plain pull), then remove it
 	// so the anchored pull actually re-resolves by digest.
-	if err := eng.Pull(ctx, ref, "", "", nil, &recSink{}); err != nil {
+	if _, err := eng.Pull(ctx, ref, "", "", nil, nil, &recSink{}); err != nil {
 		t.Fatalf("seed pull: %v", err)
 	}
 	nctx := namespaces.WithNamespace(ctx, ns)
@@ -91,7 +91,7 @@ func TestContainerdAnchoredPull(t *testing.T) {
 	_, _ = eng.Remove(ctx, repo+"@"+digest) // clear any digest record from the seed
 
 	// Anchored pull: repo@digest, tagged back to ref.
-	if err := eng.Pull(ctx, ref, digest, "", nil, &recSink{}); err != nil {
+	if _, err := eng.Pull(ctx, ref, digest, "", nil, nil, &recSink{}); err != nil {
 		t.Fatalf("anchored pull: %v", err)
 	}
 
@@ -108,4 +108,66 @@ func TestContainerdAnchoredPull(t *testing.T) {
 		t.Errorf("digest-named record %s@%s still present; retention GC could never reclaim it", repo, digest)
 	}
 	_, _ = eng.Remove(ctx, ref)
+}
+
+// TestContainerdDigestAs covers digest-named `as` references: an anchored pull
+// with a digest name registers a record with that exact name over the pulled
+// content, the unrequested pull-created record is dropped, and a name carrying
+// a foreign digest is refused.
+func TestContainerdDigestAs(t *testing.T) {
+	if _, err := os.Stat(containerdAddr()); err != nil {
+		t.Skipf("no containerd socket at %s", containerdAddr())
+	}
+	ns := containerdNamespace()
+	eng, err := newContainerdEngine(config.StoreConfig{
+		Name: "live", Kind: "containerd", Address: containerdAddr(), Namespace: ns,
+	})
+	if err != nil {
+		t.Skipf("containerd client: %v", err)
+	}
+	defer eng.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	if err := eng.Ready(ctx); err != nil {
+		t.Skipf("no reachable containerd: %v", err)
+	}
+
+	const ref = "docker.io/library/busybox:latest"
+	if _, err := eng.Pull(ctx, ref, "", "", nil, nil, &recSink{}); err != nil {
+		t.Fatalf("seed pull: %v", err)
+	}
+	nctx := namespaces.WithNamespace(ctx, ns)
+	img, err := eng.cli.ImageService().Get(nctx, ref)
+	if err != nil {
+		t.Fatalf("resolve digest: %v", err)
+	}
+	digest := img.Target.Digest.String()
+	repo := "docker.io/library/busybox"
+	_, _ = eng.Remove(ctx, ref)
+	_, _ = eng.Remove(ctx, repo+"@"+digest)
+
+	// The upstream digest name: what a digest-pinned jobspec resolves.
+	upstream := "cr.invalid/library/busybox@" + digest
+	t.Cleanup(func() { _, _ = eng.Remove(ctx, upstream) })
+	if _, err := eng.Pull(ctx, ref, digest, "", []string{upstream}, nil, &recSink{}); err != nil {
+		t.Fatalf("anchored pull with digest as: %v", err)
+	}
+	rec, err := eng.cli.ImageService().Get(nctx, upstream)
+	if err != nil {
+		t.Fatalf("digest-named record missing: %v", err)
+	}
+	if rec.Target.Digest.String() != digest {
+		t.Errorf("record digest = %s, want %s", rec.Target.Digest, digest)
+	}
+	// The unrequested pull-created record must not survive.
+	if _, err := eng.cli.ImageService().Get(nctx, repo+"@"+digest); err == nil {
+		t.Errorf("unrequested pull record %s@%s still present", repo, digest)
+	}
+
+	// A digest name that lies about its content is refused.
+	lie := "cr.invalid/library/busybox@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	if _, err := eng.Pull(ctx, ref, digest, "", []string{lie}, nil, &recSink{}); err == nil {
+		_, _ = eng.Remove(ctx, lie)
+		t.Error("mismatched digest name must be refused")
+	}
 }

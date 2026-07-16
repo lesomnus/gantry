@@ -22,8 +22,8 @@ type fakeEng struct {
 func (f *fakeEng) Name() string                { return f.name }
 func (f *fakeEng) Kind() string                { return "docker" }
 func (f *fakeEng) Ready(context.Context) error { return nil }
-func (f *fakeEng) Pull(context.Context, string, string, string, []string, down.Sink) error {
-	return nil
+func (f *fakeEng) Pull(context.Context, string, string, string, []string, *down.AnchorBlob, down.Sink) ([]string, error) {
+	return nil, nil
 }
 func (f *fakeEng) Platform(context.Context) (string, error) { return "linux/amd64", nil }
 func (f *fakeEng) InUse(context.Context) (map[string]bool, error) {

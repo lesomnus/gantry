@@ -935,8 +935,13 @@ type Job_builder struct {
 	// Engine target only: record the pulled image under these names
 	// instead of the pull reference, so a cache-fed engine keeps the image
 	// under its upstream name (e.g. "docker.io/library/redis:7"). Tag
-	// references only; non-empty replaces the pull-reference name entirely —
-	// include it in the list to keep it.
+	// references — or, for a digest-pinned job (a digest ref, or a verified
+	// source), digest references carrying the pinned digest: those are
+	// registered over the pulled content so the upstream digest name (e.g.
+	// "cr.example.com/app@sha256:...") resolves locally without touching its
+	// registry (containerd image store; a classic docker graph store skips
+	// them with a warning). Non-empty replaces the pull-reference name
+	// entirely — include it in the list to keep it.
 	As []string
 	// Free-form key/value labels for organizing and selecting jobs. Purely
 	// caller metadata — they do not change how the move runs, only how it is

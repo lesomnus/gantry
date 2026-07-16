@@ -78,7 +78,9 @@ go test -race ./...
     `hello-world` 실제 pull.
   - `internal/down/containerd_integration_test.go` → `CONTAINERD_ADDRESS` 소켓이
     있으면 `CONTAINERD_NAMESPACE`(기본 `gantry`)로 실제 pull + digest-anchored pull
-    (retag 후 digest-named 레코드가 안 남는지까지 검증), 없으면 즉시 skip.
+    (retag 후 **요청되지 않은** digest-named 레코드가 안 남는지까지 검증) +
+    digest `as`(요청된 digest 이름은 pull된 콘텐츠 위에 레코드로 남고, 다른
+    digest를 주장하는 이름은 거부되는지), 없으면 즉시 skip.
 
 ## 전체 루프 수동 검증
 

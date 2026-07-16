@@ -67,13 +67,14 @@ func TestAsValidation(t *testing.T) {
 		t.Errorf("registry dest must reject as, got %v", err)
 	}
 
-	// A digest is content identity, not a name.
+	// A digest `as` needs a digest-pinned job: on an unanchored tag job there
+	// is nothing that says what the name would mean.
 	_, _, err = w.Submit(Request{
 		Ref: "team/app:1", Source: "up", Target: "node",
 		As: []string{"docker.io/team/app@sha256:0000000000000000000000000000000000000000000000000000000000000000"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "digest") {
-		t.Errorf("digest as must be rejected, got %v", err)
+		t.Errorf("digest as on an unanchored job must be rejected, got %v", err)
 	}
 }
 

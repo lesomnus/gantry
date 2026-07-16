@@ -27,6 +27,18 @@ JobService.Get  ·  JobService.Watch (server stream)
   host's when omitted. The daemon's progress is folded into the same transfer
   (totals estimated upfront from the source manifest, refined as the daemon
   reports). `StoreService.Pull` remains for ad-hoc, job-less pulls.
+- `as` records the pulled image on the engine under caller-chosen names instead
+  of the pull reference, so a cache-fed node keeps the upstream name
+  (`docker.io/library/redis:7`). For a **digest-pinned** job (a digest ref, or a
+  verified source) the names may be digest references carrying the pinned digest
+  (`cr.example.com/app@sha256:…`): gantry registers them over the pulled content
+  — the anchor manifest's bytes come from the cache, the origin registry is
+  never contacted — so a jobspec pinned to `repo@sha256:INDEX` resolves locally
+  (`docker image inspect` hits, `force_pull=false` runs pull nothing). Digest
+  names need an engine whose docker uses the containerd image store; a classic
+  graph store skips them with a warning (tags still apply). A digest-ref copy
+  into a registry commits the source index **verbatim**, so the same digest
+  resolves from the cache.
 - Optionally, gantry reclaims space on the engines it feeds: it tracks each
   image's last-used time from the daemon's container events and runs an adaptive,
   policy-driven GC (per-store `retention`). See [Configuration](#configuration).
@@ -180,7 +192,9 @@ Implemented and tested (unit + live docker/containerd integration; `go test -rac
   against a full daemon inventory: unknown tagged images join the index and
   untagged leftovers are reaped after `untagged_after`.
 - **Signature verification** (`serve.verify`, Notary Project / notation) — verified
-  at admission with digest pinning; engine pulls are digest-anchored and signatures
+  at admission with digest pinning; engine pulls are digest-anchored (the daemon
+  fetches `repo@digest`; the local names come from `as`/the pull ref — a digest-named
+  local record additionally needs a digest `as` name, see above) and signatures
   can be copied into the cache (`copy_referrers`). Preflight, introspection, and
   hot-reload APIs. Tested with in-process notation signing.
 - **Job lifecycle** — dry-run plan, retry, idempotency, cancel-vs-evict.

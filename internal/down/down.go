@@ -38,6 +38,18 @@ type RemoveResult struct {
 	Deleted  []string `json:"deleted,omitempty"`  // content IDs whose bytes were actually deleted
 }
 
+// AnchorBlob is the raw manifest/index the digest-named `as` references point
+// at: the exact bytes whose sha256 is the pull's anchor digest, fetched from
+// the job's source (the cache) — never the origin registry. Engines that
+// register digest-named references out-of-band (docker with the containerd
+// image store) need the bytes; engines that only need the descriptor
+// (containerd) use the digest/size/media type.
+type AnchorBlob struct {
+	MediaType string
+	Digest    string // "sha256:...", equals the pull's anchor digest
+	Bytes     []byte // raw manifest/index; sha256(Bytes) == Digest
+}
+
 // Engine is a daemon gantry triggers to pull from — and, for retention, observes
 // usage on and deletes images from.
 type Engine interface {
@@ -50,7 +62,15 @@ type Engine interface {
 	// platform ("os/arch", OCI form) selects the platform to pull; empty means
 	// the daemon's default. The value is passed through as-is — if the image has
 	// no such platform, the daemon's error is returned.
-	Pull(ctx context.Context, ref string, digest string, platform string, as []string, sink Sink) error
+	// as may mix tag and digest references; a digest name must carry the anchor
+	// digest and is registered out-of-band over the pulled content (anchor
+	// supplies the manifest bytes backing it). Digest names require an anchored
+	// pull — the Warmer admits them only with a non-empty digest.
+	// recorded reports the references the daemon actually holds for the image
+	// after the pull — the applied names, or the pull-created record when a
+	// name could not be applied (classic-store digest skip) — so the caller
+	// stamps its retention index with reality, never with a skipped name.
+	Pull(ctx context.Context, ref string, digest string, platform string, as []string, anchor *AnchorBlob, sink Sink) (recorded []string, err error)
 	// Platform reports the daemon host's platform in OCI form ("linux/amd64").
 	Platform(ctx context.Context) (string, error)
 
@@ -94,17 +114,23 @@ type UntaggedImage struct {
 // Reconciler is the inventory-reconciliation capability (optional): a snapshot
 // of the daemon's image store, so retention can seed references it has never
 // observed and reap images that have lost every tag. containerd does not
-// implement it — gantry drops the digest-named record after retagging, so
-// containerd's own GC reclaims replaced content.
+// implement it — gantry drops the pull-created digest record after retagging
+// (digest names the caller did NOT ask for would root content forever; the
+// digest-named `as` references it DID ask for are stamped into the retention
+// index instead), so containerd's own GC reclaims replaced content.
 type Reconciler interface {
 	// Images snapshots the daemon's image store.
 	Images(ctx context.Context) (Inventory, error)
 	// ReapUntagged deletes one untagged image by ID, re-checking the daemon
-	// immediately before removing. ok=false without an error means the image is
-	// not reapable right now (re-tagged since the scan, referenced by a
-	// container, or one of its references is being pulled) and the caller should
-	// retry next pass; an image already gone reports ok=true.
-	ReapUntagged(ctx context.Context, id string) (rr RemoveResult, ok bool, err error)
+	// immediately before removing. owned (nil = own nothing) is consulted with
+	// each of the image's repo@digest references: any owned reference vetoes
+	// the reap — the caller's index claimed it between the plan and this apply
+	// (e.g. a digest-`as` job that just named the content). ok=false without an
+	// error means the image is not reapable right now (re-tagged since the
+	// scan, referenced by a container, owned, or one of its references is being
+	// pulled) and the caller should retry next pass; an image already gone
+	// reports ok=true.
+	ReapUntagged(ctx context.Context, id string, owned func(repoDigest string) bool) (rr RemoveResult, ok bool, err error)
 }
 
 // Caps describes which capabilities an engine implements.
@@ -134,6 +160,22 @@ func anchoredRef(ref, digest string) (string, error) {
 		return ref, nil
 	}
 	return r.Context().Name() + "@" + digest, nil
+}
+
+// splitNames separates `as` names into tag and digest references. The Warmer
+// validated each at admission, so an unparseable name is a tag (verbatim
+// passthrough keeps whatever the daemon accepted before).
+func splitNames(as []string) (tags, digests []string) {
+	for _, n := range as {
+		if r, err := name.ParseReference(n); err == nil {
+			if _, ok := r.(name.Digest); ok {
+				digests = append(digests, n)
+				continue
+			}
+		}
+		tags = append(tags, n)
+	}
+	return tags, digests
 }
 
 // New builds an Engine for a docker/containerd store config.

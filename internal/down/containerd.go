@@ -2,6 +2,7 @@ package down
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/pkg/reference"
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
 	"github.com/containerd/typeurl/v2"
@@ -55,13 +57,13 @@ func (e *containerdEngine) Platform(context.Context) (string, error) {
 	return platforms.Format(platforms.DefaultSpec()), nil
 }
 
-func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, sink Sink) error {
+func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, anchor *AnchorBlob, sink Sink) ([]string, error) {
 	ctx = namespaces.WithNamespace(ctx, e.namespace)
 	pull_ref := ref
 	if digest != "" {
 		var err error
 		if pull_ref, err = anchoredRef(ref, digest); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	opts := []containerd.RemoteOpt{containerd.WithPullUnpack}
@@ -75,51 +77,63 @@ func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, 
 	img, err := e.cli.Pull(ctx, pull_ref, opts...)
 	close(done)
 	if err != nil {
-		return z.Err(err, "pull")
+		return nil, z.Err(err, "pull")
 	}
 	// Record the names the deployment knows the image by: the requested `as`
-	// names, or — for an anchored pull, whose only record is digest-named —
-	// the tag form of the pull reference.
+	// names (tags, or digest references carrying the anchored digest), or —
+	// for an anchored pull, whose only record is digest-named — the tag form
+	// of the pull reference.
 	anchored := pull_ref != ref
 	names := as
 	if len(names) == 0 {
 		if !anchored {
-			return nil
+			return []string{ref}, nil // the pull itself recorded this name
 		}
 		names = []string{ref}
 	}
-	named := false
+	var recorded []string
 	for _, n := range names {
 		if n == pull_ref {
-			named = true // the pull itself recorded this name
+			recorded = append(recorded, n) // the pull itself recorded this name
 			continue
+		}
+		// A digest name must carry the digest of the content it will point at
+		// (containerd records the name verbatim over img.Target()) — anything
+		// else registers a lying reference.
+		if r, err := reference.Parse(n); err == nil && r.Digest() != "" && r.Digest() != img.Target().Digest {
+			if anchored && len(recorded) == 0 {
+				e.untrack(ctx, pull_ref)
+			}
+			return nil, fmt.Errorf("digest name %q does not carry the pulled digest %s", n, img.Target().Digest)
 		}
 		rec := images.Image{Name: n, Target: img.Target()}
 		if _, err := e.cli.ImageService().Create(ctx, rec); err != nil {
 			if !cerrdefs.IsAlreadyExists(err) {
-				if anchored && !named {
+				if anchored && len(recorded) == 0 {
 					e.untrack(ctx, pull_ref) // don't leave content rooted by an invisible record
 				}
-				return z.Err(err, "tag %q", n)
+				return nil, z.Err(err, "tag %q", n)
 			}
 			if _, err := e.cli.ImageService().Update(ctx, rec, "target"); err != nil {
-				if anchored && !named {
+				if anchored && len(recorded) == 0 {
 					e.untrack(ctx, pull_ref)
 				}
-				return z.Err(err, "retag %q", n)
+				return nil, z.Err(err, "retag %q", n)
 			}
 		}
-		named = true
+		recorded = append(recorded, n)
 	}
 	if !slices.Contains(names, pull_ref) {
 		// Drop the pull-created record: the caller renamed the image away from
-		// it — and for an anchored pull the retention index only ever tracks
-		// tags, so the digest-named record would root the content forever.
+		// it — and for an anchored pull the retention index tracks only the
+		// names the caller asked for, so this unrequested digest-named record
+		// would root the content forever. (A digest name the caller DID request
+		// via `as` is stamped into the index and reclaimed by name.)
 		if err := e.cli.ImageService().Delete(ctx, pull_ref); err != nil && !cerrdefs.IsNotFound(err) {
-			return z.Err(err, "untrack %q", pull_ref)
+			return nil, z.Err(err, "untrack %q", pull_ref)
 		}
 	}
-	return nil
+	return recorded, nil
 }
 
 // untrack best-effort deletes an image record on an error path; the pull

@@ -74,7 +74,11 @@ type Request struct {
 	CopyReferrers *bool
 	// As records the pulled image under these names instead of the pull
 	// reference, so a cache-fed engine can keep the image under its upstream
-	// name. Tag references only. Engine targets only.
+	// name. Tag references — or, for a digest-pinned job (a digest ref, or a
+	// verified source), digest references carrying the pinned digest: those are
+	// registered over the pulled content so the upstream digest name resolves
+	// locally without touching its registry (containerd image store; a classic
+	// docker graph store skips them with a warning). Engine targets only.
 	As []string
 	// Labels is caller metadata attached to the job for List filtering; it does
 	// not affect the move or coalescing. Each coalesced caller keeps its own.
@@ -86,10 +90,12 @@ type jobExec struct {
 	source        config.StoreConfig
 	dst           dest // the target; pusher or puller by capability
 	copyReferrers bool
+	verbatim      bool                  // pusher dest: commit the source manifest/index byte-for-byte
 	srcRef        name.Reference        // source ref; digest-pinned when verified
 	cacheRef      name.Reference        // pusher dest: the rewritten in-store ref
 	pullRef       string                // puller dest: the ref the engine is told to pull
 	as            []string              // puller dest: names recorded instead of pullRef
+	asDigest      bool                  // puller dest: as contains digest references (anchor bytes needed)
 	platform      string                // puller dest: the resolved platform
 	verification  *VerificationSnapshot // admission-time verification, stamped onto the Job
 
@@ -391,6 +397,7 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 	// anchored to the verified digest.
 	platforms := req.Platforms
 	var transfers []*Transfer
+	var asDigests []name.Digest
 	switch d := ex.dst.(type) {
 	case pusher:
 		if len(req.As) > 0 {
@@ -399,6 +406,22 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		ex.cacheRef, err = d.dstRef(ex.srcRef)
 		if err != nil {
 			return nil, nil, nil, z.Err(err, "rewrite into %q", d.Name())
+		}
+		// A digest-named cache ref keeps the source digest, so a copy-mode
+		// commit must preserve the source manifest/index byte-for-byte — a
+		// rebuilt (platform-filtered) index has a different digest and the
+		// registry would reject the put. Proxy mode commits nothing (the cache
+		// resolves the digest itself), so it is exempt.
+		isDigestDst := false
+		if _, ok := ex.cacheRef.(name.Digest); ok {
+			rd, isRegistry := ex.dst.(*registryDest)
+			isDigestDst = !isRegistry || !rd.isProxy()
+		}
+		if isDigestDst {
+			if len(req.Platforms) > 0 {
+				return nil, nil, nil, fmt.Errorf("a digest-pinned copy preserves the source image verbatim (all platforms); omit platforms")
+			}
+			ex.verbatim = true
 		}
 		transfers = append(transfers, &Transfer{
 			Store: d.Name(), Kind: d.Kind(), Source: ex.source.Name,
@@ -425,16 +448,19 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		}
 		// The image is recorded under the requested names — so a cache-fed
 		// engine can keep the upstream name — instead of the pull reference.
-		// Tags only: a digest is content identity, not a name. The strings are
-		// kept VERBATIM: containerd resolves image names by exact match, so
-		// normalizing (docker.io -> index.docker.io) would break kubelet lookups.
+		// The strings are kept VERBATIM: containerd resolves image names by
+		// exact match, so normalizing (docker.io -> index.docker.io) would
+		// break kubelet lookups. A digest reference is admitted too — it is
+		// validated against the job's pinned digest below, once verification
+		// has had its say.
 		for _, n := range req.As {
 			parsed, err := name.ParseReference(n, w.srcOpts...)
 			if err != nil {
 				return nil, nil, nil, z.Err(err, "parse `as` name %q", n)
 			}
-			if _, ok := parsed.(name.Digest); ok {
-				return nil, nil, nil, fmt.Errorf("`as` name %q is a digest; use a tag reference", n)
+			if d, ok := parsed.(name.Digest); ok {
+				asDigests = append(asDigests, d)
+				ex.asDigest = true
 			}
 			ex.as = append(ex.as, n)
 		}
@@ -472,6 +498,22 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		}
 	}
 
+	// A digest `as` name is honest only when it names exactly what the engine
+	// pulls: it requires an anchored pull (the job ref is a digest, or
+	// verification pinned one) and must carry that anchor digest — anything
+	// else would register a reference to content that is not that digest.
+	if len(asDigests) > 0 {
+		dg, ok := ex.srcRef.(name.Digest)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("digest `as` names require a digest-pinned job (a digest ref, or a verified source)")
+		}
+		for _, d := range asDigests {
+			if d.DigestStr() != dg.DigestStr() {
+				return nil, nil, nil, fmt.Errorf("`as` name %q does not carry the job's pinned digest %s", d.Name(), dg.DigestStr())
+			}
+		}
+	}
+
 	// Referrer propagation (signatures travel with the image): copy the source's
 	// referrer artifacts into the cache with the source digest preserved — which
 	// requires copying the image verbatim, i.e. every platform. Registry
@@ -497,6 +539,7 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 				return nil, nil, nil, fmt.Errorf("copy_referrers preserves the source image verbatim (all platforms); omit platforms or set copy_referrers to false")
 			}
 			platforms = nil // the verbatim commit needs every child manifest present
+			ex.verbatim = true
 		}
 	}
 
@@ -595,7 +638,7 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) e
 	if err := w.copyLayers(ctx, job, t, src, plan, ex); err != nil {
 		return w.failTransfer(job, t, err)
 	}
-	committed, err := src.Commit(ctx, ex.srcRef, ex.cacheRef, job.Platforms, ex.copyReferrers)
+	committed, err := src.Commit(ctx, ex.srcRef, ex.cacheRef, job.Platforms, ex.verbatim)
 	if err != nil {
 		return w.failTransfer(job, t, z.Err(err, "commit"))
 	}
@@ -649,8 +692,28 @@ func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 			slog.String("ref", ex.srcRef.Name()), slog.String("error", err.Error()))
 	}
 
+	// Digest-named `as` references are backed by the anchor manifest's raw
+	// bytes, fetched from the job's SOURCE (the cache) — the origin registry is
+	// never contacted. Fetched before the pull so a cache that cannot resolve
+	// the digest fails the job before any bytes move; the engine registers the
+	// names only after its pull succeeded (a name registered over absent
+	// content would send `docker run` back to the registry in the name).
+	var anchor *down.AnchorBlob
+	if ex.asDigest {
+		dg, ok := ex.srcRef.(name.Digest)
+		if !ok {
+			return w.failTransfer(job, t, fmt.Errorf("digest `as` names require an anchored pull"))
+		}
+		a, err := fetchAnchor(ctx, ex.source, dg)
+		if err != nil {
+			return w.failTransfer(job, t, err)
+		}
+		anchor = a
+	}
+
 	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
-	if err := d.pull(ctx, ex.pullRef, digest, ex.platform, ex.as, sink); err != nil {
+	recorded, err := d.pull(ctx, ex.pullRef, digest, ex.platform, ex.as, anchor, sink)
+	if err != nil {
 		return w.failTransfer(job, t, err)
 	}
 	w.store.Update(job.ID, func(*Job) {
@@ -670,9 +733,11 @@ func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 		t.State = "done"
 	})
 	if w.pullHook != nil {
-		// Stamp the names the daemon actually records — the retention index,
-		// in-use matching, and the inventory all key on them.
-		names := ex.as
+		// Stamp the names the daemon ACTUALLY records, as reported by the
+		// engine — not the requested ones: a classic-store docker skips digest
+		// `as` names, and stamping a name the daemon never held would leave the
+		// image unowned (reaped as untagged) while the index claims otherwise.
+		names := recorded
 		if len(names) == 0 {
 			names = []string{ex.pullRef}
 		}

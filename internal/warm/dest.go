@@ -39,8 +39,11 @@ type puller interface {
 	// downstream_host — applied.
 	pullRef(src name.Reference, source config.StoreConfig) (string, error)
 	// pull triggers the fetch. digest anchors it; platform is passed through
-	// as-is (the daemon errors if the image has no such platform).
-	pull(ctx context.Context, ref, digest, platform string, as []string, sink down.Sink) error
+	// as-is (the daemon errors if the image has no such platform). anchor backs
+	// digest-named `as` references with the anchored manifest's raw bytes (nil
+	// when there are none). recorded reports the references the daemon actually
+	// holds afterwards (a classic-store docker skips digest names).
+	pull(ctx context.Context, ref, digest, platform string, as []string, anchor *down.AnchorBlob, sink down.Sink) (recorded []string, err error)
 	// hostPlatform is the daemon host's platform in OCI form ("linux/amd64"),
 	// the default platform when a job does not name one.
 	hostPlatform(ctx context.Context) (string, error)
@@ -104,8 +107,8 @@ func (d *engineDest) pullRef(src name.Reference, source config.StoreConfig) (str
 	return rewriteHost(src, host)
 }
 
-func (d *engineDest) pull(ctx context.Context, ref, digest, platform string, as []string, sink down.Sink) error {
-	return d.eng.Pull(ctx, ref, digest, platform, as, sink)
+func (d *engineDest) pull(ctx context.Context, ref, digest, platform string, as []string, anchor *down.AnchorBlob, sink down.Sink) ([]string, error) {
+	return d.eng.Pull(ctx, ref, digest, platform, as, anchor, sink)
 }
 
 func (d *engineDest) hostPlatform(ctx context.Context) (string, error) {

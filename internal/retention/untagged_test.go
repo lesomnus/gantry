@@ -231,7 +231,7 @@ func (f *reconEng) Images(context.Context) (down.Inventory, error) {
 	return f.inv, nil
 }
 
-func (f *reconEng) ReapUntagged(_ context.Context, id string) (down.RemoveResult, bool, error) {
+func (f *reconEng) ReapUntagged(_ context.Context, id string, _ func(string) bool) (down.RemoveResult, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.reapOK {

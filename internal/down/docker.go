@@ -1,11 +1,13 @@
 package down
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -23,6 +25,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/xport"
+	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/z"
 )
 
@@ -114,6 +117,25 @@ func (e *dockerEngine) Platform(ctx context.Context) (string, error) {
 	return p, nil
 }
 
+// containerdStore reports whether the daemon uses the containerd image store
+// (containerd-snapshotter) rather than the classic graph store. Only the
+// containerd store can register a digest-named reference over local content —
+// in the classic store a RepoDigest exists only as the record of a real pull.
+// Probed per call, NOT cached: the store kind flips across daemon restarts
+// (migrations both ways exist) and only digest-`as` pulls pay the round trip.
+func (e *dockerEngine) containerdStore(ctx context.Context) (bool, error) {
+	info, err := e.cli.Info(ctx)
+	if err != nil {
+		return false, z.Err(err, "docker info")
+	}
+	for _, kv := range info.DriverStatus {
+		if len(kv) == 2 && kv[0] == "driver-type" && kv[1] == "io.containerd.snapshotter.v1" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ociPlatform normalizes a daemon-reported os/arch pair ("linux"/"x86_64") into
 // the OCI platform form pulls use ("linux/amd64").
 func ociPlatform(osType, arch string) (string, error) {
@@ -126,12 +148,12 @@ func ociPlatform(osType, arch string) (string, error) {
 
 func (e *dockerEngine) Close() error { return e.cli.Close() }
 
-func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, sink Sink) error {
+func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, anchor *AnchorBlob, sink Sink) ([]string, error) {
 	pull_ref := ref
 	if digest != "" {
 		var err error
 		if pull_ref, err = anchoredRef(ref, digest); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	defer e.trackPull(pull_ref)()
@@ -139,7 +161,7 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 	// daemon's error surfaces through the pull stream below.
 	rc, err := e.cli.ImagePull(ctx, pull_ref, image.PullOptions{Platform: platform})
 	if err != nil {
-		return z.Err(err, "image pull")
+		return nil, z.Err(err, "image pull")
 	}
 	defer rc.Close()
 
@@ -150,12 +172,12 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		var m jsonmessage.JSONMessage
 		if err := dec.Decode(&m); err != nil {
 			if !errors.Is(err, io.EOF) {
-				return z.Err(err, "decode pull stream")
+				return nil, z.Err(err, "decode pull stream")
 			}
 			break
 		}
 		if m.Error != nil {
-			return fmt.Errorf("pull: %s", m.Error.Message)
+			return nil, fmt.Errorf("pull: %s", m.Error.Message)
 		}
 		if u, ok := layerUpdate(m); ok {
 			sink.Layer(u)
@@ -168,40 +190,125 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 	names := as
 	if len(names) == 0 {
 		if !anchored {
-			return nil
+			return []string{ref}, nil // the pull itself created this tag
 		}
 		names = []string{ref}
 	}
-	tagged := false
-	for _, n := range names {
+	tags, digests := splitNames(names)
+	// cleanup best-effort drops the pull-created digest record while the
+	// content has no visible name yet — a partially named image stays. Skip
+	// when another pull of the same reference is in flight and about to name
+	// it. The pull context may already be canceled (a likely cause of the
+	// failure), so detach from it.
+	var recorded []string
+	cleanup := func() {
+		if anchored && len(recorded) == 0 && e.pullCount(pull_ref) == 1 {
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_, _ = e.cli.ImageRemove(dctx, pull_ref, image.RemoveOptions{})
+		}
+	}
+	for _, n := range tags {
 		if !anchored && n == ref {
-			tagged = true // the pull itself created this tag
+			recorded = append(recorded, n) // the pull itself created this tag
 			continue
 		}
 		if err := e.cli.ImageTag(ctx, pull_ref, n); err != nil {
-			// Best-effort fast cleanup (the untagged reaper is the eventual
-			// backstop, but it can be configured off), only while the content has
-			// no visible name yet — a partially named image stays. Skip when
-			// another pull of the same reference is in flight and about to tag
-			// it. The pull context may already be canceled (a likely cause of the
-			// failure), so detach from it.
-			if anchored && !tagged && e.pullCount(pull_ref) == 1 {
-				dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				defer cancel()
-				_, _ = e.cli.ImageRemove(dctx, pull_ref, image.RemoveOptions{})
-			}
-			return z.Err(err, "tag %q", n)
+			cleanup()
+			return nil, z.Err(err, "tag %q", n)
 		}
-		tagged = true
+		recorded = append(recorded, n)
 	}
-	if !anchored && !slices.Contains(names, ref) {
-		// The caller renamed the image away from the pull-created tag; drop it.
-		// Content held by the names above stays. Skip when another pull of the
-		// same reference is in flight and racing to tag it.
+	if len(digests) > 0 {
+		// Digest names cannot be tagged — a RepoDigest is forged by importing a
+		// thin OCI archive (the anchor manifest under the requested names) over
+		// the content the pull just placed. Containerd image store only; the
+		// classic graph store cannot represent it, so it degrades to a no-op:
+		// the names are NOT reported as recorded and the caller stamps what the
+		// daemon really holds (the pull reference) instead.
+		ok, err := e.containerdStore(ctx)
+		if err != nil {
+			cleanup()
+			return nil, z.Err(err, "probe image store")
+		}
+		if !ok {
+			log.From(ctx).Warn("digest-named references skipped: the daemon uses the classic graph store, which cannot record a digest reference without a registry pull; the image resolves only by its pull reference",
+				slog.String("engine", e.name), slog.String("names", strings.Join(digests, ", ")))
+		} else {
+			if err := e.loadDigestNames(ctx, digests, digest, anchor); err != nil {
+				cleanup()
+				return nil, err
+			}
+			recorded = append(recorded, digests...)
+		}
+	}
+	if !anchored && len(recorded) > 0 && !slices.Contains(names, ref) {
+		// The caller renamed the image away from the pull-created name; drop it.
+		// Content held by the names above stays — the len(recorded) guard covers
+		// the classic-store digest fallback, where no name was applied and
+		// removing the pull record would orphan the content. Skip when another
+		// pull of the same reference is in flight and racing to tag it.
 		if e.pullCount(ref) == 1 {
 			if _, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{}); err != nil {
-				return z.Err(err, "untag %q", ref)
+				return nil, z.Err(err, "untag %q", ref)
 			}
+		}
+	}
+	if len(recorded) == 0 {
+		// Nothing was applied (digest names skipped on a classic store): the
+		// image survives solely as the pull-created record — report that, so
+		// retention tracks a reference the daemon actually resolves.
+		recorded = []string{pull_ref}
+	}
+	return recorded, nil
+}
+
+// loadDigestNames registers digest-named references for the anchor manifest by
+// streaming a thin OCI archive — the raw anchor bytes plus one index entry per
+// name — into /images/load. The daemon resolves the names to the already-pulled
+// content; nothing is fetched. MUST run after the pull succeeded: a name loaded
+// before its content exists resolves to a broken record that sends `docker run`
+// back to the registry in the name.
+func (e *dockerEngine) loadDigestNames(ctx context.Context, names []string, digest string, anchor *AnchorBlob) error {
+	if anchor == nil || len(anchor.Bytes) == 0 {
+		return fmt.Errorf("digest-named references need the anchor manifest bytes")
+	}
+	if anchor.Digest != digest {
+		return fmt.Errorf("anchor manifest is %s, pull anchored to %s", anchor.Digest, digest)
+	}
+	for _, n := range names {
+		r, err := name.ParseReference(n)
+		if err != nil {
+			return z.Err(err, "parse digest name %q", n)
+		}
+		d, ok := r.(name.Digest)
+		if !ok {
+			return fmt.Errorf("%q is not a digest reference", n)
+		}
+		if d.DigestStr() != anchor.Digest {
+			return fmt.Errorf("digest name %q does not carry the anchored digest %s", n, anchor.Digest)
+		}
+	}
+	tar, err := anchorArchive(names, anchor)
+	if err != nil {
+		return z.Err(err, "build archive")
+	}
+	resp, err := e.cli.ImageLoad(ctx, bytes.NewReader(tar), client.ImageLoadWithQuiet(true))
+	if err != nil {
+		return z.Err(err, "load digest names")
+	}
+	defer resp.Body.Close()
+	dec := json.NewDecoder(resp.Body)
+	for {
+		var m jsonmessage.JSONMessage
+		if err := dec.Decode(&m); err != nil {
+			if !errors.Is(err, io.EOF) {
+				return z.Err(err, "decode load stream")
+			}
+			break
+		}
+		if m.Error != nil {
+			return fmt.Errorf("load digest names: %s", m.Error.Message)
 		}
 	}
 	return nil
@@ -367,7 +474,7 @@ func realRefs(refs []string) []string {
 // digest references are removed one at a time — the daemon frees content when
 // the last one goes and never demands force the way a multi-repo by-ID delete
 // does; only an image with no references at all is deleted by bare ID.
-func (e *dockerEngine) ReapUntagged(ctx context.Context, id string) (RemoveResult, bool, error) {
+func (e *dockerEngine) ReapUntagged(ctx context.Context, id string, owned func(string) bool) (RemoveResult, bool, error) {
 	// pullMu is held for the whole reap so a pull registering mid-removal waits
 	// and then re-fetches whatever was deleted. Bound the daemon calls so a
 	// wedged daemon cannot hold pull registration hostage.
@@ -391,6 +498,12 @@ func (e *dockerEngine) ReapUntagged(ctx context.Context, id string) (RemoveResul
 	for _, d := range digests {
 		if e.inflight[canonRef(d)] > 0 {
 			return rr, false, nil // a pull is about to re-reference it
+		}
+		// The plan may predate a digest-`as` job that just named this content
+		// (a loaded digest reference is invisible to the RepoTags re-check that
+		// protects a concurrent retag) — the caller's index owns it now.
+		if owned != nil && owned(d) {
+			return rr, false, nil
 		}
 	}
 	// A stopped container blocks the delete without force; skip instead of

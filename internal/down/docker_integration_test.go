@@ -39,7 +39,7 @@ func TestDockerEngineLive(t *testing.T) {
 	_, _ = eng.cli.ImageRemove(ctx, ref, image.RemoveOptions{Force: true})
 
 	sink := &recSink{}
-	if err := eng.Pull(ctx, ref, "", "", nil, sink); err != nil {
+	if _, err := eng.Pull(ctx, ref, "", "", nil, nil, sink); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	// Per-layer progress must be observed. Byte counts are best-effort: docker
@@ -48,7 +48,7 @@ func TestDockerEngineLive(t *testing.T) {
 	if !sink.progressed() {
 		t.Error("expected per-layer progress (bytes or state) from the pull stream")
 	}
-	if err := eng.Pull(ctx, "library/gantry-does-not-exist:nope", "", "", nil, nopSink{}); err == nil {
+	if _, err := eng.Pull(ctx, "library/gantry-does-not-exist:nope", "", "", nil, nil, nopSink{}); err == nil {
 		t.Error("expected error pulling a nonexistent image")
 	}
 }

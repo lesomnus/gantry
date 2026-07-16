@@ -23,7 +23,9 @@ type fakePullEngine struct {
 	ref      string
 	digest   string
 	as       []string
-	pulled   string // platform the pull asked for
+	anchor   *down.AnchorBlob
+	pulled   string   // platform the pull asked for
+	recorded []string // canned Pull return (nil = echo the requested names)
 	pullErr  error
 	reported []down.LayerUpdate
 }
@@ -38,16 +40,27 @@ func (f *fakePullEngine) Platform(context.Context) (string, error) {
 	}
 	return f.platform, nil
 }
-func (f *fakePullEngine) Pull(_ context.Context, ref, digest, platform string, as []string, sink down.Sink) error {
+func (f *fakePullEngine) Pull(_ context.Context, ref, digest, platform string, as []string, anchor *down.AnchorBlob, sink down.Sink) ([]string, error) {
 	f.mu.Lock()
-	f.ref, f.digest, f.pulled, f.as = ref, digest, platform, as
+	f.ref, f.digest, f.pulled, f.as, f.anchor = ref, digest, platform, as, anchor
 	reports := f.reported
 	err := f.pullErr
+	recorded := f.recorded
 	f.mu.Unlock()
 	for _, u := range reports {
 		sink.Layer(u)
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	if recorded != nil {
+		return recorded, nil // canned: e.g. a classic-store skip reporting the pull ref
+	}
+	// Like a real engine: the requested names, or the pull-created record.
+	if len(as) == 0 {
+		return []string{ref}, nil
+	}
+	return as, nil
 }
 func (f *fakePullEngine) InUse(context.Context) (map[string]bool, error) { return nil, nil }
 func (f *fakePullEngine) SeedUsage(context.Context, down.UsageSink) error {

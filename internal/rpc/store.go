@@ -159,7 +159,7 @@ func (v *storeService) Pull(ctx context.Context, req *pb.StorePullRequest) (*pb.
 	if ref == "" {
 		return nil, status.Error(codes.InvalidArgument, "ref is required")
 	}
-	if err := eng.Pull(ctx, ref, "", req.GetPlatform(), nil, nopSink{}); err != nil {
+	if _, err := eng.Pull(ctx, ref, "", req.GetPlatform(), nil, nil, nopSink{}); err != nil {
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	if v.s.gc != nil {

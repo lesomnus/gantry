@@ -23,7 +23,6 @@ services:
 
       - ..:/workspace
       - ${HOME}/workspaces:/workspaces
-      - ${HOME}/.claude:/home/hypnos/.claude
 
       # Dedicated containerd's socket, shared from the `containerd` service.
       - containerd.run:/run/containerd
