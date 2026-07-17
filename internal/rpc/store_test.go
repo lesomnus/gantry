@@ -101,7 +101,7 @@ func TestStorePull(t *testing.T) {
 	}
 	// The pull stamps the retention index and records an audit event.
 	recs, err := e.gc.List("node")
-	if err != nil || len(recs) != 1 || recs[0].LastDistributed.IsZero() {
+	if err != nil || len(recs) != 1 || recs[0].DateLastDistributed.IsZero() {
 		t.Errorf("retention stamp missing: %v %v", recs, err)
 	}
 	evs, err := e.events.List(event.Filter{Type: event.ImagePulled})

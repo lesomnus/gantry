@@ -18,9 +18,9 @@ var (
 // doublestar pattern matched against the full ref, its name:tag short form,
 // and the bare tag.
 type PinEntry struct {
-	Value   string    `json:"value"`
-	Pattern bool      `json:"pattern,omitempty"`
-	At      time.Time `json:"pinned_at,omitzero"` // zero for pins stored before entries carried a timestamp
+	Value      string    `json:"value"`
+	Pattern    bool      `json:"pattern,omitempty"`
+	DatePinned time.Time `json:"date_pinned,omitzero"` // zero for pins stored before entries carried a timestamp
 }
 
 // protects reports whether this pin protects the record. An exact pin only
@@ -85,15 +85,15 @@ func (ix *Index) upsert(engine, ref string, fn func(*Record)) error {
 	})
 }
 
-// Touch records that ref was used at t (LastUsed = max(current, t)). Seed is the
+// Touch records that ref was used at t (DateLastUsed = max(current, t)). Seed is the
 // same merge, used to bootstrap from existing containers at startup.
 func (ix *Index) Touch(engine, ref string, t time.Time) error {
 	return ix.upsert(engine, ref, func(r *Record) {
-		if r.FirstSeen.IsZero() {
-			r.FirstSeen = t
+		if r.DateFirstSeen.IsZero() {
+			r.DateFirstSeen = t
 		}
-		if t.After(r.LastUsed) {
-			r.LastUsed = t
+		if t.After(r.DateLastUsed) {
+			r.DateLastUsed = t
 		}
 	})
 }
@@ -101,24 +101,24 @@ func (ix *Index) Touch(engine, ref string, t time.Time) error {
 func (ix *Index) Seed(engine, ref string, t time.Time) error { return ix.Touch(engine, ref, t) }
 
 // Distributed records that gantry pushed ref to the engine at t. It does not set
-// LastUsed (that stays a pure usage signal); effLastUsed falls back to it.
+// DateLastUsed (that stays a pure usage signal); effLastUsed falls back to it.
 func (ix *Index) Distributed(engine, ref string, t time.Time) error {
 	return ix.upsert(engine, ref, func(r *Record) {
-		if r.FirstSeen.IsZero() {
-			r.FirstSeen = t
+		if r.DateFirstSeen.IsZero() {
+			r.DateFirstSeen = t
 		}
-		r.LastDistributed = t
+		r.DateLastDistributed = t
 	})
 }
 
 // Observe records that ref exists on the engine (an inventory-scan sighting of
 // an image gantry never pulled or saw used). It creates the record when absent
-// — FirstSeen starts the age clock at observation — and never bumps the usage
+// — DateFirstSeen starts the age clock at observation — and never bumps the usage
 // signals of an existing record.
 func (ix *Index) Observe(engine, ref string, t time.Time) error {
 	return ix.upsert(engine, ref, func(r *Record) {
-		if r.FirstSeen.IsZero() {
-			r.FirstSeen = t
+		if r.DateFirstSeen.IsZero() {
+			r.DateFirstSeen = t
 		}
 	})
 }
@@ -127,11 +127,11 @@ func (ix *Index) Observe(engine, ref string, t time.Time) error {
 // at the first observation — the moment the tag was actually lost is unknowable
 // after the fact and is not needed.
 type UntaggedEntry struct {
-	ID        string    `json:"id"`
-	FirstSeen time.Time `json:"first_seen"`
+	ID            string    `json:"id"`
+	DateFirstSeen time.Time `json:"date_first_seen"`
 }
 
-// ObserveUntagged records that image id currently has no tags. FirstSeen is
+// ObserveUntagged records that image id currently has no tags. DateFirstSeen is
 // write-once: a re-observation keeps the original clock.
 func (ix *Index) ObserveUntagged(engine, id string, t time.Time) error {
 	return ix.db.Update(func(tx *bolt.Tx) error {
@@ -142,7 +142,7 @@ func (ix *Index) ObserveUntagged(engine, id string, t time.Time) error {
 		if b.Get([]byte(id)) != nil {
 			return nil
 		}
-		enc, err := json.Marshal(UntaggedEntry{ID: id, FirstSeen: t})
+		enc, err := json.Marshal(UntaggedEntry{ID: id, DateFirstSeen: t})
 		if err != nil {
 			return err
 		}
@@ -258,7 +258,7 @@ func (ix *Index) Pin(engine, ref string, pattern bool) error {
 		if err != nil {
 			return err
 		}
-		enc, err := json.Marshal(PinEntry{Value: ref, Pattern: pattern, At: time.Now().UTC()})
+		enc, err := json.Marshal(PinEntry{Value: ref, Pattern: pattern, DatePinned: time.Now().UTC()})
 		if err != nil {
 			return err
 		}

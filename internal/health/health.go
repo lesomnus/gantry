@@ -26,14 +26,14 @@ import (
 // ErrUnknownStore is returned by Check when the store name is not configured.
 var ErrUnknownStore = errors.New("unknown store")
 
-// Report is one store's health at CheckedAt.
+// Report is one store's health at DateChecked.
 type Report struct {
-	Name      string    `json:"name"`
-	Kind      string    `json:"kind"`
-	Healthy   bool      `json:"healthy"`
-	Error     string    `json:"error,omitempty"`
-	LatencyMS int64     `json:"latency_ms"`
-	CheckedAt time.Time `json:"checked_at"`
+	Name        string    `json:"name"`
+	Kind        string    `json:"kind"`
+	Healthy     bool      `json:"healthy"`
+	Error       string    `json:"error,omitempty"`
+	LatencyMS   int64     `json:"latency_ms"`
+	DateChecked time.Time `json:"date_checked"`
 	// Cached is true when this report was served from the TTL cache rather than
 	// probed for this request.
 	Cached bool `json:"cached"`
@@ -145,11 +145,11 @@ func (ck *Checker) runProbe(ctx context.Context, c config.StoreConfig) Report {
 	err := ck.probe(pctx, c)
 	dur := ck.now().Sub(start)
 	rep := Report{
-		Name:      c.Name,
-		Kind:      c.Kind,
-		Healthy:   err == nil,
-		LatencyMS: dur.Milliseconds(),
-		CheckedAt: start,
+		Name:        c.Name,
+		Kind:        c.Kind,
+		Healthy:     err == nil,
+		LatencyMS:   dur.Milliseconds(),
+		DateChecked: start,
 	}
 	if err != nil {
 		rep.Error = err.Error()

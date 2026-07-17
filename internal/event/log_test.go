@@ -33,8 +33,8 @@ func TestAppendListNewestFirst(t *testing.T) {
 	if got[0].Seq <= got[1].Seq {
 		t.Error("seq must be monotonic")
 	}
-	if got[0].At.IsZero() {
-		t.Error("At must be stamped")
+	if got[0].DateCreated.IsZero() {
+		t.Error("DateCreated must be stamped")
 	}
 }
 
@@ -101,8 +101,8 @@ func TestListLimit(t *testing.T) {
 func TestSinceFilter(t *testing.T) {
 	l := openTemp(t, 100)
 	cutoff := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
-	_ = l.Append(Event{Type: JobAdmitted, Ref: "old", At: cutoff.Add(-time.Hour)})
-	_ = l.Append(Event{Type: JobAdmitted, Ref: "new", At: cutoff.Add(time.Hour)})
+	_ = l.Append(Event{Type: JobAdmitted, Ref: "old", DateCreated: cutoff.Add(-time.Hour)})
+	_ = l.Append(Event{Type: JobAdmitted, Ref: "new", DateCreated: cutoff.Add(time.Hour)})
 	got, _ := l.List(Filter{Since: cutoff})
 	if len(got) != 1 || got[0].Ref != "new" {
 		t.Errorf("since filter = %+v, want only the newer event", got)

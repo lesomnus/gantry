@@ -151,7 +151,7 @@ func (v *imageService) List(ctx context.Context, req *pb.ImageListRequest) (*pb.
 		}
 		items := make([]*pb.UntaggedImage, 0, len(unt))
 		for _, u := range unt {
-			ub := pb.UntaggedImage_builder{DateFirstSeen: ts(u.FirstSeen)}
+			ub := pb.UntaggedImage_builder{DateFirstSeen: ts(u.DateFirstSeen)}
 			if u.ID != "" {
 				ub.Id = proto.String(u.ID)
 			}

@@ -285,11 +285,11 @@ func TestStoreSweep(t *testing.T) {
 	now := time.Now()
 	old := mkJob("old", "img:1", nil)
 	old.State = JobDone
-	old.EndedAt = now.Add(-time.Hour)
+	old.DateEnded = now.Add(-time.Hour)
 	_ = s.Add(old)
 	fresh := mkJob("fresh", "img:2", nil)
 	fresh.State = JobDone
-	fresh.EndedAt = now
+	fresh.DateEnded = now
 	_ = s.Add(fresh)
 	active := mkJob("active", "img:3", nil)
 	active.State = JobRunning

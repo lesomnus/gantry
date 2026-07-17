@@ -8,26 +8,26 @@ import "time"
 
 // Record is the per-(engine, image-ref) retention state. The bbolt key is Ref.
 type Record struct {
-	Ref             string    `json:"ref"`              // full local ref incl. tag, e.g. "cache.local/team/app:1.2"
-	Repo            string    `json:"repo"`             // RepositoryStr(); the keep-N grouping key
-	Tag             string    `json:"tag"`              // tag portion; "" for digest refs
-	Digest          string    `json:"digest,omitempty"` // resolved manifest digest, if known
-	LastUsed        time.Time `json:"last_used"`        // the last-USED signal; zero => never observed used
-	LastDistributed time.Time `json:"last_distributed,omitempty"`
-	FirstSeen       time.Time `json:"first_seen"`
-	Pinned          bool      `json:"pinned,omitempty"` // explicit pin on this exact ref
+	Ref                 string    `json:"ref"`              // full local ref incl. tag, e.g. "cache.local/team/app:1.2"
+	Repo                string    `json:"repo"`             // RepositoryStr(); the keep-N grouping key
+	Tag                 string    `json:"tag"`              // tag portion; "" for digest refs
+	Digest              string    `json:"digest,omitempty"` // resolved manifest digest, if known
+	DateLastUsed        time.Time `json:"date_last_used"`   // the last-USED signal; zero => never observed used
+	DateLastDistributed time.Time `json:"date_last_distributed,omitempty"`
+	DateFirstSeen       time.Time `json:"date_first_seen"`
+	Pinned              bool      `json:"pinned,omitempty"` // explicit pin on this exact ref
 }
 
 // effLastUsed is the timestamp used for age decisions: real last-used, else the
 // distribute time, else first-seen.
 func (r Record) effLastUsed() time.Time {
 	switch {
-	case !r.LastUsed.IsZero():
-		return r.LastUsed
-	case !r.LastDistributed.IsZero():
-		return r.LastDistributed
+	case !r.DateLastUsed.IsZero():
+		return r.DateLastUsed
+	case !r.DateLastDistributed.IsZero():
+		return r.DateLastDistributed
 	default:
-		return r.FirstSeen
+		return r.DateFirstSeen
 	}
 }
 

@@ -599,7 +599,7 @@ func (w *Warmer) run(job *Job) {
 func (w *Warmer) execute(ctx context.Context, job *Job) error {
 	w.store.Update(job.ID, func(j *Job) {
 		j.State = JobRunning
-		j.StartedAt = time.Now()
+		j.DateStarted = time.Now()
 	})
 	ex := job.exec
 
@@ -862,7 +862,7 @@ func (w *Warmer) finish(job *Job, err error) {
 			j.State = JobFailed
 			j.Err = err.Error()
 		}
-		j.EndedAt = time.Now()
+		j.DateEnded = time.Now()
 	})
 }
 

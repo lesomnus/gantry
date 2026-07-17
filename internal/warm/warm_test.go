@@ -202,7 +202,7 @@ func TestWarmerSweepsTerminalJobs(t *testing.T) {
 
 	done_job := NewJob("job_done", "a/b:1", nil, time.Now())
 	done_job.State = JobDone
-	done_job.EndedAt = time.Now()
+	done_job.DateEnded = time.Now()
 	live_job := NewJob("job_live", "a/b:2", nil, time.Now())
 	for _, j := range []*Job{done_job, live_job} {
 		if err := js.Add(j); err != nil {

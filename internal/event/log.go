@@ -32,15 +32,15 @@ const (
 // Event is one audit record. Seq is a monotonic id; the rest is best-effort
 // context, present per Type.
 type Event struct {
-	Seq    uint64          `json:"seq"`
-	At     time.Time       `json:"at"`
-	Type   Type            `json:"type"`
-	Store  string          `json:"store,omitempty"`
-	Ref    string          `json:"ref,omitempty"`
-	State  string          `json:"state,omitempty"`
-	Digest string          `json:"digest,omitempty"`
-	Error  string          `json:"error,omitempty"`
-	Detail json.RawMessage `json:"detail,omitempty" swaggertype:"object"`
+	Seq         uint64          `json:"seq"`
+	DateCreated time.Time       `json:"date_created"`
+	Type        Type            `json:"type"`
+	Store       string          `json:"store,omitempty"`
+	Ref         string          `json:"ref,omitempty"`
+	State       string          `json:"state,omitempty"`
+	Digest      string          `json:"digest,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Detail      json.RawMessage `json:"detail,omitempty" swaggertype:"object"`
 }
 
 // Filter narrows a Log query.
@@ -81,7 +81,7 @@ func Open(path string, capEntries int) (*Log, error) {
 
 func (l *Log) Close() error { return l.db.Close() }
 
-// Append records e (Seq/At are assigned here) and evicts the oldest entries
+// Append records e (Seq/DateCreated are assigned here) and evicts the oldest entries
 // past the cap. A logging failure must never break the operation it records, so
 // callers ignore the error beyond a debug log.
 func (l *Log) Append(e Event) error {
@@ -89,8 +89,8 @@ func (l *Log) Append(e Event) error {
 		b := tx.Bucket(bktEvt)
 		seq, _ := b.NextSequence()
 		e.Seq = seq
-		if e.At.IsZero() {
-			e.At = l.now().UTC()
+		if e.DateCreated.IsZero() {
+			e.DateCreated = l.now().UTC()
 		}
 		enc, err := json.Marshal(e)
 		if err != nil {
@@ -173,7 +173,7 @@ func (l *Log) List(f Filter) ([]Event, error) {
 			if f.State != "" && e.State != f.State {
 				continue
 			}
-			if !f.Since.IsZero() && e.At.Before(f.Since) {
+			if !f.Since.IsZero() && e.DateCreated.Before(f.Since) {
 				continue
 			}
 			out = append(out, e)

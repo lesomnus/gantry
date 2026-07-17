@@ -33,8 +33,8 @@ func TestIndexTouchMergeAndParse(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(recs))
 	}
 	r := recs[0]
-	if !r.LastUsed.Equal(t1) {
-		t.Errorf("LastUsed = %v, want max(%v,%v)", r.LastUsed, t0, t1)
+	if !r.DateLastUsed.Equal(t1) {
+		t.Errorf("DateLastUsed = %v, want max(%v,%v)", r.DateLastUsed, t0, t1)
 	}
 	if r.Repo != "ghcr.io/lesomnus/a" || r.Tag != "foo" {
 		t.Errorf("parse = repo:%q tag:%q", r.Repo, r.Tag)
@@ -47,11 +47,11 @@ func TestIndexDistributedFallback(t *testing.T) {
 	_ = ix.Distributed("docker", "cache/app:1", ts)
 	recs, _ := ix.List("docker")
 	r := recs[0]
-	if !r.LastUsed.IsZero() {
-		t.Errorf("LastUsed should stay zero, got %v", r.LastUsed)
+	if !r.DateLastUsed.IsZero() {
+		t.Errorf("DateLastUsed should stay zero, got %v", r.DateLastUsed)
 	}
-	if !r.LastDistributed.Equal(ts) {
-		t.Errorf("LastDistributed = %v", r.LastDistributed)
+	if !r.DateLastDistributed.Equal(ts) {
+		t.Errorf("DateLastDistributed = %v", r.DateLastDistributed)
 	}
 	if got := r.effLastUsed(); !got.Equal(ts) {
 		t.Errorf("effLastUsed = %v, want distributed time", got)
@@ -125,10 +125,10 @@ func TestPinsEntriesAndLegacyMarkers(t *testing.T) {
 	for _, p := range pins {
 		by_value[p.Value] = p
 	}
-	if e, ok := by_value["*:stable"]; !ok || e.At.IsZero() {
+	if e, ok := by_value["*:stable"]; !ok || e.DatePinned.IsZero() {
 		t.Errorf("new pin should carry a timestamp: %+v", e)
 	}
-	if e, ok := by_value["cache.local/a/app:1"]; !ok || !e.At.IsZero() {
+	if e, ok := by_value["cache.local/a/app:1"]; !ok || !e.DatePinned.IsZero() {
 		t.Errorf("legacy pin should be listed with a zero timestamp: %+v", e)
 	}
 }

@@ -67,9 +67,9 @@ type Job struct {
 	Verification *VerificationSnapshot // nil when verification is disabled
 	Transfers    []*Transfer
 
-	CreatedAt time.Time
-	StartedAt time.Time
-	EndedAt   time.Time
+	DateCreated time.Time
+	DateStarted time.Time
+	DateEnded   time.Time
 
 	// Set by the Warmer at submit time; not serialized.
 	ctx      context.Context
@@ -96,11 +96,11 @@ type Job struct {
 
 func NewJob(id, ref string, platforms []string, now time.Time) *Job {
 	return &Job{
-		ID:        id,
-		Ref:       ref,
-		Platforms: platforms,
-		State:     JobPending,
-		CreatedAt: now,
+		ID:          id,
+		Ref:         ref,
+		Platforms:   platforms,
+		State:       JobPending,
+		DateCreated: now,
 	}
 }
 
@@ -181,9 +181,9 @@ type JobSnapshot struct {
 	Err          string                `json:"error"`
 	Verification *VerificationSnapshot `json:"verification,omitempty"`
 	Transfers    []TransferSnapshot    `json:"transfers"`
-	CreatedAt    time.Time             `json:"created_at"`
-	StartedAt    time.Time             `json:"started_at,omitempty"`
-	EndedAt      time.Time             `json:"ended_at,omitempty"`
+	DateCreated  time.Time             `json:"date_created"`
+	DateStarted  time.Time             `json:"date_started,omitempty"`
+	DateEnded    time.Time             `json:"date_ended,omitempty"`
 }
 
 type TransferSnapshot struct {
@@ -209,16 +209,16 @@ type LayerSnapshot struct {
 
 func (j *Job) snapshot() JobSnapshot {
 	s := JobSnapshot{
-		ID:        j.ID,
-		Ref:       j.Ref,
-		Platforms: j.Platforms,
-		As:        j.As,
-		Labels:    j.Labels,
-		State:     j.State,
-		Err:       j.Err,
-		CreatedAt: j.CreatedAt,
-		StartedAt: j.StartedAt,
-		EndedAt:   j.EndedAt,
+		ID:          j.ID,
+		Ref:         j.Ref,
+		Platforms:   j.Platforms,
+		As:          j.As,
+		Labels:      j.Labels,
+		State:       j.State,
+		Err:         j.Err,
+		DateCreated: j.DateCreated,
+		DateStarted: j.DateStarted,
+		DateEnded:   j.DateEnded,
 	}
 	if j.Verification != nil {
 		v := *j.Verification

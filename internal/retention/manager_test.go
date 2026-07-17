@@ -145,7 +145,7 @@ func TestWatcherStampsIndex(t *testing.T) {
 	m.StartWatchers(ctx)
 	time.Sleep(80 * time.Millisecond)
 	recs, _ := ix.List("d")
-	if len(recs) != 1 || recs[0].Ref != "r/a:used" || !recs[0].LastUsed.Equal(ts) {
+	if len(recs) != 1 || recs[0].Ref != "r/a:used" || !recs[0].DateLastUsed.Equal(ts) {
 		t.Errorf("watcher did not stamp index: %+v", recs)
 	}
 }
@@ -173,7 +173,7 @@ func TestWatcherStatusStamps(t *testing.T) {
 		if !ok {
 			t.Fatal("engine must be tracked")
 		}
-		if !ws.LastEventAt.IsZero() && ws.Reconnects >= 1 && ws.LastError == "stream dropped" && !ws.LastSeedAt.IsZero() {
+		if !ws.DateLastEvent.IsZero() && ws.Reconnects >= 1 && ws.LastError == "stream dropped" && !ws.DateLastSeed.IsZero() {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -201,15 +201,15 @@ func ruleStatuses(rules []Rule) []RuleStatus {
 }
 
 // WatcherStatus is one engine's usage-watcher health. A dead event stream
-// freezes LastUsed and silently degrades age GC; alert on connected=false or a
-// stale last_event_at.
+// freezes DateLastUsed and silently degrades age GC; alert on connected=false or a
+// stale date_last_event.
 type WatcherStatus struct {
-	Connected   bool      `json:"connected"`
-	Since       time.Time `json:"watching_since,omitzero"`
-	LastEventAt time.Time `json:"last_event_at,omitzero"` // receipt time of the last usage event
-	LastSeedAt  time.Time `json:"last_seed_at,omitzero"`
-	Reconnects  int64     `json:"reconnects"` // times the event stream ended and was re-established
-	LastError   string    `json:"last_error,omitempty"`
+	Connected     bool      `json:"connected"`
+	Since         time.Time `json:"watching_since,omitzero"`
+	DateLastEvent time.Time `json:"date_last_event,omitzero"` // receipt time of the last usage event
+	DateLastSeed  time.Time `json:"date_last_seed,omitzero"`
+	Reconnects    int64     `json:"reconnects"` // times the event stream ended and was re-established
+	LastError     string    `json:"last_error,omitempty"`
 }
 
 // Watcher reports an engine's usage-watcher status; ok is false for a store
@@ -339,7 +339,7 @@ func (u *unit) watch(ctx context.Context) {
 	seed := func() bool {
 		err := eng.SeedUsage(ctx, func(ref string, at time.Time) { _ = u.ix.Seed(name, ref, at) })
 		u.mu.Lock()
-		u.watcher.LastSeedAt = u.m.now()
+		u.watcher.DateLastSeed = u.m.now()
 		if err != nil {
 			u.watcher.LastError = err.Error()
 		}
@@ -360,7 +360,7 @@ func (u *unit) watch(ctx context.Context) {
 		err := eng.WatchUsage(ctx, func(ref string, at time.Time) {
 			_ = u.ix.Touch(name, ref, at)
 			u.mu.Lock()
-			u.watcher.LastEventAt = u.m.now()
+			u.watcher.DateLastEvent = u.m.now()
 			u.mu.Unlock()
 			u.poke()
 		})
@@ -460,7 +460,7 @@ func (u *unit) plan(ctx context.Context, rules []Rule, after time.Duration, inv 
 	}
 	firstSeen := make(map[string]time.Time, len(entries))
 	for _, e := range entries {
-		firstSeen[e.ID] = e.FirstSeen
+		firstSeen[e.ID] = e.DateFirstSeen
 	}
 	pins, err := u.ix.Pins(u.name)
 	if err != nil {
@@ -485,7 +485,7 @@ func (u *unit) plan(ctx context.Context, rules []Rule, after time.Duration, inv 
 }
 
 // reconcile snapshots the engine's image store and syncs the index: tagged refs
-// gantry has never observed get a record (FirstSeen = now, so the configured
+// gantry has never observed get a record (DateFirstSeen = now, so the configured
 // rules eventually manage images a human pulled while gantry was away), newly
 // untagged images start their reap clock, and tracked entries whose image
 // regained a tag or vanished are dropped. Returns the inventory for the plan

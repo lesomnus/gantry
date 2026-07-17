@@ -8,7 +8,7 @@ import (
 )
 
 func rec(ref, repo string, lastUsed time.Time) Record {
-	return Record{Ref: ref, Repo: repo, LastUsed: lastUsed, FirstSeen: lastUsed}
+	return Record{Ref: ref, Repo: repo, DateLastUsed: lastUsed, DateFirstSeen: lastUsed}
 }
 
 // rules1 wraps a Policy as a single catch-all "**" rule so the pre-existing
@@ -34,7 +34,7 @@ func TestEvaluateInUseAndPinBeatAge(t *testing.T) {
 	old := now.Add(-100 * time.Hour)
 	recs := []Record{
 		rec("r/a:1", "r/a", old),
-		{Ref: "r/a:2", Repo: "r/a", LastUsed: old, Pinned: true},
+		{Ref: "r/a:2", Repo: "r/a", DateLastUsed: old, Pinned: true},
 		rec("r/a:3", "r/a", old),
 	}
 	inUse := map[string]bool{"r/a:1": true}
@@ -188,7 +188,7 @@ func TestEvaluateMaxNExcludesProtected(t *testing.T) {
 	now := time.Now()
 	recs := []Record{
 		rec("r/a:live", "r/a", now.Add(-1*time.Minute)),
-		{Ref: "r/a:pin", Repo: "r/a", LastUsed: now.Add(-2 * time.Minute), FirstSeen: now, Pinned: true},
+		{Ref: "r/a:pin", Repo: "r/a", DateLastUsed: now.Add(-2 * time.Minute), DateFirstSeen: now, Pinned: true},
 		rec("r/a:new", "r/a", now.Add(-3*time.Minute)),
 		rec("r/a:old", "r/a", now.Add(-4*time.Minute)),
 	}
@@ -378,8 +378,8 @@ func TestMatchPin(t *testing.T) {
 func TestEvaluatePatternPins(t *testing.T) {
 	now := time.Now()
 	recs := []Record{
-		{Ref: "cache.local/a/app:stable", Repo: "cache.local/a/app", Tag: "stable", LastUsed: now.Add(-100 * time.Hour), FirstSeen: now.Add(-100 * time.Hour)},
-		{Ref: "cache.local/a/app:old", Repo: "cache.local/a/app", Tag: "old", LastUsed: now.Add(-100 * time.Hour), FirstSeen: now.Add(-100 * time.Hour)},
+		{Ref: "cache.local/a/app:stable", Repo: "cache.local/a/app", Tag: "stable", DateLastUsed: now.Add(-100 * time.Hour), DateFirstSeen: now.Add(-100 * time.Hour)},
+		{Ref: "cache.local/a/app:old", Repo: "cache.local/a/app", Tag: "old", DateLastUsed: now.Add(-100 * time.Hour), DateFirstSeen: now.Add(-100 * time.Hour)},
 	}
 	d := Evaluate(now, recs, nil, rules1(Policy{MaxAge: time.Hour, Pins: []string{"*:stable"}}), time.Time{})
 	del, keep := decided(d)

@@ -173,8 +173,8 @@ func TestUntaggedFirstSeenSticky(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(es) != 1 || !es[0].FirstSeen.Equal(first) {
-		t.Errorf("first_seen must be write-once: %+v", es)
+	if len(es) != 1 || !es[0].DateFirstSeen.Equal(first) {
+		t.Errorf("date_first_seen must be write-once: %+v", es)
 	}
 }
 
@@ -199,7 +199,7 @@ func TestObserveDoesNotBumpUsage(t *testing.T) {
 	_ = ix.Touch("d", "r/a:1", used)
 	_ = ix.Observe("d", "r/a:1", time.Now())
 	recs, _ := ix.List("d")
-	if len(recs) != 1 || !recs[0].LastUsed.Equal(used) {
+	if len(recs) != 1 || !recs[0].DateLastUsed.Equal(used) {
 		t.Errorf("observe must not touch usage: %+v", recs)
 	}
 	_ = ix.Observe("d", "r/b:1", used)
@@ -208,8 +208,8 @@ func TestObserveDoesNotBumpUsage(t *testing.T) {
 		t.Errorf("observe must create unknown records: %+v", recs)
 	}
 	for _, r := range recs {
-		if r.Ref == "r/b:1" && (!r.LastUsed.IsZero() || !r.FirstSeen.Equal(used)) {
-			t.Errorf("observed record must carry first_seen only: %+v", r)
+		if r.Ref == "r/b:1" && (!r.DateLastUsed.IsZero() || !r.DateFirstSeen.Equal(used)) {
+			t.Errorf("observed record must carry date_first_seen only: %+v", r)
 		}
 	}
 }

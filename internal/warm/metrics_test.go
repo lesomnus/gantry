@@ -53,7 +53,7 @@ func TestWarmerGauges(t *testing.T) {
 
 	done_job := NewJob("job_done", "a/b:1", nil, time.Now())
 	done_job.State = JobDone
-	done_job.EndedAt = time.Now()
+	done_job.DateEnded = time.Now()
 	if err := js.Add(done_job); err != nil {
 		t.Fatal(err)
 	}

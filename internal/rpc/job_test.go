@@ -18,7 +18,7 @@ import (
 )
 
 func snap(id, ref string, state warm.JobState, at time.Time) warm.JobSnapshot {
-	return warm.JobSnapshot{ID: id, Ref: ref, State: state, CreatedAt: at}
+	return warm.JobSnapshot{ID: id, Ref: ref, State: state, DateCreated: at}
 }
 
 func TestJobAdd(t *testing.T) {

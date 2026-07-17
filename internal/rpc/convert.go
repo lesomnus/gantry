@@ -252,9 +252,9 @@ func jobToPB(snap warm.JobSnapshot) *pb.Job {
 		Error:        snap.Err,
 		Verification: verificationToPB(snap.Verification),
 		Transfers:    transfers,
-		DateCreated:  ts(snap.CreatedAt),
-		DateStarted:  ts(snap.StartedAt),
-		DateEnded:    ts(snap.EndedAt),
+		DateCreated:  ts(snap.DateCreated),
+		DateStarted:  ts(snap.DateStarted),
+		DateEnded:    ts(snap.DateEnded),
 	}
 	// The snapshot carries the resolved stores inside its transfer step.
 	if len(snap.Transfers) > 0 {
@@ -272,9 +272,9 @@ func recordToPB(storeName string, rec retention.Record, inUse bool) *pb.Image {
 		Repo:                rec.Repo,
 		Tag:                 rec.Tag,
 		Digest:              rec.Digest,
-		DateFirstSeen:       ts(rec.FirstSeen),
-		DateLastUsed:        ts(rec.LastUsed),
-		DateLastDistributed: ts(rec.LastDistributed),
+		DateFirstSeen:       ts(rec.DateFirstSeen),
+		DateLastUsed:        ts(rec.DateLastUsed),
+		DateLastDistributed: ts(rec.DateLastDistributed),
 		Pinned:              rec.Pinned,
 		InUse:               inUse,
 	}.Build()
@@ -286,14 +286,14 @@ func pinToPB(storeName string, e retention.PinEntry) *pb.Pin {
 		Store:      storeByName(storeName),
 		Value:      e.Value,
 		Pattern:    e.Pattern,
-		DatePinned: ts(e.At),
+		DatePinned: ts(e.DatePinned),
 	}.Build()
 }
 
 func eventToPB(e event.Event) *pb.Event {
 	b := pb.Event_builder{
 		Seq:         e.Seq,
-		DateCreated: ts(e.At),
+		DateCreated: ts(e.DateCreated),
 		Type:        eventTypeToPB[e.Type],
 		Store:       e.Store,
 		Ref:         e.Ref,
@@ -330,7 +330,7 @@ func reportToPB(rep health.Report) *pb.StoreHealthResponse {
 	b := pb.StoreHealthResponse_builder{
 		Healthy:     proto.Bool(rep.Healthy),
 		LatencyMs:   proto.Int64(rep.LatencyMS),
-		DateChecked: ts(rep.CheckedAt),
+		DateChecked: ts(rep.DateChecked),
 		Cached:      proto.Bool(rep.Cached),
 	}
 	if k, ok := storeKindToPB[rep.Kind]; ok {
@@ -346,8 +346,8 @@ func watcherToPB(ws retention.WatcherStatus) *pb.GcWatcherStatus {
 	b := pb.GcWatcherStatus_builder{
 		Connected:     proto.Bool(ws.Connected),
 		WatchingSince: ts(ws.Since),
-		DateLastEvent: ts(ws.LastEventAt),
-		DateLastSeed:  ts(ws.LastSeedAt),
+		DateLastEvent: ts(ws.DateLastEvent),
+		DateLastSeed:  ts(ws.DateLastSeed),
 		Reconnects:    proto.Int32(int32(ws.Reconnects)),
 	}
 	if ws.LastError != "" {

@@ -69,7 +69,7 @@ func (v *pinService) find(storeName, value string) (retention.PinEntry, error) {
 }
 
 // Add creates or refreshes a pin: pinning an existing value is an upsert that
-// refreshes pinned_at (and may flip pattern-ness), like the REST endpoint.
+// refreshes date_pinned (and may flip pattern-ness), like the REST endpoint.
 func (v *pinService) Add(ctx context.Context, req *pb.PinAddRequest) (*pb.Pin, error) {
 	name, err := v.gcUnit(req.GetStore())
 	if err != nil {

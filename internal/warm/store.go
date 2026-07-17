@@ -53,7 +53,7 @@ func (s *memStore) Add(j *Job) error {
 		id:        j.ID,
 		jobID:     j.ID,
 		labels:    j.Labels,
-		createdAt: j.CreatedAt,
+		createdAt: j.DateCreated,
 	}
 	return nil
 }
@@ -111,11 +111,11 @@ func (s *memStore) handleSnapshot(h *handle) (JobSnapshot, bool) {
 	snap := j.snapshot()
 	snap.ID = h.id
 	snap.Labels = h.labels
-	snap.CreatedAt = h.createdAt
+	snap.DateCreated = h.createdAt
 	if h.canceled {
 		snap.State = JobCanceled
 		snap.Err = ""
-		snap.EndedAt = h.endedAt
+		snap.DateEnded = h.endedAt
 	}
 	return snap, true
 }
@@ -154,7 +154,7 @@ func (s *memStore) List(f Filter) []JobSnapshot {
 		if f.Ref != "" && !strings.Contains(snap.Ref, f.Ref) {
 			continue
 		}
-		if !f.Since.IsZero() && snap.CreatedAt.Before(f.Since) {
+		if !f.Since.IsZero() && snap.DateCreated.Before(f.Since) {
 			continue
 		}
 		if !matchLabels(snap.Labels, f.Labels) {
@@ -162,7 +162,7 @@ func (s *memStore) List(f Filter) []JobSnapshot {
 		}
 		out = append(out, snap)
 	}
-	sort.Slice(out, func(i, k int) bool { return out[i].CreatedAt.After(out[k].CreatedAt) })
+	sort.Slice(out, func(i, k int) bool { return out[i].DateCreated.After(out[k].DateCreated) })
 	if f.Limit > 0 && len(out) > f.Limit {
 		out = out[:f.Limit]
 	}
@@ -311,7 +311,7 @@ func (s *memStore) handleEnd(h *handle) (time.Time, bool) {
 		return h.endedAt, true
 	}
 	if j, ok := s.jobs[h.jobID]; ok && j.State.Terminal() {
-		return j.EndedAt, true
+		return j.DateEnded, true
 	}
 	return time.Time{}, false
 }
