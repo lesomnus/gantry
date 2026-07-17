@@ -158,9 +158,8 @@
   처리해 `serve.verify` 오타 등이 보안 컨트롤을 조용히 끄는 것을 막는다.
 - **auth-off 경고 로그** — ✅ 완료. auth 미설정 시 기동 로그에 "API authentication is
   DISABLED …" 경고(`rpc.AuthEnabled` 헬퍼로 판정).
-- **secrets** — 현재 시크릿은 `serve.auth.tokens`와 `stores.<name>.password`. env 확장은
-  tokens만 되고 `gantry config`가 전체를 평문 덤프. 제안: password도 env 확장 + `gantry config`
-  덤프 시 시크릿 마스킹(사용자 확인 후 적용).
+- **secrets** — ✅ 완료. store `username`/`password`도 Evaluate에서 `${VAR}` 확장(tokens와
+  패리티), `gantry config` 덤프는 `Config.Redacted()`로 토큰·password를 `***`로 마스킹.
 - **감사 로그 유실 경고** — ✅ 완료. `Recorder.emit`이 Append 실패를 WARN 로그로 surface하고
   누적 드롭 카운터(`dropped_total`)를 함께 남긴다.
 - **deps** — 기능적 문제 없음(빌드/테스트 green, go.sum 고정). 미태깅 pin은 릴리즈 태깅 이슈로

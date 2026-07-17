@@ -23,7 +23,7 @@ func NewCmdConfig() *xli.Command {
 		Brief: "print current configuration as YAML",
 		Handler: xli.OnRun(func(ctx context.Context, cmd *xli.Command, next xli.Next) error {
 			c := use_config.Must(ctx)
-			return yaml.NewEncoder(cmd).Encode(c)
+			return yaml.NewEncoder(cmd).Encode(c.Redacted())
 		}),
 	}
 }

@@ -52,6 +52,28 @@ func (c *Config) Path() string {
 	return c.path
 }
 
+// Redacted returns a shallow copy with secret values masked, for safe display
+// (e.g. the `config` subcommand). Non-empty bearer tokens and store passwords
+// are replaced with a placeholder.
+func (c *Config) Redacted() *Config {
+	const mask = "***"
+	cp := *c
+	cp.Serve.Auth.Tokens = append([]string(nil), c.Serve.Auth.Tokens...)
+	for i, t := range cp.Serve.Auth.Tokens {
+		if t != "" {
+			cp.Serve.Auth.Tokens[i] = mask
+		}
+	}
+	cp.Stores = make(map[string]StoreConfig, len(c.Stores))
+	for name, s := range c.Stores {
+		if s.Password != "" {
+			s.Password = mask
+		}
+		cp.Stores[name] = s
+	}
+	return &cp
+}
+
 // engineHost normalizes an engine address the way the docker store dials it
 // (internal/down dockerHost): empty means the default local socket, a bare
 // path gets the unix scheme. Keep the two in sync.
@@ -79,6 +101,9 @@ func (c *Config) Evaluate() error {
 			return z.Err(nil, "a store has an empty name")
 		}
 		s.Name = name
+		// Env-expand credentials so ${VAR} works like it does for auth.tokens.
+		s.Username = os.ExpandEnv(s.Username)
+		s.Password = os.ExpandEnv(s.Password)
 		switch s.Kind {
 		case "oci":
 			z.FallbackP(&s.Host, name) // a store named "docker.io" defaults its host
