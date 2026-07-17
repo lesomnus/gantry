@@ -39,7 +39,10 @@ func ReadFromFile(p string) (*Config, error) {
 	}
 
 	var c Config
-	if err := yaml.NewDecoder(f).Decode(&c); err != nil {
+	// Strict decode: an unknown key is an error, not a silent no-op. A typo like
+	// a misindented `mode:` under serve.verify must fail loudly rather than
+	// quietly disabling a security control.
+	if err := yaml.NewDecoder(f, yaml.DisallowUnknownField()).Decode(&c); err != nil {
 		return nil, z.Err(err, "decode")
 	}
 

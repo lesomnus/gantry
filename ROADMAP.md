@@ -154,8 +154,8 @@
 
 ### 5b. 권장 (should-fix)
 
-- **config strict decode** — unknown key를 에러로. `serve.verify` 오타가 서명 검증을 조용히
-  끄는 것을 막는다. → 채택, 구현.
+- **config strict decode** — ✅ 완료. `yaml.DisallowUnknownField()`로 unknown key를 에러
+  처리해 `serve.verify` 오타 등이 보안 컨트롤을 조용히 끄는 것을 막는다.
 - **auth-off 경고 로그** — ✅ 완료. auth 미설정 시 기동 로그에 "API authentication is
   DISABLED …" 경고(`rpc.AuthEnabled` 헬퍼로 판정).
 - **secrets** — 현재 시크릿은 `serve.auth.tokens`와 `stores.<name>.password`. env 확장은
