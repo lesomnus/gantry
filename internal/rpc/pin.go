@@ -3,11 +3,14 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"strconv"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/pb"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -86,6 +89,20 @@ func (v *pinService) Add(ctx context.Context, req *pb.PinAddRequest) (*pb.Pin, e
 	}
 	if err := v.s.gc.Pin(name, value, req.GetPattern()); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
+	}
+	// Echo the pin's current blast radius as response trailers (non-blocking):
+	// how many index records it protects, and the refs (capped). Lets a caller
+	// notice a careless broad pattern that would neutralize GC.
+	if matched, err := v.s.gc.PinMatches(name, value, req.GetPattern()); err == nil {
+		md := metadata.Pairs("gantry-pin-matched-count", strconv.Itoa(len(matched)))
+		const cap = 50
+		if len(matched) > cap {
+			matched = matched[:cap]
+		}
+		if len(matched) > 0 {
+			md["gantry-pin-matched"] = matched
+		}
+		_ = grpc.SetTrailer(ctx, md)
 	}
 	e, err := v.find(name, value)
 	if err != nil {

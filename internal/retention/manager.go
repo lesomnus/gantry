@@ -245,6 +245,24 @@ func (m *Manager) List(engine string) ([]Record, error) {
 	return u.ix.List(engine)
 }
 
+// PinMatches returns the refs of a store's current index records that a pin
+// (value, pattern) would protect, so a caller can see a pin's blast radius when
+// creating it — e.g. a careless "*" that would neutralize GC.
+func (m *Manager) PinMatches(engine, value string, pattern bool) ([]string, error) {
+	recs, err := m.List(engine)
+	if err != nil {
+		return nil, err
+	}
+	e := PinEntry{Value: value, Pattern: pattern}
+	var out []string
+	for _, r := range recs {
+		if e.protects(r) {
+			out = append(out, r.Ref)
+		}
+	}
+	return out, nil
+}
+
 // DeleteRecord removes one record from a store's index (does not touch the
 // engine). A ref that is a tracked untagged image ID purges that entry instead.
 func (m *Manager) DeleteRecord(engine, ref string) (bool, error) {

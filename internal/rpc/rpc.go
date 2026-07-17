@@ -40,6 +40,7 @@ type GC interface {
 	Pin(engine, ref string, pattern bool) error
 	Unpin(engine, ref string) error
 	Pins(engine string) ([]retention.PinEntry, error)
+	PinMatches(engine, value string, pattern bool) ([]string, error)
 	Plan(ctx context.Context, engine string, override *retention.Policy) (retention.Decision, error)
 	Apply(ctx context.Context, engine string, dec retention.Decision) (retention.ApplyResult, error)
 }

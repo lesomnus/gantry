@@ -104,7 +104,9 @@
 - **in-use 주기 heartbeat** — ✅ 완료. `unit.heartbeat` 고루틴이 `retention.heartbeat`(기본
   5m) 주기로 `Engine.InUse`를 읽어 tag/digest ref의 LastUsed=now를 stamp(sha256 image-ID는
   skip). 놓친 start 이벤트를 보강.
-- **pattern pin 매칭 echo** — `PinService.Add` 응답에 현재 매칭되는 refs 포함(비차단).
+- **pattern pin 매칭 echo** — ✅ 완료. `PinService.Add`가 `Manager.PinMatches`로 현재 매칭
+  레코드를 계산해 `gantry-pin-matched-count`/`gantry-pin-matched` 트레일러로 노출(비차단;
+  refs는 50개 cap, count는 전체). proto 재생성 불요라 트레일러 방식 채택.
 
 ### 제품 기능
 - **영속 job store** — 접근: `protoc-gen-orm-ent`(protobuf-orm 생태계) + **sqlite3** 백엔드로
