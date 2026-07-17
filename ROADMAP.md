@@ -156,8 +156,8 @@
 
 - **config strict decode** — unknown key를 에러로. `serve.verify` 오타가 서명 검증을 조용히
   끄는 것을 막는다. → 채택, 구현.
-- **auth-off 경고 로그** — `:8080` 전 인터페이스 바인드 + auth 미설정 시 파괴적 RPC가 무인증
-  노출인데 경고가 없음. → 채택, 기동 시 경고.
+- **auth-off 경고 로그** — ✅ 완료. auth 미설정 시 기동 로그에 "API authentication is
+  DISABLED …" 경고(`rpc.AuthEnabled` 헬퍼로 판정).
 - **secrets** — 현재 시크릿은 `serve.auth.tokens`와 `stores.<name>.password`. env 확장은
   tokens만 되고 `gantry config`가 전체를 평문 덤프. 제안: password도 env 확장 + `gantry config`
   덤프 시 시크릿 마스킹(사용자 확인 후 적용).

@@ -179,6 +179,12 @@ func NewCmdServe() *xli.Command {
 
 			l := log.From(ctx)
 			l.Info("serving", slog.String("addr", c.Serve.Addr), slog.Int("stores", len(c.Stores)))
+			if !rpc.AuthEnabled(c.Serve.Auth) {
+				l.Warn("API authentication is DISABLED — every RPC is unauthenticated, "+
+					"including destructive ones (StoreService.Remove/GcApply, PinService). "+
+					"Set serve.auth.tokens or place gantry behind an authenticating proxy.",
+					slog.String("addr", c.Serve.Addr))
+			}
 
 			errc := make(chan error, 1)
 			go func() {

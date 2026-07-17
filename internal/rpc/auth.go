@@ -49,6 +49,18 @@ func Auth(cfg config.AuthConfig) (grpc.UnaryServerInterceptor, grpc.StreamServer
 	return unary, stream
 }
 
+// AuthEnabled reports whether serve.auth requires a credential — i.e. at least
+// one non-empty bearer token after env expansion. When false, the API is open
+// to anyone who can reach it.
+func AuthEnabled(cfg config.AuthConfig) bool {
+	for _, t := range cfg.Tokens {
+		if os.ExpandEnv(t) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func isPublicMethod(method string) bool {
 	return strings.HasPrefix(method, "/grpc.health.v1.Health/") ||
 		strings.HasPrefix(method, "/grpc.reflection.")
