@@ -12,7 +12,7 @@ import (
 // matchPin reports whether a pin (an exact reference or a doublestar pattern)
 // protects the record. A pattern is tried against the full ref, the name:tag
 // short form (last repo segment), and the bare tag — so "cache.local/a/app:1",
-// "*:stable", and "prod-*" all work as plan-gc.md documents.
+// "*:stable", and "prod-*" all match as intended.
 func matchPin(pin string, r Record) bool {
 	if pin == r.Ref {
 		return true

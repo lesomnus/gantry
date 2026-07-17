@@ -182,25 +182,41 @@ scripts/gen-proto.sh    # regenerate the gRPC contract: protoc-gen-orm-service e
 
 ## Status
 
-Implemented and tested (unit + live docker/containerd integration; `go test -race`):
+Feature-complete and tested — `go build`, `go vet`, and `go test -race ./...` all
+pass, with the live docker/containerd integration tests exercised against real
+daemons (they self-skip when no daemon is present).
+
+Implemented:
 
 - **Image movement** — the store/transfer model, `copy`/`proxy` fill, the engine
-  pull seam, streaming progress. Verified end-to-end against real daemons.
+  pull seam, per-layer streaming progress. Verified end-to-end against real daemons.
+- **Caller-chosen `as` names** — records the pulled image on the engine under
+  upstream names instead of the cache pull ref. Tag names on any engine; **digest
+  names** (`repo@sha256:…`) on an engine whose docker uses the containerd image
+  store, registered over cache-fed content via a thin OCI `docker load` — no origin
+  registry contact — so a digest-pinned jobspec resolves locally. Classic graph
+  stores skip digest names with a warning (tags still apply). A digest-ref registry
+  copy commits the source index verbatim so the same digest resolves from the cache.
+  Verified end-to-end on real containerd-store nodes.
 - **Retention / GC** (per-store `retention`) — usage tracking from container events,
-  keep-N-per-repo, exact and pattern pins, the adaptive scheduler, and the
-  inventory / status / watcher APIs. On docker stores the GC pass also reconciles
-  against a full daemon inventory: unknown tagged images join the index and
-  untagged leftovers are reaped after `untagged_after`.
+  the per-repo rule cascade (keep-N, `max_n` cap, `max_age`), exact and pattern
+  pins, the adaptive scheduler, and the inventory / status / watcher APIs. Each GC
+  pass reconciles against a full daemon inventory: unknown tagged images join the
+  index and (on docker) untagged leftovers are reaped after `untagged_after`.
 - **Signature verification** (`serve.verify`, Notary Project / notation) — verified
-  at admission with digest pinning; engine pulls are digest-anchored (the daemon
-  fetches `repo@digest`; the local names come from `as`/the pull ref — a digest-named
-  local record additionally needs a digest `as` name, see above) and signatures
-  can be copied into the cache (`copy_referrers`). Preflight, introspection, and
-  hot-reload APIs. Tested with in-process notation signing.
-- **Job lifecycle** — dry-run plan, retry, idempotency, cancel-vs-evict.
+  fail-closed at admission with digest pinning and a fail-fast trust store; engine
+  pulls are digest-anchored (`repo@digest`) and signatures can travel into the cache
+  (`copy_referrers`). Preflight, introspection, and truststore hot-reload APIs.
+  Tested with in-process notation signing.
+- **Job lifecycle & API** — the resource-oriented gRPC contract (`JobService` /
+  `StoreService` / `ImageService` / `PinService` / `EventService` / `VerifyService`
+  plus `grpc.health.v1.Health`) with dry-run `Plan`, `Retry`, an `Idempotency-Key`,
+  coalescing onto an identical in-flight move (a `gantry-coalesced` trailer flags
+  whether the submit joined one), job `labels`, and cancel-vs-evict. Bearer-token
+  auth and server reflection.
 - **Observability** — OTLP metrics/traces (`otel`), a durable audit log
   (`serve.events`), and health/readiness over `grpc.health.v1.Health`.
 
-The design docs — [plan.md](plan.md) (movement), [plan-gc.md](plan-gc.md) (retention),
-and [plan-api.md](plan-api.md) (the API expansion) — record the rationale and
-point-in-time decisions.
+Remaining work, documentation gaps, and the v1-release checklist are tracked in
+[ROADMAP.md](ROADMAP.md), which consolidates the former design docs (their full
+rationale remains in git history).
