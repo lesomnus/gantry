@@ -224,8 +224,10 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   exporter pushes metrics/traces/logs over OTLP/gRPC. Metric instruments:
   `gantry.bytes`, `gantry.job.duration`, `gantry.jobs` (by state),
   `gantry.jobs.active`, `gantry.queue.depth` / `gantry.queue.capacity`,
-  `gantry.health.probe.duration`, and per-engine `gantry.retention.records` /
-  `gantry.retention.pins` / `gantry.retention.untagged`.
+  `gantry.health.probe.duration`, per-engine `gantry.retention.records` /
+  `gantry.retention.pins` / `gantry.retention.untagged` /
+  `gantry.retention.watcher.connected` (1/0), and GC-result counters
+  `gantry.retention.gc.deleted` / `.untagged` / `.reaped` / `.errors`.
 
 ## Development
 

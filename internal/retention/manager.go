@@ -57,6 +57,10 @@ type Manager struct {
 	now   func() time.Time
 	rec   Recorder       // audit log (nil = disabled)
 	onRun func(Decision) // test hook, fired after each store's GC pass
+
+	// GC-result counters, registered by StartWatchers (nil until then / when
+	// otel is off, in which case Add is a safe no-op on the no-op meter).
+	cDeleted, cUntagged, cReaped, cErrors metric.Int64Counter
 }
 
 // unit is one engine store's retention state.
@@ -379,19 +383,38 @@ func (m *Manager) registerGauges(ctx context.Context) {
 		metric.WithDescription("pinned references per engine store"))
 	untagged, _ := mt.Int64ObservableGauge("gantry.retention.untagged",
 		metric.WithDescription("tracked untagged images per engine store"))
+	connected, _ := mt.Int64ObservableGauge("gantry.retention.watcher.connected",
+		metric.WithDescription("usage watcher connected (1) or not (0) per engine store"))
 	_, _ = mt.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		for name, u := range m.units {
+			store_attr := metric.WithAttributes(attribute.String("store", name))
+			u.mu.Lock()
+			conn := int64(0)
+			if u.watcher.Connected {
+				conn = 1
+			}
+			u.mu.Unlock()
+			o.ObserveInt64(connected, conn, store_attr)
 			nrec, npin, nunt, err := u.ix.Counts(name)
 			if err != nil {
 				continue
 			}
-			store_attr := metric.WithAttributes(attribute.String("store", name))
 			o.ObserveInt64(records, int64(nrec), store_attr)
 			o.ObserveInt64(pins, int64(npin), store_attr)
 			o.ObserveInt64(untagged, int64(nunt), store_attr)
 		}
 		return nil
-	}, records, pins, untagged)
+	}, records, pins, untagged, connected)
+
+	// GC-result counters, incremented at apply.
+	m.cDeleted, _ = mt.Int64Counter("gantry.retention.gc.deleted",
+		metric.WithDescription("images whose content GC freed"))
+	m.cUntagged, _ = mt.Int64Counter("gantry.retention.gc.untagged",
+		metric.WithDescription("refs GC untagged (content may remain)"))
+	m.cReaped, _ = mt.Int64Counter("gantry.retention.gc.reaped",
+		metric.WithDescription("untagged images GC reaped"))
+	m.cErrors, _ = mt.Int64Counter("gantry.retention.gc.errors",
+		metric.WithDescription("per-ref GC removal failures"))
 }
 
 func (u *unit) watch(ctx context.Context) {
@@ -608,6 +631,13 @@ func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 	}
 	if len(res.Errors) > 0 {
 		log.From(ctx).Warn("gc removal errors", slog.String("store", u.name), slog.Int("count", len(res.Errors)))
+	}
+	if u.m.cDeleted != nil {
+		attr := metric.WithAttributes(attribute.String("store", u.name))
+		u.m.cDeleted.Add(ctx, int64(len(res.Deleted)), attr)
+		u.m.cUntagged.Add(ctx, int64(len(res.Untagged)), attr)
+		u.m.cReaped.Add(ctx, int64(len(res.Reaped)), attr)
+		u.m.cErrors.Add(ctx, int64(len(res.Errors)), attr)
 	}
 	return res
 }

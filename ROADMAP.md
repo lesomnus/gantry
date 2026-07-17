@@ -117,10 +117,10 @@
   인벤토리 질의 API가 맞고, 있어서 나쁠 것 없는 nice-to-have.
 
 ### 관측성
-- **watcher-connected OTel gauge** — 채택. 죽은 usage-event 스트림을 알림으로 잡는다
-  (상태는 store RPC로 이미 노출, `Manager.registerGauges`에 추가).
-- **GC 결과 카운터**(deleted/untagged/reaped/errors) — 채택. 현재 apply 지점은 slog +
-  이벤트 로그만 기록.
+- **watcher-connected OTel gauge** — ✅ 완료. `gantry.retention.watcher.connected`(1/0)
+  게이지를 `registerGauges` 콜백에 추가.
+- **GC 결과 카운터**(deleted/untagged/reaped/errors) — ✅ 완료. `gantry.retention.gc.*`
+  카운터를 apply 지점에서 증가.
 
 ### 외부 의존 (mkot, `/workspaces/github.com/lesomnus/mkot`)
 - **mkot CI `GOWORK=off` per-module build** + **`pretty` 모듈 테스트 수정**(otx ingress/egress
