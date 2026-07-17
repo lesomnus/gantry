@@ -112,13 +112,13 @@ func TestSinceFilter(t *testing.T) {
 func TestRecorderNilSafe(t *testing.T) {
 	var r *Recorder
 	r.JobAdmitted("a", "b", "c", "d") // must not panic
-	r = NewRecorder(nil)
+	r = NewRecorder(nil, nil)
 	r.GCApplied("eng", 1, 2, 3, 0) // nil log, no panic
 }
 
 func TestRecorderEmits(t *testing.T) {
 	l := openTemp(t, 100)
-	r := NewRecorder(l)
+	r := NewRecorder(l, nil)
 	r.JobAdmitted("a:1", "up", "cache", "sha256:x")
 	r.GCApplied("eng", 2, 1, 1, 0)
 	r.Pinned("eng", "*:stable", false)
@@ -181,7 +181,7 @@ func TestRingEvictionBacklog(t *testing.T) {
 
 func TestRecorderImageRemoved(t *testing.T) {
 	l := openTemp(t, 100)
-	NewRecorder(l).ImageRemoved("eng", "cache.local/a:1")
+	NewRecorder(l, nil).ImageRemoved("eng", "cache.local/a:1")
 	got, _ := l.List(Filter{Type: ImageRemove})
 	if len(got) != 1 || got[0].Ref != "cache.local/a:1" || got[0].Store != "eng" {
 		t.Errorf("image_removed = %+v", got)

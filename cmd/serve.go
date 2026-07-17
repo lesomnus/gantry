@@ -107,7 +107,7 @@ func NewCmdServe() *xli.Command {
 				}
 				defer ev.Close()
 				events = ev
-				rec := event.NewRecorder(ev)
+				rec := event.NewRecorder(ev, log.From(ctx))
 				if gc != nil {
 					gc.SetRecorder(rec)
 				}
@@ -117,7 +117,7 @@ func NewCmdServe() *xli.Command {
 			jobStore := cpx.NewMemStore()
 			wmr := cpx.NewCopier(stores, jobStore, c.Worker)
 			if events != nil {
-				wmr.SetRecorder(event.NewRecorder(events))
+				wmr.SetRecorder(event.NewRecorder(events, log.From(ctx)))
 			}
 			if gc != nil {
 				// Stamp the retention index when a job's engine destination pulls, so

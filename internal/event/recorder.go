@@ -1,19 +1,42 @@
 package event
 
+import (
+	"log/slog"
+	"sync/atomic"
+)
+
 // Recorder adapts a Log to the cpx and retention Recorder interfaces, so those
 // packages emit audit events without importing the event package's concrete
-// types beyond this adapter. Append failures are swallowed: an audit-log write
-// must never break the operation it records.
-type Recorder struct{ log *Log }
+// types beyond this adapter. An audit-log write must never break the operation
+// it records, so an Append failure is not propagated — but it is surfaced: each
+// failure is logged at WARN with the running dropped count, so a silently
+// failing log (full disk, corrupt/locked db) is observable.
+type Recorder struct {
+	log     *Log
+	logger  *slog.Logger
+	dropped atomic.Uint64
+}
 
-// NewRecorder wraps a Log; nil is safe (every method is a no-op).
-func NewRecorder(l *Log) *Recorder { return &Recorder{log: l} }
+// NewRecorder wraps a Log; a nil Log is safe (every method is a no-op). A nil
+// logger falls back to slog.Default().
+func NewRecorder(l *Log, logger *slog.Logger) *Recorder {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Recorder{log: l, logger: logger}
+}
 
 func (r *Recorder) emit(e Event) {
 	if r == nil || r.log == nil {
 		return
 	}
-	_ = r.log.Append(e)
+	if err := r.log.Append(e); err != nil {
+		n := r.dropped.Add(1)
+		r.logger.Warn("audit event dropped: append to the log failed",
+			slog.String("type", string(e.Type)),
+			slog.String("error", err.Error()),
+			slog.Uint64("dropped_total", n))
+	}
 }
 
 // --- cpx.Recorder ---

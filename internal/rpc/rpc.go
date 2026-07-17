@@ -78,7 +78,7 @@ func New(copier Copier, jobs cpx.Store, stores *store.Set, gc GC, hc Health, vf 
 		health: hc,
 		verify: vf,
 		events: ev,
-		rec:    event.NewRecorder(ev),
+		rec:    event.NewRecorder(ev, nil),
 	}
 }
 

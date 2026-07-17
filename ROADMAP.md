@@ -161,7 +161,8 @@
 - **secrets** — 현재 시크릿은 `serve.auth.tokens`와 `stores.<name>.password`. env 확장은
   tokens만 되고 `gantry config`가 전체를 평문 덤프. 제안: password도 env 확장 + `gantry config`
   덤프 시 시크릿 마스킹(사용자 확인 후 적용).
-- **감사 로그 유실 경고** — `recorder.go`가 Append 에러를 버림. → 채택, slog 경고 + 드롭 카운터.
+- **감사 로그 유실 경고** — ✅ 완료. `Recorder.emit`이 Append 실패를 WARN 로그로 surface하고
+  누적 드롭 카운터(`dropped_total`)를 함께 남긴다.
 - **deps** — 기능적 문제 없음(빌드/테스트 green, go.sum 고정). 미태깅 pin은 릴리즈 태깅 이슈로
   사용자 소관(5a-6) → 조치 불요.
 - **정리** — `greet` 서브커맨드/설정/`gantry.yaml` 블록 제거.
