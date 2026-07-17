@@ -81,6 +81,10 @@ stores:
   #     interval: "1h"                  # scheduler idle cap (default 1h)
   #     min_interval: "1m"              # debounce between GC runs (default 1m)
   #     grace: "1h"                     # hold off deletion after startup (default 1h)
+  #     heartbeat: "5m"                 # periodic in-use scan stamping last-used, so
+  #                                     # a long-running container's image survives
+  #                                     # age GC even if its start event was missed
+  #                                     # (default 5m; "0s" disables)
   #     # docker stores only (containerd reclaims untagged content itself and
   #     # rejects this key): reap an image this long after it is first observed
   #     # with NO tags — e.g. the old image of a re-pulled tag. Default "1h",

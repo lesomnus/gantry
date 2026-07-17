@@ -143,6 +143,12 @@ type StoreRetention struct {
 	// Grace holds off deletion this long after startup, since the usage index has
 	// no history for the downtime. Default 1h.
 	Grace Duration `yaml:"grace"`
+	// Heartbeat periodically stamps LastUsed=now for images a live container
+	// references, covering containers whose start event the usage watcher missed
+	// (so the image survives age GC after the container later stops). Cheap: one
+	// container list per tick. Default 5m; a pointer so "0s" (off) differs from
+	// unset (default on).
+	Heartbeat *Duration `yaml:"heartbeat"`
 	// UntaggedAfter reaps an image this long after gantry first observes it with
 	// no tags — e.g. the previous image of a tag that was re-pulled. Untagged
 	// images bypass the per-repo rules (there is no tag for a rule to manage);
@@ -193,6 +199,15 @@ func (c *StoreRetention) UntaggedReapAfter() time.Duration {
 	return time.Duration(*c.UntaggedAfter)
 }
 
+// HeartbeatInterval is the effective in-use heartbeat cadence after defaults;
+// zero (an explicit "0s") disables it.
+func (c *StoreRetention) HeartbeatInterval() time.Duration {
+	if c == nil || c.Heartbeat == nil {
+		return 0
+	}
+	return time.Duration(*c.Heartbeat)
+}
+
 // evaluateRetention applies defaults and validates the store's retention config.
 // Retention is only supported on engine stores.
 func (s *StoreConfig) evaluateRetention() error {
@@ -209,6 +224,10 @@ func (s *StoreConfig) evaluateRetention() error {
 	z.FallbackP((*time.Duration)(&r.Interval), time.Hour)
 	z.FallbackP((*time.Duration)(&r.MinInterval), time.Minute)
 	z.FallbackP((*time.Duration)(&r.Grace), time.Hour)
+	if r.Heartbeat == nil {
+		d := Duration(5 * time.Minute)
+		r.Heartbeat = &d
+	}
 	switch s.Kind {
 	case "docker":
 		if r.UntaggedAfter == nil {

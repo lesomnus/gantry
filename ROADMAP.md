@@ -101,7 +101,9 @@
   추가 삭제는 선택 후속(미착수).
 - **keep-N/max-N digest 단위 카운트** — ✅ 완료. `digestGroups`로 같은 digest의 태그를 한
   그룹으로 묶어 keep_n/max_n이 digest 기준으로 센다(digest 없는 레코드는 개별 카운트).
-- **in-use 주기 heartbeat** — 저부하 주기 스캔으로 in-use 이미지의 LastUsed=now 갱신.
+- **in-use 주기 heartbeat** — ✅ 완료. `unit.heartbeat` 고루틴이 `retention.heartbeat`(기본
+  5m) 주기로 `Engine.InUse`를 읽어 tag/digest ref의 LastUsed=now를 stamp(sha256 image-ID는
+  skip). 놓친 start 이벤트를 보강.
 - **pattern pin 매칭 echo** — `PinService.Add` 응답에 현재 매칭되는 refs 포함(비차단).
 
 ### 제품 기능

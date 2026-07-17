@@ -82,6 +82,7 @@ func NewCmdServe() *xli.Command {
 							Interval:    time.Duration(rc.Interval),
 							MinInterval: time.Duration(rc.MinInterval),
 							Grace:       time.Duration(rc.Grace),
+							Heartbeat:   rc.HeartbeatInterval(),
 						},
 						UntaggedAfter: rc.UntaggedReapAfter(),
 					})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ type Schedule struct {
 	Interval    time.Duration // safety/idle cap on sleep between GC checks
 	MinInterval time.Duration // debounce floor between GC runs
 	Grace       time.Duration // hold off deletion this long after start
+	Heartbeat   time.Duration // in-use scan cadence stamping LastUsed; 0 disables
 }
 
 // ApplyResult reports a GC apply outcome.
@@ -143,6 +145,7 @@ type ScheduleStatus struct {
 	Interval    string `json:"interval"`
 	MinInterval string `json:"min_interval"`
 	Grace       string `json:"grace"`
+	Heartbeat   string `json:"heartbeat,omitempty"`
 }
 
 // RuleStatus mirrors a per-repo rule for the API; unset fields are omitted.
@@ -176,6 +179,9 @@ func (m *Manager) Status() Status {
 			Interval:    u.sched.Interval.String(),
 			MinInterval: u.sched.MinInterval.String(),
 			Grace:       u.sched.Grace.String(),
+		}
+		if u.sched.Heartbeat > 0 {
+			ss.Schedule.Heartbeat = u.sched.Heartbeat.String()
 		}
 		ss.Rules = ruleStatuses(u.rules)
 		if nrec, npin, nunt, err := u.ix.Counts(name); err == nil {
@@ -310,6 +316,38 @@ func (m *Manager) StartWatchers(ctx context.Context) {
 	m.registerGauges(ctx)
 	for _, u := range m.units {
 		go u.watch(ctx)
+		go u.heartbeat(ctx)
+	}
+}
+
+// heartbeat periodically stamps LastUsed=now for images a live container
+// references, so an image whose start event the watcher missed still survives
+// age GC after the container later stops. Image-ID (sha256:) keys are skipped —
+// only tag and digest refs are index keys. Disabled when Schedule.Heartbeat<=0.
+func (u *unit) heartbeat(ctx context.Context) {
+	iv := u.sched.Heartbeat
+	if iv <= 0 {
+		return
+	}
+	t := time.NewTicker(iv)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			inUse, err := u.engine.InUse(ctx)
+			if err != nil {
+				continue
+			}
+			now := u.m.now()
+			for ref := range inUse {
+				if strings.HasPrefix(ref, "sha256:") {
+					continue
+				}
+				_ = u.ix.Touch(u.name, ref, now)
+			}
+		}
 	}
 }
 
