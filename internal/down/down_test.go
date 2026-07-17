@@ -18,7 +18,7 @@ type recSink struct {
 	layers map[string]LayerUpdate
 }
 
-// Layer mirrors the warm engineSink: it preserves a layer's total and, on
+// Layer mirrors the cpx engineSink: it preserves a layer's total and, on
 // done/exists, sets done to that total.
 func (s *recSink) Layer(u LayerUpdate) {
 	s.mu.Lock()

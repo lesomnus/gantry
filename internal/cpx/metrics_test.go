@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -44,10 +44,10 @@ func gaugeValue(t *testing.T, rm metricdata.ResourceMetrics, name, attr_key, att
 	return 0, false
 }
 
-func TestWarmerGauges(t *testing.T) {
+func TestCopierGauges(t *testing.T) {
 	ctx, reader := otxContext(t)
 	ctx, cancel := context.WithCancel(ctx)
-	w, js := newWarmer(t, nil, true)
+	w, js := newCopier(t, nil, true)
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 

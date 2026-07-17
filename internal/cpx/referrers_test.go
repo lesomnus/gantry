@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"bytes"
@@ -91,7 +91,7 @@ func testJobCopyReferrersVerbatim(t *testing.T, start func(*testing.T) string) {
 	cache_store := config.StoreConfig{Name: "cache", Kind: "oci", Host: cache, Insecure: true, Mode: "copy"}
 	attachReferrer(t, up_store, src_ref.Context(), src_desc)
 
-	w, js := newWarmer(t, []config.StoreConfig{up_store, cache_store}, false)
+	w, js := newCopier(t, []config.StoreConfig{up_store, cache_store}, false)
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
@@ -140,7 +140,7 @@ func TestJobCopyReferrersSingleManifest(t *testing.T) {
 	cache_store := config.StoreConfig{Name: "cache", Kind: "oci", Host: cache, Insecure: true, Mode: "copy"}
 	attachReferrer(t, up_store, src_ref.Context(), src_desc)
 
-	w, js := newWarmer(t, []config.StoreConfig{up_store, cache_store}, false)
+	w, js := newCopier(t, []config.StoreConfig{up_store, cache_store}, false)
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
 
@@ -163,7 +163,7 @@ func TestJobCopyReferrersSingleManifest(t *testing.T) {
 }
 
 func TestPlanCopyReferrersConflicts(t *testing.T) {
-	w, _ := newWarmer(t, []config.StoreConfig{
+	w, _ := newCopier(t, []config.StoreConfig{
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 		{Name: "ro", Kind: "oci", Host: "ro.local", Insecure: true, Mode: "proxy"},
 	}, true)
@@ -193,7 +193,7 @@ func TestCopyReferrersDefault(t *testing.T) {
 	verified_hash := v1.Hash{Algorithm: "sha256", Hex: "0123456789012345678901234567890123456789012345678901234567890123"}
 	plan_exec := func(t *testing.T, verifier *fakeVerifier, req Request) *jobExec {
 		t.Helper()
-		w, _ := newWarmer(t, []config.StoreConfig{
+		w, _ := newCopier(t, []config.StoreConfig{
 			{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 		}, true)
 		w.base = context.Background()

@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 // them.
 func TestJobToEngineAs(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 
 	var mu sync.Mutex
@@ -57,7 +57,7 @@ func TestJobToEngineAs(t *testing.T) {
 
 func TestAsValidation(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, _, up := engineWarmer(t, eng)
+	w, _, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 	w.SetBaseContext(context.Background()) // admission only; no workers
 
@@ -81,7 +81,7 @@ func TestAsValidation(t *testing.T) {
 // Jobs that differ only in `as` are different moves and must not coalesce.
 func TestAsDedup(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, _, up := engineWarmer(t, eng)
+	w, _, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 	w.SetBaseContext(context.Background()) // jobs stay pending: dedup is observable
 

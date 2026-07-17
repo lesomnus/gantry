@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -38,7 +38,7 @@ func (s *copySource) Resolve(ctx context.Context, src, _ name.Reference, platfor
 	return resolvePlan(ctx, src, platforms, s.pullOpts(ctx))
 }
 
-func (s *copySource) Warm(ctx context.Context, src, dst name.Repository, l PlannedLayer, sink ProgressSink) error {
+func (s *copySource) Fill(ctx context.Context, src, dst name.Repository, l PlannedLayer, sink ProgressSink) error {
 	layer, err := remote.Layer(src.Digest(l.Digest), s.pullOpts(ctx)...)
 	if err != nil {
 		return z.Err(err, "resolve src layer %s", l.Digest)
@@ -50,15 +50,15 @@ func (s *copySource) Warm(ctx context.Context, src, dst name.Repository, l Plann
 	if cl.moved.Load() == 0 {
 		sink.SetState("exists") // blob already in cache; nothing moved
 	} else {
-		sink.SetState("warm")
+		sink.SetState("copied")
 	}
 	return nil
 }
 
 // Commit publishes the cache tag and returns the committed digest. For a
 // single image it pushes the manifest byte-for-byte (blobs are skip-checked
-// since Warm uploaded them). For an index it pushes a new index referencing
-// only the warmed platforms so unwanted arches are not pulled into the cache —
+// since Fill uploaded them). For an index it pushes a new index referencing
+// only the copied platforms so unwanted arches are not pulled into the cache —
 // unless verbatim, which pushes every child manifest and then the original
 // index bytes so the source digest (and any signature over it) is preserved.
 func (s *copySource) Commit(ctx context.Context, src, dst name.Reference, platforms []string, verbatim bool) (v1.Hash, error) {
@@ -118,7 +118,7 @@ func (s *copySource) Commit(ctx context.Context, src, dst name.Reference, platfo
 
 // commitVerbatim pushes the source index unmodified: every child manifest first
 // (a registry rejects an index whose children are missing; children outside the
-// warmed platforms — e.g. attestation entries — upload their blobs here), then
+// copied platforms — e.g. attestation entries — upload their blobs here), then
 // the raw index bytes under the cache tag, preserving the source digest.
 func (s *copySource) commitVerbatim(ctx context.Context, dst name.Reference, desc *remote.Descriptor) (v1.Hash, error) {
 	src_idx, err := desc.ImageIndex()

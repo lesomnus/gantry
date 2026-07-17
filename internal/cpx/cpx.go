@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 )
 
 // ErrQueueFull is returned by Submit when the pending-job buffer is saturated.
-var ErrQueueFull = errors.New("warm queue is full")
+var ErrQueueFull = errors.New("job queue is full")
 
 // ErrJobNotFound is returned by Retry for an unknown job id.
 var ErrJobNotFound = errors.New("job not found")
@@ -103,9 +103,9 @@ type jobExec struct {
 	committed v1.Hash
 }
 
-// Warmer runs a two-tier worker pool: MaxConcurrentJobs jobs at once, each moving
+// Copier runs a two-tier worker pool: MaxConcurrentJobs jobs at once, each moving
 // up to MaxConcurrentLayers layers at once during its registry copy.
-type Warmer struct {
+type Copier struct {
 	stores *store.Set
 	store  Store
 	wc     config.WorkerConfig
@@ -123,12 +123,12 @@ type Warmer struct {
 	wg   sync.WaitGroup
 }
 
-func NewWarmer(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Warmer {
+func NewCopier(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Copier {
 	q := wc.QueueSize
 	if q < 1 {
 		q = 1
 	}
-	return &Warmer{
+	return &Copier{
 		stores:  stores,
 		store:   jobStore,
 		wc:      wc,
@@ -141,11 +141,11 @@ func NewWarmer(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Warme
 
 // SetPullHook registers a callback invoked (engine name, ref) after a job's
 // engine destination completes its pull — used to stamp the retention index.
-func (w *Warmer) SetPullHook(fn func(engine, ref string)) { w.pullHook = fn }
+func (w *Copier) SetPullHook(fn func(engine, ref string)) { w.pullHook = fn }
 
 // SetVerifier enables source-signature verification at job admission. Must be
 // set before Start/Submit.
-func (w *Warmer) SetVerifier(v verify.Verifier) { w.verifier = v }
+func (w *Copier) SetVerifier(v verify.Verifier) { w.verifier = v }
 
 // Recorder receives audit events for admitted and finished jobs. Its methods
 // must not fail the operation they record.
@@ -155,11 +155,11 @@ type Recorder interface {
 }
 
 // SetRecorder wires the audit log. Must be set before Start/Submit.
-func (w *Warmer) SetRecorder(r Recorder) { w.rec = r }
+func (w *Copier) SetRecorder(r Recorder) { w.rec = r }
 
 // rootCtx is the base context for admission-time work (verification); it uses
 // the running server context once Start has been called.
-func (w *Warmer) rootCtx() context.Context {
+func (w *Copier) rootCtx() context.Context {
 	if w.base != nil {
 		return w.base
 	}
@@ -168,11 +168,11 @@ func (w *Warmer) rootCtx() context.Context {
 
 // SetBaseContext sets the context new jobs derive from. Start calls it before
 // spawning workers; a caller that only submits or plans (tests, or an
-// admission-only warmer) can call it directly so submitted jobs enqueue but are
+// admission-only copier) can call it directly so submitted jobs enqueue but are
 // never processed. Stop is safe without Start.
-func (w *Warmer) SetBaseContext(ctx context.Context) { w.base = ctx }
+func (w *Copier) SetBaseContext(ctx context.Context) { w.base = ctx }
 
-func (w *Warmer) Start(ctx context.Context) {
+func (w *Copier) Start(ctx context.Context) {
 	w.base = ctx
 	w.metrics = newMetrics(ctx)
 	w.metrics.gauges = w.registerGauges(ctx)
@@ -192,7 +192,7 @@ func (w *Warmer) Start(ctx context.Context) {
 
 // registerGauges observes queue saturation (visible before clients hit the 503
 // of a full queue) and job records by state.
-func (w *Warmer) registerGauges(ctx context.Context) metric.Registration {
+func (w *Copier) registerGauges(ctx context.Context) metric.Registration {
 	m := otx.Meter(ctx)
 	depth, _ := m.Int64ObservableGauge("gantry.queue.depth",
 		metric.WithDescription("jobs waiting in the pending-job queue"))
@@ -212,7 +212,7 @@ func (w *Warmer) registerGauges(ctx context.Context) metric.Registration {
 	return reg
 }
 
-func (w *Warmer) Stop() {
+func (w *Copier) Stop() {
 	close(w.stop)
 	close(w.jobs)
 	w.wg.Wait()
@@ -224,7 +224,7 @@ func (w *Warmer) Stop() {
 
 // sweeper evicts terminal job records older than JobTTL so they do not
 // accumulate unbounded on a long-lived server.
-func (w *Warmer) sweeper(ttl time.Duration) {
+func (w *Copier) sweeper(ttl time.Duration) {
 	defer w.wg.Done()
 	period := min(ttl/4, time.Minute)
 	if period <= 0 {
@@ -247,7 +247,7 @@ func (w *Warmer) sweeper(ttl time.Duration) {
 // Submit resolves and enqueues a job, collapsing identical in-flight moves.
 // created reports whether a new job was enqueued (false = coalesced onto an
 // active identical move).
-func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error) {
+func (w *Copier) Submit(req Request) (snap JobSnapshot, created bool, err error) {
 	ex, transfers, platforms, err := w.plan(w.rootCtx(), req)
 	if err != nil {
 		return JobSnapshot{}, false, err
@@ -301,7 +301,7 @@ func (w *Warmer) Submit(req Request) (snap JobSnapshot, created bool, err error)
 // Retry re-submits a terminal job's ORIGINAL request: fresh store resolution,
 // fresh signature verification, fresh digest pin — never the stored plan, whose
 // digest was pinned at the original admission.
-func (w *Warmer) Retry(id string) (JobSnapshot, bool, error) {
+func (w *Copier) Retry(id string) (JobSnapshot, bool, error) {
 	// Read this handle's request and its per-caller state: a coalesced caller
 	// retries with its own labels and its own (possibly canceled) view, not the
 	// originating submit's — which is what every other RPC reports for this id.
@@ -331,7 +331,7 @@ type PlanResult struct {
 }
 
 // Plan dry-runs admission under the caller's context.
-func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
+func (w *Copier) Plan(ctx context.Context, req Request) (PlanResult, error) {
 	ex, _, platforms, err := w.plan(ctx, req)
 	if err != nil {
 		return PlanResult{}, err
@@ -360,7 +360,7 @@ func (w *Warmer) Plan(ctx context.Context, req Request) (PlanResult, error) {
 }
 
 // plan resolves the request into an execution plan and the initial transfer row.
-func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, []string, error) {
+func (w *Copier) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, []string, error) {
 	base, err := name.ParseReference(req.Ref, w.srcOpts...)
 	if err != nil {
 		return nil, nil, nil, z.Err(err, "parse ref %q", req.Ref)
@@ -546,14 +546,14 @@ func (w *Warmer) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 	return ex, transfers, platforms, nil
 }
 
-func (w *Warmer) worker() {
+func (w *Copier) worker() {
 	defer w.wg.Done()
 	for job := range w.jobs {
 		w.run(job)
 	}
 }
 
-func (w *Warmer) run(job *Job) {
+func (w *Copier) run(job *Job) {
 	// Release the job's cancelCtx from the base context once it is terminal;
 	// otherwise every job leaks a child context until its record is deleted.
 	defer job.Cancel()
@@ -596,7 +596,7 @@ func (w *Warmer) run(job *Job) {
 	}
 }
 
-func (w *Warmer) execute(ctx context.Context, job *Job) error {
+func (w *Copier) execute(ctx context.Context, job *Job) error {
 	w.store.Update(job.ID, func(j *Job) {
 		j.State = JobRunning
 		j.DateStarted = time.Now()
@@ -617,7 +617,7 @@ func (w *Warmer) execute(ctx context.Context, job *Job) error {
 
 // runCopy fills a pusher destination (the registry transfer). Its failure fails
 // the job.
-func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) error {
+func (w *Copier) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) error {
 	t := job.Transfers[0]
 	w.store.Update(job.ID, func(*Job) { t.State = "running" })
 
@@ -670,7 +670,7 @@ func (w *Warmer) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) e
 // transfer total is estimated upfront from the source manifest (best-effort) and
 // refined by the daemon's own progress reports as they arrive; the daemon's
 // error — including an unavailable platform — fails the job as-is.
-func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) error {
+func (w *Copier) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) error {
 	t := job.Transfers[0]
 	// Anchor the pull when the source is digest-pinned (a verified job, or a
 	// digest ref): the daemon pulls repo@digest and tags it as the ref.
@@ -753,7 +753,7 @@ func (w *Warmer) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 // engineSink folds an engine's per-layer reports into a Transfer, upserting
 // layers by digest and recomputing the transfer totals.
 type engineSink struct {
-	w     *Warmer
+	w     *Copier
 	jobID string
 	t     *Transfer
 	idx   map[string]*LayerProgress
@@ -793,7 +793,7 @@ func (s *engineSink) Layer(u down.LayerUpdate) {
 	})
 }
 
-func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Source, plan *Plan, ex *jobExec) error {
+func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Source, plan *Plan, ex *jobExec) error {
 	c := w.wc.MaxConcurrentLayers
 	if c < 1 {
 		c = 1
@@ -824,7 +824,7 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 			defer func() { <-sem }()
 			w.store.Update(job.ID, func(*Job) { lp.State = "pulling" })
 			sink := &layerSink{w: w, jobID: job.ID, t: t, lp: lp}
-			if err := src.Warm(ctx, srcRepo, dstRepo, pl, sink); err != nil {
+			if err := src.Fill(ctx, srcRepo, dstRepo, pl, sink); err != nil {
 				w.store.Update(job.ID, func(*Job) { lp.State = "failed" })
 				once.Do(func() {
 					firstErr = err
@@ -837,7 +837,7 @@ func (w *Warmer) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	return firstErr
 }
 
-func (w *Warmer) failTransfer(job *Job, t *Transfer, err error) error {
+func (w *Copier) failTransfer(job *Job, t *Transfer, err error) error {
 	w.store.Update(job.ID, func(*Job) {
 		t.State = "failed"
 		t.Err = err.Error()
@@ -845,7 +845,7 @@ func (w *Warmer) failTransfer(job *Job, t *Transfer, err error) error {
 	return err
 }
 
-func (w *Warmer) finish(job *Job, err error) {
+func (w *Copier) finish(job *Job, err error) {
 	w.store.Update(job.ID, func(j *Job) {
 		if j.State.Terminal() {
 			return
@@ -867,7 +867,7 @@ func (w *Warmer) finish(job *Job, err error) {
 }
 
 // refOpts returns name parse options for a registry store (insecure + test opts).
-func (w *Warmer) refOpts(c config.StoreConfig) []name.Option {
+func (w *Copier) refOpts(c config.StoreConfig) []name.Option {
 	opts := append([]name.Option(nil), w.srcOpts...)
 	if c.Insecure {
 		opts = append(opts, name.Insecure)
@@ -877,7 +877,7 @@ func (w *Warmer) refOpts(c config.StoreConfig) []name.Option {
 
 // layerSink reports a registry-copy blob's progress.
 type layerSink struct {
-	w     *Warmer
+	w     *Copier
 	jobID string
 	t     *Transfer
 	lp    *LayerProgress
@@ -910,7 +910,7 @@ func jobBytes(job *Job) int64 {
 func newID() string {
 	var b [10]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		panic(fmt.Sprintf("warm: read random: %v", err))
+		panic(fmt.Sprintf("cpx: read random: %v", err))
 	}
 	return "job_" + hex.EncodeToString(b[:])
 }

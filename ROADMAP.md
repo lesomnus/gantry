@@ -21,7 +21,7 @@
   `{ref, source, target}`로 registry→registry copy 또는 registry→engine pull을
   같은 모양으로 표현하고, 각 이동 단계는 per-layer 진행률을 갖는 `Transfer`로
   보고된다. (원래 warm-centric 설계를 store 모델로 일반화한 결과 — plan.md v2.)
-- **seam 구조** — 갈아끼울 수 있는 부분을 `internal/warm`(registry Source: copy/proxy
+- **seam 구조** — 갈아끼울 수 있는 부분을 `internal/cpx`(registry Source: copy/proxy
   + Warmer 오케스트레이션)과 `internal/down`(engine 드라이버 + capability
   sub-interface)에 격리한다. 새 engine KIND = 파일 하나 + factory case 하나. verify/GC는
   engine이 optional capability를 만족시키면 자동으로 노출되는 additive 확장이다.
@@ -63,7 +63,7 @@
   불요)로 등록한다. classic graph store는 위조가 원천 불가하므로 경고 로그 + skip
   (태그는 정상). hop1 digest-ref 잡은 index를 재조립하지 않고 **verbatim 커밋**해
   소스 digest를 보존한다.
-- **job store는 in-memory** — job record는 `JobTTL` 후 evict되는 휘발성. warm cache
+- **job store는 in-memory** — job record는 `JobTTL` 후 evict되는 휘발성. 캐시 채우기
   용도에선 재시작 시 job history 소실이 수용 가능하고, `Store` interface seam으로
   두어 향후 bbolt/sqlite drop-in이 가능하다. 재시작 내구 이력이 필요한 감사 용도는
   별개의 bbolt 이벤트 로그(`serve.events`)가 담당한다.

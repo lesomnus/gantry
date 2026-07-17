@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -97,7 +97,7 @@ func reg(name, host string) config.StoreConfig {
 	return config.StoreConfig{Name: name, Kind: "oci", Host: host, Insecure: true, Mode: "copy"}
 }
 
-func TestCopySourceWarmCommitAndDedup(t *testing.T) {
+func TestCopySourceFillCommitAndDedup(t *testing.T) {
 	ctx := context.Background()
 	// Upstream and cache are distinct registries; ggcr's in-memory registry
 	// shares blobs globally by digest, so a single host would make every blob
@@ -125,11 +125,11 @@ func TestCopySourceWarmCommitAndDedup(t *testing.T) {
 	var moved int64
 	for _, l := range plan.Layers {
 		sink := &testSink{}
-		if err := s.Warm(ctx, src.Context(), dst.Context(), l, sink); err != nil {
-			t.Fatalf("warm %s: %v", l.Digest, err)
+		if err := s.Fill(ctx, src.Context(), dst.Context(), l, sink); err != nil {
+			t.Fatalf("fill %s: %v", l.Digest, err)
 		}
-		if sink.lastState() != "warm" {
-			t.Errorf("state = %q, want warm", sink.lastState())
+		if sink.lastState() != "copied" {
+			t.Errorf("state = %q, want copied", sink.lastState())
 		}
 		moved += sink.bytes.Load()
 	}
@@ -147,16 +147,16 @@ func TestCopySourceWarmCommitAndDedup(t *testing.T) {
 	var again int64
 	for _, l := range plan.Layers {
 		sink := &testSink{}
-		if err := s.Warm(ctx, src.Context(), dst.Context(), l, sink); err != nil {
-			t.Fatalf("re-warm: %v", err)
+		if err := s.Fill(ctx, src.Context(), dst.Context(), l, sink); err != nil {
+			t.Fatalf("re-fill: %v", err)
 		}
 		if sink.lastState() != "exists" {
-			t.Errorf("re-warm state = %q, want exists", sink.lastState())
+			t.Errorf("re-fill state = %q, want exists", sink.lastState())
 		}
 		again += sink.bytes.Load()
 	}
 	if again != 0 {
-		t.Errorf("re-warm moved %d bytes, want 0", again)
+		t.Errorf("re-fill moved %d bytes, want 0", again)
 	}
 }
 
@@ -204,8 +204,8 @@ func TestProxySourceReadsThrough(t *testing.T) {
 	var read int64
 	for _, l := range plan.Layers {
 		sink := &testSink{}
-		if err := s.Warm(ctx, name.Repository{}, cache.Context(), l, sink); err != nil {
-			t.Fatalf("warm: %v", err)
+		if err := s.Fill(ctx, name.Repository{}, cache.Context(), l, sink); err != nil {
+			t.Fatalf("fill: %v", err)
 		}
 		read += sink.bytes.Load()
 	}

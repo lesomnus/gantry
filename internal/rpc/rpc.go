@@ -10,23 +10,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/cpx"
 	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
-	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc"
 	healthsvc "google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// Warmer is the subset of *warm.Warmer the services call.
-type Warmer interface {
-	Submit(req warm.Request) (warm.JobSnapshot, bool, error)
-	Retry(id string) (warm.JobSnapshot, bool, error)
-	Plan(ctx context.Context, req warm.Request) (warm.PlanResult, error)
+// Copier is the subset of *cpx.Copier the services call.
+type Copier interface {
+	Submit(req cpx.Request) (cpx.JobSnapshot, bool, error)
+	Retry(id string) (cpx.JobSnapshot, bool, error)
+	Plan(ctx context.Context, req cpx.Request) (cpx.PlanResult, error)
 }
 
 // GC is the subset of *retention.Manager the services call.
@@ -52,8 +52,8 @@ type Health interface {
 
 // Server implements pb.Server plus the VerifyService.
 type Server struct {
-	warmer Warmer
-	jobs   warm.Store
+	copier Copier
+	jobs   cpx.Store
 	stores *store.Set
 	gc     GC // nil when retention/GC is disabled
 	health Health
@@ -62,7 +62,7 @@ type Server struct {
 	rec    *event.Recorder
 }
 
-func New(warmer Warmer, jobs warm.Store, stores *store.Set, gc GC, hc Health, vf verify.Service, ev *event.Log) *Server {
+func New(copier Copier, jobs cpx.Store, stores *store.Set, gc GC, hc Health, vf verify.Service, ev *event.Log) *Server {
 	// A typed-nil pointer inside an interface would bypass the disabled guards.
 	if isNil(gc) {
 		gc = nil
@@ -71,7 +71,7 @@ func New(warmer Warmer, jobs warm.Store, stores *store.Set, gc GC, hc Health, vf
 		vf = nil
 	}
 	return &Server{
-		warmer: warmer,
+		copier: copier,
 		jobs:   jobs,
 		stores: stores,
 		gc:     gc,

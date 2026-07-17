@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/cpx"
 	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/rpc"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
-	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/xli"
 	"github.com/lesomnus/xli/flg"
@@ -28,7 +28,7 @@ import (
 func NewCmdServe() *xli.Command {
 	return &xli.Command{
 		Name:  "serve",
-		Brief: "run the cache-warming API server",
+		Brief: "run the image copy API server",
 
 		Flags: flg.Flags{
 			&flg.String{Name: "addr", Brief: "listen address (overrides config)"},
@@ -114,8 +114,8 @@ func NewCmdServe() *xli.Command {
 				log.From(ctx).Info("audit log enabled", slog.String("path", c.Serve.Events.Path))
 			}
 
-			jobStore := warm.NewMemStore()
-			wmr := warm.NewWarmer(stores, jobStore, c.Worker)
+			jobStore := cpx.NewMemStore()
+			wmr := cpx.NewCopier(stores, jobStore, c.Worker)
 			if events != nil {
 				wmr.SetRecorder(event.NewRecorder(events))
 			}

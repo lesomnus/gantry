@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func (s *proxySource) Resolve(ctx context.Context, _, dst name.Reference, platfo
 	return resolvePlan(ctx, dst, platforms, s.opts(ctx))
 }
 
-func (s *proxySource) Warm(ctx context.Context, _, dst name.Repository, l PlannedLayer, sink ProgressSink) error {
+func (s *proxySource) Fill(ctx context.Context, _, dst name.Repository, l PlannedLayer, sink ProgressSink) error {
 	layer, err := remote.Layer(dst.Digest(l.Digest), s.opts(ctx)...)
 	if err != nil {
 		return z.Err(err, "resolve cache layer %s", l.Digest)
@@ -41,14 +41,14 @@ func (s *proxySource) Warm(ctx context.Context, _, dst name.Repository, l Planne
 	defer rc.Close()
 	cr := &countingReader{rc: rc, sink: sink}
 	if _, err := io.Copy(io.Discard, cr); err != nil {
-		return z.Err(err, "warm blob %s", l.Digest)
+		return z.Err(err, "copy blob %s", l.Digest)
 	}
-	sink.SetState("warm")
+	sink.SetState("copied")
 	return nil
 }
 
 // Commit is a no-op for proxy mode: Resolve pulled the manifest through the
-// cache and Warm pulled every blob, so the cache is already populated. The
+// cache and Fill pulled every blob, so the cache is already populated. The
 // committed digest is unknown (the cache resolves the tag itself).
 func (s *proxySource) Commit(ctx context.Context, src, dst name.Reference, platforms []string, verbatim bool) (v1.Hash, error) {
 	return v1.Hash{}, nil

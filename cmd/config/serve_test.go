@@ -19,7 +19,7 @@ func TestEvaluateDefaults(t *testing.T) {
 		t.Errorf("shutdown_grace = %v, want 15s", got)
 	}
 	if c.Worker.MaxConcurrentJobs != 2 || c.Worker.MaxConcurrentLayers != 4 || c.Worker.QueueSize != 256 {
-		t.Errorf("warm pool = %+v, want jobs=2 layers=4 queue=256", c.Worker)
+		t.Errorf("worker pool = %+v, want jobs=2 layers=4 queue=256", c.Worker)
 	}
 	if got := time.Duration(c.Worker.JobTTL); got != 30*time.Minute {
 		t.Errorf("job_ttl = %v, want 30m", got)

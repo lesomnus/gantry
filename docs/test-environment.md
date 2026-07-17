@@ -72,7 +72,7 @@ go test -race ./...
 ```
 
 - **단위 테스트**(데몬 불필요): config round-trip, rewrite 규칙, Store 동시성,
-  Source copy/proxy(in-memory registry), Warmer, 엔진 목적지(`internal/warm/dest`,
+  Source copy/proxy(in-memory registry), Copier, 엔진 목적지(`internal/cpx/dest`,
   fake target) 등.
 - **라이브 통합 테스트**(자기-skip): 실데몬이 있으면 돌고 없으면 skip.
   - `internal/down/docker_integration_test.go` → `tcp://docker:2375`에 Ping 후
@@ -86,7 +86,7 @@ go test -race ./...
 
 ## 전체 루프 수동 검증
 
-gantry warm → cache copy → 양쪽 데몬이 cache에서 pull 까지 한 번에 확인한다.
+gantry가 캐시로 복사 → 양쪽 데몬이 cache에서 pull 까지 한 번에 확인한다.
 
 ### 1. cache registry + 로컬 포워드
 
@@ -171,7 +171,7 @@ cache가 plain-HTTP면, **다운스트림 데몬이 cache에서 pull할 때** �
 
 이 테스트가 `127.0.0.1:5000`을 쓰고 포워드까지 두는 이유가 이것이다 — DinD에서 데몬이
 **별도 설정 없이** insecure cache를 pull할 수 있는 유일한 주소가 자기 loopback이기 때문.
-gantry는 다운스트림의 insecure 정책을 강제하지 않는다(split-brain — gantry 자신의 warm은
+gantry는 다운스트림의 insecure 정책을 강제하지 않는다(split-brain — gantry 자신의 copy는
 `registry.insecure`를 따르지만, 데몬의 cache-pull은 데몬 설정을 따른다). 실 fleet에서
 비-loopback insecure cache를 쓰려면 각 데몬에 위 설정을 해두거나 cache에 TLS를 붙여야 한다.
 

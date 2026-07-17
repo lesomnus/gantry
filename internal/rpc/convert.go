@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lesomnus/gantry/internal/cpx"
 	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
-	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -82,20 +82,20 @@ func page[T any](items []T, size int32, token string) ([]T, string, error) {
 
 // --- enum maps -------------------------------------------------------------
 
-var jobStateToPB = map[warm.JobState]pb.JobState{
-	warm.JobPending:  pb.JobState_JOB_STATE_PENDING,
-	warm.JobRunning:  pb.JobState_JOB_STATE_RUNNING,
-	warm.JobDone:     pb.JobState_JOB_STATE_DONE,
-	warm.JobFailed:   pb.JobState_JOB_STATE_FAILED,
-	warm.JobCanceled: pb.JobState_JOB_STATE_CANCELED,
+var jobStateToPB = map[cpx.JobState]pb.JobState{
+	cpx.JobPending:  pb.JobState_JOB_STATE_PENDING,
+	cpx.JobRunning:  pb.JobState_JOB_STATE_RUNNING,
+	cpx.JobDone:     pb.JobState_JOB_STATE_DONE,
+	cpx.JobFailed:   pb.JobState_JOB_STATE_FAILED,
+	cpx.JobCanceled: pb.JobState_JOB_STATE_CANCELED,
 }
 
-var jobStateFromPB = map[pb.JobState]warm.JobState{
-	pb.JobState_JOB_STATE_PENDING:  warm.JobPending,
-	pb.JobState_JOB_STATE_RUNNING:  warm.JobRunning,
-	pb.JobState_JOB_STATE_DONE:     warm.JobDone,
-	pb.JobState_JOB_STATE_FAILED:   warm.JobFailed,
-	pb.JobState_JOB_STATE_CANCELED: warm.JobCanceled,
+var jobStateFromPB = map[pb.JobState]cpx.JobState{
+	pb.JobState_JOB_STATE_PENDING:  cpx.JobPending,
+	pb.JobState_JOB_STATE_RUNNING:  cpx.JobRunning,
+	pb.JobState_JOB_STATE_DONE:     cpx.JobDone,
+	pb.JobState_JOB_STATE_FAILED:   cpx.JobFailed,
+	pb.JobState_JOB_STATE_CANCELED: cpx.JobCanceled,
 }
 
 var transferStateToPB = map[string]pb.TransferState{
@@ -205,7 +205,7 @@ func statusToPB(st store.Status) *pb.Store {
 	}.Build()
 }
 
-func verificationToPB(v *warm.VerificationSnapshot) *pb.Verification {
+func verificationToPB(v *cpx.VerificationSnapshot) *pb.Verification {
 	if v == nil {
 		return nil
 	}
@@ -216,7 +216,7 @@ func verificationToPB(v *warm.VerificationSnapshot) *pb.Verification {
 	}.Build()
 }
 
-func jobToPB(snap warm.JobSnapshot) *pb.Job {
+func jobToPB(snap cpx.JobSnapshot) *pb.Job {
 	transfers := make([]*pb.Transfer, 0, len(snap.Transfers))
 	for _, t := range snap.Transfers {
 		layers := make([]*pb.Layer, 0, len(t.Layers))
@@ -297,7 +297,7 @@ func eventToPB(e event.Event) *pb.Event {
 		Type:        eventTypeToPB[e.Type],
 		Store:       e.Store,
 		Ref:         e.Ref,
-		State:       jobStateToPB[warm.JobState(e.State)],
+		State:       jobStateToPB[cpx.JobState(e.State)],
 		Digest:      e.Digest,
 		Error:       e.Error,
 	}
@@ -405,7 +405,7 @@ func applyResultToPB(res retention.ApplyResult) *pb.StoreGcApplyResponse {
 	}.Build()
 }
 
-func planToPB(res warm.PlanResult) *pb.JobPlanResponse {
+func planToPB(res cpx.PlanResult) *pb.JobPlanResponse {
 	b := pb.JobPlanResponse_builder{
 		Platforms:    res.Platforms,
 		As:           res.As,

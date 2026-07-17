@@ -1,7 +1,7 @@
 // Package store resolves the image stores a job references and reports them on
 // GET /v1/store. A store is a registry (gantry reads/writes blobs) or an engine
 // daemon (gantry triggers a pull). It builds the engine clients and exposes the
-// registry configs the warm engine needs.
+// registry configs the copy engine needs.
 package store
 
 import (

@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/cpx"
 	"github.com/lesomnus/gantry/internal/verify"
-	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -42,11 +42,11 @@ func jobID(ref *pb.JobRef) (string, error) {
 // submitErr maps Submit/Retry errors the way the HTTP layer does.
 func submitErr(err error) error {
 	switch {
-	case errors.Is(err, warm.ErrQueueFull):
+	case errors.Is(err, cpx.ErrQueueFull):
 		return status.Error(codes.ResourceExhausted, "job queue is full")
-	case errors.Is(err, warm.ErrJobNotFound):
+	case errors.Is(err, cpx.ErrJobNotFound):
 		return status.Error(codes.NotFound, err.Error())
-	case errors.Is(err, warm.ErrJobActive):
+	case errors.Is(err, cpx.ErrJobActive):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, verify.ErrUnsigned), errors.Is(err, verify.ErrUntrusted):
 		return status.Error(codes.FailedPrecondition, err.Error())
@@ -72,8 +72,8 @@ func idemKey(ctx context.Context) string {
 	return ""
 }
 
-func requestFromPB(ref string, source, target *pb.StoreRef, platforms, as []string, labels map[string]string) warm.Request {
-	return warm.Request{
+func requestFromPB(ref string, source, target *pb.StoreRef, platforms, as []string, labels map[string]string) cpx.Request {
+	return cpx.Request{
 		Ref:       ref,
 		Platforms: platforms,
 		Source:    source.GetName(),
@@ -102,7 +102,7 @@ func (v *jobService) Add(ctx context.Context, req *pb.JobAddRequest) (*pb.Job, e
 			return jobToPB(snap), nil
 		}
 	}
-	snap, created, err := v.s.warmer.Submit(r)
+	snap, created, err := v.s.copier.Submit(r)
 	if err != nil {
 		return nil, submitErr(err)
 	}
@@ -138,7 +138,7 @@ func (v *jobService) Erase(ctx context.Context, ref *pb.JobRef) (*emptypb.Empty,
 }
 
 func (v *jobService) List(ctx context.Context, req *pb.JobListRequest) (*pb.JobListResponse, error) {
-	f := warm.Filter{}
+	f := cpx.Filter{}
 	if req.HasState() {
 		st, ok := jobStateFromPB[req.GetState()]
 		if !ok {
@@ -206,7 +206,7 @@ func (v *jobService) Plan(ctx context.Context, req *pb.JobPlanRequest) (*pb.JobP
 		cr := req.GetCopyReferrers()
 		r.CopyReferrers = &cr
 	}
-	res, err := v.s.warmer.Plan(ctx, r)
+	res, err := v.s.copier.Plan(ctx, r)
 	if err != nil {
 		if errors.Is(err, verify.ErrUnsigned) || errors.Is(err, verify.ErrUntrusted) {
 			return nil, status.Error(codes.FailedPrecondition, err.Error())
@@ -238,7 +238,7 @@ func (v *jobService) Retry(ctx context.Context, ref *pb.JobRef) (*pb.Job, error)
 	if err != nil {
 		return nil, err
 	}
-	snap, created, err := v.s.warmer.Retry(id)
+	snap, created, err := v.s.copier.Retry(id)
 	if err != nil {
 		return nil, submitErr(err)
 	}

@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -74,12 +74,12 @@ func (f *fakePullEngine) Remove(context.Context, string) (down.RemoveResult, err
 	return down.RemoveResult{}, nil
 }
 
-// engineWarmer builds a warmer over one upstream registry (live httptest) and
+// engineCopier builds a copier over one upstream registry (live httptest) and
 // one fake engine store named "node".
-func engineWarmer(t *testing.T, eng *fakePullEngine) (*Warmer, Store, string) {
+func engineCopier(t *testing.T, eng *fakePullEngine) (*Copier, Store, string) {
 	t.Helper()
 	up := startRegistry(t)
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: up, Insecure: true},
 	}, false)
 	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker"}, eng)
@@ -91,7 +91,7 @@ func engineWarmer(t *testing.T, eng *fakePullEngine) (*Warmer, Store, string) {
 // the source manifest, and the pull hook stamps retention.
 func TestJobToEngine(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/riscv64"}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	src := pushImage(t, up+"/team/app:1", 2)
 
 	var hookEngine, hookRef string
@@ -141,7 +141,7 @@ func TestJobToEngine(t *testing.T) {
 func TestJobToEngineDaemonErrorFailsJob(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64",
 		pullErr: errors.New("no matching manifest for linux/s390x")}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -163,7 +163,7 @@ func TestJobToEngineDaemonErrorFailsJob(t *testing.T) {
 
 func TestJobToEngineRejectsMultiplePlatforms(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, _, up := engineWarmer(t, eng)
+	w, _, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 	w.base = context.Background()
 
@@ -176,7 +176,7 @@ func TestJobToEngineRejectsMultiplePlatforms(t *testing.T) {
 
 func TestJobToEngineRejectsCopyReferrers(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, _, up := engineWarmer(t, eng)
+	w, _, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 	w.base = context.Background()
 
@@ -190,7 +190,7 @@ func TestJobToEngineRejectsCopyReferrers(t *testing.T) {
 // An unreachable daemon fails admission when the platform must be resolved from it.
 func TestJobToEngineHostPlatformFailureFailsAdmission(t *testing.T) {
 	eng := &fakePullEngine{name: "node"} // Platform() errors
-	w, _, up := engineWarmer(t, eng)
+	w, _, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 	w.base = context.Background()
 
@@ -212,7 +212,7 @@ func TestJobToEngineHostPlatformFailureFailsAdmission(t *testing.T) {
 func TestEnginePullRefHostOverride(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
 	up := startRegistry(t)
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: up, Insecure: true, DownstreamHost: "cache.cr.example"},
 	}, false)
 	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker", PullHost: "mirror.example"}, eng)
@@ -238,7 +238,7 @@ func TestEnginePullRefHostOverride(t *testing.T) {
 // to the verified digest.
 func TestJobToEngineVerifiedDigestAnchor(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	src := pushImage(t, up+"/team/app:1", 1)
 	h, _ := v1.NewHash("sha256:" + strings.Repeat("c", 64))
 	w.SetVerifier(&fakeVerifier{dg: h})
@@ -269,7 +269,7 @@ func TestJobToEngineDaemonProgressRefinesEstimate(t *testing.T) {
 		{Digest: "l1", Total: 100, Done: 100, State: "done"},
 		{Digest: "l2", Total: 400, Done: 400, State: "done"},
 	}}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -296,7 +296,7 @@ func TestJobToEngineDaemonProgressRefinesEstimate(t *testing.T) {
 // Identical engine moves coalesce; a different engine is a different job.
 func TestJobToEngineDedup(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
 	w.base = context.Background() // admit without workers so the first job stays active
 

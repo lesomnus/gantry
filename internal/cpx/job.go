@@ -1,8 +1,8 @@
-// Package warm holds the image-move domain: jobs, the transfers that make them
-// up, the job store, and the Warmer engine. A job moves an image between stores;
+// Package cpx holds the image-move domain: jobs, the transfers that make them
+// up, the job store, and the Copier engine. A job moves an image between stores;
 // each step (a registry copy, or an engine pull) is a Transfer with the same
 // per-layer progress shape.
-package warm
+package cpx
 
 import (
 	"context"
@@ -51,7 +51,7 @@ type VerificationSnapshot struct {
 }
 
 // Job is the live record of one image move. Its Transfers are filled in by the
-// Warmer when the job is planned and run.
+// Copier when the job is planned and run.
 type Job struct {
 	ID        string
 	Ref       string // the requested image reference
@@ -71,7 +71,7 @@ type Job struct {
 	DateStarted time.Time
 	DateEnded   time.Time
 
-	// Set by the Warmer at submit time; not serialized.
+	// Set by the Copier at submit time; not serialized.
 	ctx      context.Context
 	cancel   context.CancelFunc
 	dedup    string
@@ -152,7 +152,7 @@ type LayerProgress struct {
 	Platform string
 	Total    int64
 	Done     atomic.Int64
-	State    string // pending | pulling | done | exists | failed
+	State    string // pending | pulling | copied | done | exists | failed
 }
 
 // Plan is the manifest walk a registry Source produces before bytes move.
@@ -204,7 +204,7 @@ type LayerSnapshot struct {
 	Platform string `json:"platform"`
 	Total    int64  `json:"total"`
 	Done     int64  `json:"done"`
-	State    string `json:"state" enums:"pending,pulling,done,exists,failed"` // per-layer progress state
+	State    string `json:"state" enums:"pending,pulling,copied,done,exists,failed"` // per-layer progress state
 }
 
 func (j *Job) snapshot() JobSnapshot {

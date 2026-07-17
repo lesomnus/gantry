@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func (f *fakeVerifier) Verify(_ context.Context, _ config.StoreConfig, src name.
 // TestVerifyRejectsAdmission: a verification failure aborts Submit before any
 // job is created (fail-closed), preserving the sentinel error for the handler.
 func TestVerifyRejectsAdmission(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: "up.example", Insecure: true},
 		{Name: "cache", Kind: "oci", Host: "cache.example", Insecure: true, Mode: "copy"},
 	}, false)
@@ -50,7 +50,7 @@ func TestVerifyRejectsAdmission(t *testing.T) {
 // TestVerifyPinKeepsCacheTagged: a verified digest pins the source but the cache
 // destination stays tag-named (so the cache remains pullable by tag).
 func TestVerifyPinKeepsCacheTagged(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: "up.example", Insecure: true},
 		{Name: "cache", Kind: "oci", Host: "cache.example", Insecure: true, Mode: "copy"},
 	}, false)
@@ -79,7 +79,7 @@ func TestVerifyPinKeepsCacheTagged(t *testing.T) {
 // TestVerifyProxyModeRejected: a verified digest cannot be honored by a proxy
 // destination (reads through by tag), so the job is refused fail-closed.
 func TestVerifyProxyModeRejected(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: "up.example", Insecure: true},
 		{Name: "cache", Kind: "oci", Host: "cache.example", Insecure: true, Mode: "proxy"},
 	}, false)
@@ -99,7 +99,7 @@ func TestVerifyProxyModeRejected(t *testing.T) {
 // TestVerifyPinsSourceRef: a verified digest pins the source ref the copy pulls,
 // so the cache is filled from exactly what was verified (surfaced as Plan.SrcRef).
 func TestVerifyPinsSourceRef(t *testing.T) {
-	w, _ := newWarmer(t, []config.StoreConfig{
+	w, _ := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: "up.example", Insecure: true},
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, false)

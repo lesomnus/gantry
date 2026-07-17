@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 // source, digest-verified — and the retention hook stamps each name.
 func TestJobToEngineAsDigest(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	idx := pushIndex(t, up+"/team/app:multi", "linux/amd64", "linux/arm64")
 	desc, err := remote.Get(idx)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestJobToEngineAsDigest(t *testing.T) {
 // digest; a tag `as` on a digest job needs no anchor bytes.
 func TestAsDigestValidation(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	idx := pushIndex(t, up+"/team/app:multi", "linux/amd64")
 	desc, err := remote.Get(idx)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestJobDigestRefCopyVerbatim(t *testing.T) {
 	}
 	dg := desc.Digest.String()
 
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: up, Insecure: true},
 		{Name: "cache", Kind: "oci", Host: cache, Insecure: true, Mode: "copy"},
 	}, false)
@@ -180,7 +180,7 @@ func TestJobDigestRefCopyVerbatim(t *testing.T) {
 // name would leave the image unowned while the index claims it is tracked.
 func TestAsDigestClassicSkipStampsReality(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
-	w, js, up := engineWarmer(t, eng)
+	w, js, up := engineCopier(t, eng)
 	idx := pushIndex(t, up+"/team/app:multi", "linux/amd64")
 	desc, err := remote.Get(idx)
 	if err != nil {

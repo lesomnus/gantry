@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -19,24 +19,24 @@ import (
 	"github.com/lesomnus/z"
 )
 
-// ProgressSink receives byte and state updates for one blob being warmed.
+// ProgressSink receives byte and state updates for one blob being copied.
 type ProgressSink interface {
 	Add(n int64)
 	SetState(state string)
 }
 
-// Source warms blobs into the cache. copy mode pulls from upstream and pushes
+// Source fills blobs into the cache. copy mode pulls from upstream and pushes
 // to the cache; proxy mode reads through the cache to trigger a self-fill.
 //
-// The Warmer parses both references once and hands them to the Source: Resolve
-// walks whichever side the mode reads (upstream for copy, cache for proxy), Warm
+// The Copier parses both references once and hands them to the Source: Resolve
+// walks whichever side the mode reads (upstream for copy, cache for proxy), Fill
 // moves each blob, and Commit finalizes the image so the cache tag resolves.
 type Source interface {
 	Resolve(ctx context.Context, src, dst name.Reference, platforms []string) (*Plan, error)
-	Warm(ctx context.Context, src, dst name.Repository, l PlannedLayer, sink ProgressSink) error
+	Fill(ctx context.Context, src, dst name.Repository, l PlannedLayer, sink ProgressSink) error
 	// Commit publishes the manifest(s) under the cache tag and returns the
 	// committed digest (zero when unknown, e.g. proxy mode). copy mode pushes a
-	// platform-filtered index referencing the blobs Warm uploaded — or, with
+	// platform-filtered index referencing the blobs Fill uploaded — or, with
 	// verbatim, the source manifest/index byte-for-byte so its digest (and any
 	// signature over it) is preserved; proxy mode is a no-op (resolving +
 	// reading already populated the cache).

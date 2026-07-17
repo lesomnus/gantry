@@ -1,4 +1,4 @@
-package warm
+package cpx
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/lesomnus/gantry/internal/store"
 )
 
-func newWarmer(t *testing.T, stores []config.StoreConfig, allowUnknown bool) (*Warmer, Store) {
+func newCopier(t *testing.T, stores []config.StoreConfig, allowUnknown bool) (*Copier, Store) {
 	t.Helper()
 	m := make(map[string]config.StoreConfig, len(stores))
 	for _, s := range stores {
@@ -31,7 +31,7 @@ func newWarmer(t *testing.T, stores []config.StoreConfig, allowUnknown bool) (*W
 		t.Fatal(err)
 	}
 	js := NewMemStore()
-	w := NewWarmer(set, js, c.Worker)
+	w := NewCopier(set, js, c.Worker)
 	w.srcOpts = []name.Option{name.Insecure}
 	return w, js
 }
@@ -49,13 +49,13 @@ func waitTerminal(t *testing.T, js Store, id string) JobSnapshot {
 	return JobSnapshot{}
 }
 
-func TestWarmerCopyEndToEnd(t *testing.T) {
+func TestCopierCopyEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	up := startRegistry(t)
 	cache := startRegistry(t)
 	pushImage(t, up+"/team/app:1", 3)
 
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "up", Kind: "oci", Host: up, Insecure: true},
 		{Name: "cache", Kind: "oci", Host: cache, Insecure: true, Mode: "copy"},
 	}, false)
@@ -89,8 +89,8 @@ func TestWarmerCopyEndToEnd(t *testing.T) {
 	}
 }
 
-func TestWarmerDedup(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+func TestCopierDedup(t *testing.T) {
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background() // enqueue without starting workers; jobs stay active
@@ -130,7 +130,7 @@ func TestWarmerDedup(t *testing.T) {
 }
 
 func TestRetryHonorsHandleViewAndLabels(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background() // no workers: the shared job stays active
@@ -170,8 +170,8 @@ func TestRetryHonorsHandleViewAndLabels(t *testing.T) {
 	_ = sA
 }
 
-func TestWarmerQueueFull(t *testing.T) {
-	w, _ := newWarmer(t, []config.StoreConfig{
+func TestCopierQueueFull(t *testing.T) {
+	w, _ := newCopier(t, []config.StoreConfig{
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background()
@@ -185,17 +185,17 @@ func TestWarmerQueueFull(t *testing.T) {
 	}
 }
 
-func TestWarmerNothingToDo(t *testing.T) {
-	w, _ := newWarmer(t, nil, true)
+func TestCopierNothingToDo(t *testing.T) {
+	w, _ := newCopier(t, nil, true)
 	w.base = context.Background()
 	if _, _, err := w.Submit(Request{Ref: "x/y:1", Source: "r.io"}); err == nil {
 		t.Error("expected error when `target` is not set")
 	}
 }
 
-func TestWarmerSweepsTerminalJobs(t *testing.T) {
+func TestCopierSweepsTerminalJobs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	w, js := newWarmer(t, nil, true)
+	w, js := newCopier(t, nil, true)
 	w.wc.JobTTL = config.Duration(50 * time.Millisecond)
 	w.Start(ctx)
 	t.Cleanup(func() { cancel(); w.Stop() })
@@ -231,7 +231,7 @@ func (failSource) Resolve(context.Context, name.Reference, name.Reference, []str
 	return nil, nil
 }
 
-func (failSource) Warm(ctx context.Context, _, _ name.Repository, l PlannedLayer, _ ProgressSink) error {
+func (failSource) Fill(ctx context.Context, _, _ name.Repository, l PlannedLayer, _ ProgressSink) error {
 	if l.Digest == "sha256:1" {
 		return errors.New("copy blob: boom")
 	}
@@ -244,7 +244,7 @@ func (failSource) Commit(context.Context, name.Reference, name.Reference, []stri
 }
 
 func TestCopyLayersReportsLayerError(t *testing.T) {
-	w, js := newWarmer(t, nil, true)
+	w, js := newCopier(t, nil, true)
 	w.wc.MaxConcurrentLayers = 1
 	ctx, cancel := context.WithCancel(context.Background())
 	job := NewJob("job_l", "a/b:1", nil, time.Now())
@@ -274,7 +274,7 @@ func TestCopyLayersReportsLayerError(t *testing.T) {
 
 func TestFinish(t *testing.T) {
 	t.Run("layer failure self-cancel is recorded as failed", func(t *testing.T) {
-		w, js := newWarmer(t, nil, true)
+		w, js := newCopier(t, nil, true)
 		ctx, cancel := context.WithCancel(context.Background())
 		job := NewJob("job_f", "a/b:1", nil, time.Now())
 		job.ctx, job.cancel = ctx, cancel
@@ -294,7 +294,7 @@ func TestFinish(t *testing.T) {
 		}
 	})
 	t.Run("cancellation stays canceled", func(t *testing.T) {
-		w, js := newWarmer(t, nil, true)
+		w, js := newCopier(t, nil, true)
 		ctx, cancel := context.WithCancel(context.Background())
 		job := NewJob("job_c", "a/b:1", nil, time.Now())
 		job.ctx, job.cancel = ctx, cancel
@@ -311,7 +311,7 @@ func TestFinish(t *testing.T) {
 }
 
 func TestActiveSkipsCanceledJob(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background()
@@ -334,7 +334,7 @@ func TestActiveSkipsCanceledJob(t *testing.T) {
 }
 
 func TestRetryRequiresTerminal(t *testing.T) {
-	w, js := newWarmer(t, []config.StoreConfig{
+	w, js := newCopier(t, []config.StoreConfig{
 		{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
 	}, true)
 	w.base = context.Background()

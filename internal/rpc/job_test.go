@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lesomnus/gantry/internal/cpx"
 	"github.com/lesomnus/gantry/internal/verify"
-	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -17,15 +17,15 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func snap(id, ref string, state warm.JobState, at time.Time) warm.JobSnapshot {
-	return warm.JobSnapshot{ID: id, Ref: ref, State: state, DateCreated: at}
+func snap(id, ref string, state cpx.JobState, at time.Time) cpx.JobSnapshot {
+	return cpx.JobSnapshot{ID: id, Ref: ref, State: state, DateCreated: at}
 }
 
 func TestJobAdd(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.warmer.snap = snap("job_1", "src.local/lib/app:1", warm.JobPending, time.Now())
-	e.warmer.created = true
+	e.copier.snap = snap("job_1", "src.local/lib/app:1", cpx.JobPending, time.Now())
+	e.copier.created = true
 
 	var trailer metadata.MD
 	job, err := e.client.Job().Add(ctx, pb.JobAddRequest_builder{
@@ -43,14 +43,14 @@ func TestJobAdd(t *testing.T) {
 	if got := trailer.Get("gantry-coalesced"); len(got) != 1 || got[0] != "false" {
 		t.Errorf("want coalesced=false trailer, got %v", got)
 	}
-	if len(e.warmer.submits) != 1 || e.warmer.submits[0].Target != "node" ||
-		len(e.warmer.submits[0].As) != 1 || e.warmer.submits[0].As[0] != "docker.io/lib/app:1" ||
-		e.warmer.submits[0].Labels["team"] != "infra" {
-		t.Errorf("submit not forwarded: %+v", e.warmer.submits)
+	if len(e.copier.submits) != 1 || e.copier.submits[0].Target != "node" ||
+		len(e.copier.submits[0].As) != 1 || e.copier.submits[0].As[0] != "docker.io/lib/app:1" ||
+		e.copier.submits[0].Labels["team"] != "infra" {
+		t.Errorf("submit not forwarded: %+v", e.copier.submits)
 	}
 
 	// Coalesced submit reports through the trailer.
-	e.warmer.created = false
+	e.copier.created = false
 	_, err = e.client.Job().Add(ctx, pb.JobAddRequest_builder{
 		Ref:    "src.local/lib/app:1",
 		Target: pb.StoreByName("node"),
@@ -71,24 +71,24 @@ func TestJobAddErrors(t *testing.T) {
 	ctx := context.Background()
 	req := pb.JobAddRequest_builder{Ref: "x:1"}.Build()
 
-	e.warmer.err = warm.ErrQueueFull
+	e.copier.err = cpx.ErrQueueFull
 	_, err := e.client.Job().Add(ctx, req)
 	wantCode(t, err, codes.ResourceExhausted)
 
-	e.warmer.err = fmt.Errorf("admission: %w", verify.ErrUntrusted)
+	e.copier.err = fmt.Errorf("admission: %w", verify.ErrUntrusted)
 	_, err = e.client.Job().Add(ctx, req)
 	wantCode(t, err, codes.FailedPrecondition)
 
-	e.warmer.err = errors.New("no rewrite rule matched")
+	e.copier.err = errors.New("no rewrite rule matched")
 	_, err = e.client.Job().Add(ctx, req)
 	wantCode(t, err, codes.InvalidArgument)
 }
 
 func TestJobAddIdempotency(t *testing.T) {
 	e := newEnv(t)
-	e.addJob(t, "job_9", "x:1", warm.JobRunning, time.Now())
-	e.warmer.snap = snap("job_9", "x:1", warm.JobRunning, time.Now())
-	e.warmer.created = true
+	e.addJob(t, "job_9", "x:1", cpx.JobRunning, time.Now())
+	e.copier.snap = snap("job_9", "x:1", cpx.JobRunning, time.Now())
+	e.copier.created = true
 
 	ctx := metadata.AppendToOutgoingContext(context.Background(), "idempotency-key", "k1")
 	req := pb.JobAddRequest_builder{Ref: "x:1"}.Build()
@@ -107,8 +107,8 @@ func TestJobAddIdempotency(t *testing.T) {
 	if got := trailer.Get("gantry-coalesced"); len(got) != 1 || got[0] != "true" {
 		t.Errorf("replay must report coalesced, got %v", got)
 	}
-	if len(e.warmer.submits) != 1 {
-		t.Errorf("replay must not resubmit: %d submits", len(e.warmer.submits))
+	if len(e.copier.submits) != 1 {
+		t.Errorf("replay must not resubmit: %d submits", len(e.copier.submits))
 	}
 }
 
@@ -116,9 +116,9 @@ func TestJobGetListErase(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	t0 := time.Now().Add(-time.Hour)
-	e.addJob(t, "job_1", "a:1", warm.JobDone, t0)
-	e.addJob(t, "job_2", "b:1", warm.JobRunning, t0.Add(time.Minute))
-	e.addJob(t, "job_3", "b:2", warm.JobDone, t0.Add(2*time.Minute))
+	e.addJob(t, "job_1", "a:1", cpx.JobDone, t0)
+	e.addJob(t, "job_2", "b:1", cpx.JobRunning, t0.Add(time.Minute))
+	e.addJob(t, "job_3", "b:2", cpx.JobDone, t0.Add(2*time.Minute))
 
 	job, err := e.client.Job().Get(ctx, pb.JobGetById("job_2"))
 	if err != nil || job.GetState() != pb.JobState_JOB_STATE_RUNNING {
@@ -162,8 +162,8 @@ func TestJobListByLabel(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	now := time.Now()
-	e.addLabeledJob(t, "job_1", "a:1", warm.JobRunning, now, map[string]string{"team": "x", "env": "prod"})
-	e.addLabeledJob(t, "job_2", "b:1", warm.JobRunning, now, map[string]string{"team": "y", "env": "prod"})
+	e.addLabeledJob(t, "job_1", "a:1", cpx.JobRunning, now, map[string]string{"team": "x", "env": "prod"})
+	e.addLabeledJob(t, "job_2", "b:1", cpx.JobRunning, now, map[string]string{"team": "y", "env": "prod"})
 
 	// A single key selects; the matched job echoes its full label set back.
 	res, err := e.client.Job().List(ctx, pb.JobListRequest_builder{
@@ -196,7 +196,7 @@ func TestJobListByLabel(t *testing.T) {
 func TestJobWatch(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.addJob(t, "job_1", "a:1", warm.JobDone, time.Now())
+	e.addJob(t, "job_1", "a:1", cpx.JobDone, time.Now())
 
 	w, err := e.client.Job().Watch(ctx, pb.JobById("job_1"))
 	if err != nil {
@@ -211,7 +211,7 @@ func TestJobWatch(t *testing.T) {
 	}
 
 	// A running job streams until it turns terminal.
-	e.addJob(t, "job_2", "b:1", warm.JobRunning, time.Now())
+	e.addJob(t, "job_2", "b:1", cpx.JobRunning, time.Now())
 	w, err = e.client.Job().Watch(ctx, pb.JobById("job_2"))
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestJobWatch(t *testing.T) {
 	if job, err := w.Recv(); err != nil || job.GetState() != pb.JobState_JOB_STATE_RUNNING {
 		t.Fatalf("first frame: %v %v", job, err)
 	}
-	e.jobs.Update("job_2", func(j *warm.Job) { j.State = warm.JobDone })
+	e.jobs.Update("job_2", func(j *cpx.Job) { j.State = cpx.JobDone })
 	if job, err := w.Recv(); err != nil || job.GetState() != pb.JobState_JOB_STATE_DONE {
 		t.Fatalf("terminal frame: %v %v", job, err)
 	}
@@ -237,7 +237,7 @@ func TestJobWatch(t *testing.T) {
 
 func TestJobWatchEviction(t *testing.T) {
 	e := newEnv(t)
-	e.addJob(t, "job_1", "a:1", warm.JobRunning, time.Now())
+	e.addJob(t, "job_1", "a:1", cpx.JobRunning, time.Now())
 
 	w, err := e.client.Job().Watch(context.Background(), pb.JobById("job_1"))
 	if err != nil {
@@ -256,7 +256,7 @@ func TestJobWatchEviction(t *testing.T) {
 
 func TestJobWatchClientCancel(t *testing.T) {
 	e := newEnv(t)
-	e.addJob(t, "job_1", "a:1", warm.JobRunning, time.Now())
+	e.addJob(t, "job_1", "a:1", cpx.JobRunning, time.Now())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	w, err := e.client.Job().Watch(ctx, pb.JobById("job_1"))
@@ -294,7 +294,7 @@ func TestListPageTokenValidation(t *testing.T) {
 func TestJobCancelRetry(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.addJob(t, "job_1", "a:1", warm.JobRunning, time.Now())
+	e.addJob(t, "job_1", "a:1", cpx.JobRunning, time.Now())
 
 	job, err := e.client.Job().Cancel(ctx, pb.JobById("job_1"))
 	if err != nil {
@@ -304,12 +304,12 @@ func TestJobCancelRetry(t *testing.T) {
 		t.Errorf("cancel snapshot: %v", job)
 	}
 
-	e.jobs.Update("job_1", func(j *warm.Job) { j.State = warm.JobCanceled })
+	e.jobs.Update("job_1", func(j *cpx.Job) { j.State = cpx.JobCanceled })
 	_, err = e.client.Job().Cancel(ctx, pb.JobById("job_1"))
 	wantCode(t, err, codes.FailedPrecondition)
 
-	e.warmer.snap = snap("job_2", "a:1", warm.JobPending, time.Now())
-	e.warmer.created = true
+	e.copier.snap = snap("job_2", "a:1", cpx.JobPending, time.Now())
+	e.copier.created = true
 	var trailer metadata.MD
 	job, err = e.client.Job().Retry(ctx, pb.JobById("job_1"), grpc.Trailer(&trailer))
 	if err != nil || job.GetId() != "job_2" {
@@ -320,7 +320,7 @@ func TestJobCancelRetry(t *testing.T) {
 	}
 
 	// A retry can itself coalesce onto an active twin.
-	e.warmer.created = false
+	e.copier.created = false
 	if _, err := e.client.Job().Retry(ctx, pb.JobById("job_1"), grpc.Trailer(&trailer)); err != nil {
 		t.Fatal(err)
 	}
@@ -328,11 +328,11 @@ func TestJobCancelRetry(t *testing.T) {
 		t.Errorf("coalesced retry trailer: %v", got)
 	}
 
-	e.warmer.err = fmt.Errorf("%w: job_9 is running", warm.ErrJobActive)
+	e.copier.err = fmt.Errorf("%w: job_9 is running", cpx.ErrJobActive)
 	_, err = e.client.Job().Retry(ctx, pb.JobById("job_9"))
 	wantCode(t, err, codes.FailedPrecondition)
 
-	e.warmer.err = warm.ErrJobNotFound
+	e.copier.err = cpx.ErrJobNotFound
 	_, err = e.client.Job().Retry(ctx, pb.JobById("job_9"))
 	wantCode(t, err, codes.NotFound)
 }
@@ -340,7 +340,7 @@ func TestJobCancelRetry(t *testing.T) {
 func TestJobPlan(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.warmer.planRes = warm.PlanResult{
+	e.copier.planRes = cpx.PlanResult{
 		Ref:       "src.local/lib/app:1",
 		Source:    "src",
 		Target:    "node",
@@ -362,7 +362,7 @@ func TestJobPlan(t *testing.T) {
 		t.Errorf("unexpected plan: %v", res)
 	}
 
-	e.warmer.planErr = fmt.Errorf("%w", verify.ErrUnsigned)
+	e.copier.planErr = fmt.Errorf("%w", verify.ErrUnsigned)
 	_, err = e.client.Job().Plan(ctx, pb.JobPlanRequest_builder{Ref: proto.String("x:1")}.Build())
 	wantCode(t, err, codes.FailedPrecondition)
 }

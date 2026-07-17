@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/cpx"
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
@@ -17,7 +18,6 @@ import (
 	"github.com/lesomnus/gantry/internal/rpc"
 	"github.com/lesomnus/gantry/internal/store"
 	"github.com/lesomnus/gantry/internal/verify"
-	"github.com/lesomnus/gantry/internal/warm"
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -100,29 +100,29 @@ func (e *fakeEngine) Remove(_ context.Context, ref string) (down.RemoveResult, e
 	return e.removeRes, nil
 }
 
-// fakeWarmer is a canned rpc.Warmer.
-type fakeWarmer struct {
-	snap    warm.JobSnapshot
+// fakeCopier is a canned rpc.Copier.
+type fakeCopier struct {
+	snap    cpx.JobSnapshot
 	created bool
 	err     error
-	planRes warm.PlanResult
+	planRes cpx.PlanResult
 	planErr error
 
-	submits []warm.Request
+	submits []cpx.Request
 	retries []string
 }
 
-func (w *fakeWarmer) Submit(req warm.Request) (warm.JobSnapshot, bool, error) {
+func (w *fakeCopier) Submit(req cpx.Request) (cpx.JobSnapshot, bool, error) {
 	w.submits = append(w.submits, req)
 	return w.snap, w.created, w.err
 }
 
-func (w *fakeWarmer) Retry(id string) (warm.JobSnapshot, bool, error) {
+func (w *fakeCopier) Retry(id string) (cpx.JobSnapshot, bool, error) {
 	w.retries = append(w.retries, id)
 	return w.snap, w.created, w.err
 }
 
-func (w *fakeWarmer) Plan(context.Context, warm.Request) (warm.PlanResult, error) {
+func (w *fakeCopier) Plan(context.Context, cpx.Request) (cpx.PlanResult, error) {
 	return w.planRes, w.planErr
 }
 
@@ -145,9 +145,9 @@ func (v *fakeVerify) Reload() (verify.Description, error) {
 
 type env struct {
 	eng    *fakeEngine
-	warmer *fakeWarmer
+	copier *fakeCopier
 	verify *fakeVerify
-	jobs   warm.Store
+	jobs   cpx.Store
 	ix     *retention.Index
 	gc     *retention.Manager
 	events *event.Log
@@ -195,8 +195,8 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 
 	e := &env{
 		eng:    eng,
-		warmer: &fakeWarmer{},
-		jobs:   warm.NewMemStore(),
+		copier: &fakeCopier{},
+		jobs:   cpx.NewMemStore(),
 		stores: stores,
 	}
 
@@ -238,7 +238,7 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 		CacheTTL:     time.Millisecond,
 		ProbeTimeout: time.Second,
 	})
-	srv := rpc.New(e.warmer, e.jobs, stores, gc, hc, vf, e.events)
+	srv := rpc.New(e.copier, e.jobs, stores, gc, hc, vf, e.events)
 	e.srv = srv
 
 	var sopts []grpc.ServerOption
@@ -271,24 +271,24 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 }
 
 // addJob seeds a job record in the real in-memory job store.
-func (e *env) addJob(t *testing.T, id, ref string, state warm.JobState, at time.Time) *warm.Job {
+func (e *env) addJob(t *testing.T, id, ref string, state cpx.JobState, at time.Time) *cpx.Job {
 	t.Helper()
 	return e.addLabeledJob(t, id, ref, state, at, nil)
 }
 
 // addLabeledJob seeds a job carrying labels; the labels are fixed at Add time
 // (they seed the primary handle), so they must be set before the store sees it.
-func (e *env) addLabeledJob(t *testing.T, id, ref string, state warm.JobState, at time.Time, labels map[string]string) *warm.Job {
+func (e *env) addLabeledJob(t *testing.T, id, ref string, state cpx.JobState, at time.Time, labels map[string]string) *cpx.Job {
 	t.Helper()
-	j := warm.NewJob(id, ref, nil, at)
+	j := cpx.NewJob(id, ref, nil, at)
 	j.Labels = labels
 	_, cancel := context.WithCancel(context.Background())
 	j.SetCancel(cancel)
 	if err := e.jobs.Add(j); err != nil {
 		t.Fatal(err)
 	}
-	if state != warm.JobPending {
-		e.jobs.Update(id, func(j *warm.Job) { j.State = state })
+	if state != cpx.JobPending {
+		e.jobs.Update(id, func(j *cpx.Job) { j.State = state })
 	}
 	return j
 }

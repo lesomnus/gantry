@@ -65,7 +65,7 @@ type Engine interface {
 	// as may mix tag and digest references; a digest name must carry the anchor
 	// digest and is registered out-of-band over the pulled content (anchor
 	// supplies the manifest bytes backing it). Digest names require an anchored
-	// pull — the Warmer admits them only with a non-empty digest.
+	// pull — the Copier admits them only with a non-empty digest.
 	// recorded reports the references the daemon actually holds for the image
 	// after the pull — the applied names, or the pull-created record when a
 	// name could not be applied (classic-store digest skip) — so the caller
@@ -162,7 +162,7 @@ func anchoredRef(ref, digest string) (string, error) {
 	return r.Context().Name() + "@" + digest, nil
 }
 
-// splitNames separates `as` names into tag and digest references. The Warmer
+// splitNames separates `as` names into tag and digest references. The Copier
 // validated each at admission, so an unparseable name is a tag (verbatim
 // passthrough keeps whatever the daemon accepted before).
 func splitNames(as []string) (tags, digests []string) {

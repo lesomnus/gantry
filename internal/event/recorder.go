@@ -1,6 +1,6 @@
 package event
 
-// Recorder adapts a Log to the warm and retention Recorder interfaces, so those
+// Recorder adapts a Log to the cpx and retention Recorder interfaces, so those
 // packages emit audit events without importing the event package's concrete
 // types beyond this adapter. Append failures are swallowed: an audit-log write
 // must never break the operation it records.
@@ -16,7 +16,7 @@ func (r *Recorder) emit(e Event) {
 	_ = r.log.Append(e)
 }
 
-// --- warm.Recorder ---
+// --- cpx.Recorder ---
 
 func (r *Recorder) JobAdmitted(ref, source, target, digest string) {
 	r.emit(Event{Type: JobAdmitted, Ref: ref, Store: target, Digest: digest, Detail: kv("source", source)})
