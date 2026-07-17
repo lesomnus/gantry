@@ -250,8 +250,6 @@ func (s *StoreConfig) evaluateRetention() error {
 type AuthConfig struct {
 	// Tokens is a bearer-token whitelist; if non-empty, every RPC requires one.
 	Tokens []string `yaml:"tokens"`
-	// ClientCA, if set, accepts a verified mTLS client certificate in lieu of a token.
-	ClientCA string `yaml:"client_ca"`
 	// TLSCert/TLSKey serve the API over TLS; empty means plaintext (TLS terminated upstream).
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`

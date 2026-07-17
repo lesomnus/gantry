@@ -143,9 +143,9 @@
 
 1. **LICENSE** — 사용자가 직접 추가 예정 → 조치 불요.
 2. **bbolt 데이터 호환성** — 릴리즈 전이므로 기존 DB를 신경 쓰지 않음 → 조치 불요.
-3. **`serve.auth.client_ca` 제거** — 이건 store 접근용 클라이언트 인증이 아니라 gantry gRPC
-   **서버**가 들어오는 API 호출자를 mTLS로 인증하는 서버측 기능인데 미구현 dead code.
-   bearer + (reverse-proxy) TLS로 충분하므로 **config 필드·`auth.go` dead branch·문서를 제거**.
+3. **`serve.auth.client_ca` 제거** — ✅ 완료. 서버측 mTLS API 인증은 미구현 dead code였고,
+   bearer + (reverse-proxy) TLS로 충분하므로 config 필드·`auth.go` dead branch·문서를 제거.
+   (store-side TPM/`ca_cert` mTLS는 gantry가 client인 정당한 기능이라 유지.)
 4. **nomad/hday CLI arg 순서** — 4절에서 수정 완료(재확인함).
 5. **proto 버저닝** — 불요. v2가 필요하면 다른 패키지명으로 proto를 만들면 됨(사용자 결정).
 6. **버저닝/릴리즈** — 사용자가 직접 → 조치 불요.

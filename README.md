@@ -129,12 +129,8 @@ Every RPC is guarded by a bearer token (`authorization: Bearer <token>` request
 metadata) when `serve.auth.tokens` is set; with none set, auth is disabled
 (intended to sit behind a trusted network). The standard health and reflection
 services are always exempt — they expose liveness and the schema, not the data.
-
-> **mTLS is not currently enforced.** `serve.auth.client_ca` is parsed but the
-> server never requests or verifies a client certificate, so a bearer token is the
-> only working credential. Setting `client_ca` with no `tokens` turns the guard on
-> with nothing able to satisfy it, rejecting every non-exempt RPC — don't use it as
-> an auth gate.
+Serve TLS with `serve.auth.tls_cert`/`tls_key`, or terminate TLS/mTLS at a
+reverse proxy.
 
 A few behaviors worth knowing:
 
@@ -214,8 +210,6 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   ring (`cap` entries) of jobs, GC, pins, and manual ops, queryable via
   `EventService`.
 - `serve.auth` — `tokens` (env-expanded) and server `tls_cert`/`tls_key` for TLS.
-  (`client_ca` is parsed but mTLS client-cert auth is not enforced — see the note
-  under the API table.)
 - `otel` (top-level, not under `serve`) — the OpenTelemetry pipeline (mkot-style).
   Instruments are a no-op until an exporter is wired to a provider; the `otlp`
   exporter pushes metrics/traces/logs over OTLP/gRPC. Metric instruments:

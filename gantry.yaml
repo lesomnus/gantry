@@ -127,14 +127,12 @@ serve:
   shutdown_grace: "15s"
 
   # Authentication for every RPC (the standard health and reflection
-  # services are exempt). Clients send `authorization: Bearer <token>`.
+  # services are exempt). Clients send `authorization: Bearer <token>`. Serve the
+  # API over TLS with tls_cert/tls_key, or terminate TLS/mTLS at a reverse proxy.
   # auth:
   #   tokens: ["${GANTRY_TOKEN}"]
-  #   # NOTE: client_ca / mTLS client-cert auth is NOT currently enforced — the
-  #   # server never requests a client certificate, so a bearer token is the only
-  #   # working credential. Setting client_ca with no tokens locks out every
-  #   # non-exempt RPC. Use tokens (and terminate TLS/mTLS at a reverse proxy).
-  #   client_ca: "/etc/gantry/ca.pem"
+  #   tls_cert: "/etc/gantry/server.crt"
+  #   tls_key:  "/etc/gantry/server.key"
 
   # Allow a job's source/target to name a bare registry host not declared below.
   # Default false: only declared stores may be used. (A bare host that matches a
