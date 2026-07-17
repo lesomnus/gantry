@@ -2,7 +2,8 @@
 #
 #   remote (cr.hday.io) ──copy──▶ local (192.168.10.33:5000) ──pull──▶ docker daemons
 #
-# Run with: gantry serve --config gantry.hday.yaml
+# Run with: gantry --config gantry.hday.yaml serve
+# (the --config flag is a root flag, so it precedes the `serve` subcommand)
 #
 # `stores` is a top-level section (not nested under `serve`).
 stores:
@@ -23,7 +24,8 @@ stores:
       - { "**": "{{.CacheHost}}/{{.Repo}}" }
 
   # Docker daemons gantry triggers to pull the cached image.
-  # Load a cached image onto one of these with POST /v1/store/{name}/pull.
+  # Load a cached image onto one of these by adding a job whose `target` names
+  # the engine store: gantry.JobService/Add {ref, source, target}.
   dockerd-10-2:
     kind: docker
     address: "tcp://192.168.10.2:2376"    # daemon TLS port

@@ -69,7 +69,9 @@ job "gantry" {
       config {
         image = var.image
         ports = ["grpc"]
-        args  = ["serve", "--config", "${NOMAD_TASK_DIR}/gantry.yaml"]
+        # The --config flag must precede the subcommand (it is a persistent
+        # root flag), so it comes before "serve".
+        args  = ["--config", "${NOMAD_TASK_DIR}/gantry.yaml", "serve"]
 
         # For the unix-socket docker store below. Requires the client's
         # docker plugin to allow it (plugin "docker" { config { volumes {

@@ -52,11 +52,21 @@ stores:
     host: "registry.cache.local"
     insecure: true            # plain-HTTP / self-signed
     mode: "copy"              # copy = push blobs; proxy = read-through self-fill
+    # Registry credentials (optional). These apply to THIS store — copy-mode push
+    # and proxy-mode pull. In copy mode the UPSTREAM `source` pull authenticates
+    # via the docker keychain (~/.docker/config.json), not these fields.
+    # username: ""
+    # password: ""
     # Override the host engines are told to pull from when they reach this
     # registry by a different (trusted) name. e.g. push to an IP but have
     # daemons pull a name. Per-store pull_host wins.
     # downstream_host: "cache.cr.com"
     # source ref -> ref in this registry (ordered, first match wins; quote both).
+    # Template variables: .Ref .Full .CacheHost .Registry .Repo .Tag .Digest
+    # .Identifier. If the rendered ref omits a tag/digest, the source identifier is
+    # appended (so "{{.CacheHost}}/{{.Repo}}" keeps the original ":7"). ggcr
+    # normalizes Docker Hub to index.docker.io, so .Registry is "index.docker.io"
+    # (match with "index.docker.io/**" or just "**").
     rewrite:
       - { "**": "{{.CacheHost}}/{{.Repo}}" }
 
@@ -120,10 +130,15 @@ serve:
   # services are exempt). Clients send `authorization: Bearer <token>`.
   # auth:
   #   tokens: ["${GANTRY_TOKEN}"]
+  #   # NOTE: client_ca / mTLS client-cert auth is NOT currently enforced — the
+  #   # server never requests a client certificate, so a bearer token is the only
+  #   # working credential. Setting client_ca with no tokens locks out every
+  #   # non-exempt RPC. Use tokens (and terminate TLS/mTLS at a reverse proxy).
   #   client_ca: "/etc/gantry/ca.pem"
 
-  # Allow a job's from/to to name a bare registry host not declared below.
-  # Default false: only declared stores may be used.
+  # Allow a job's source/target to name a bare registry host not declared below.
+  # Default false: only declared stores may be used. (A bare host that matches a
+  # declared store's `host` still resolves even when this is false.)
   allow_unknown_stores: false
 
   # Per-store health probe (StoreService.Health). An engine store is probed
@@ -167,7 +182,9 @@ serve:
 
   # Source-image signature verification (Notary Project / notation). When enabled,
   # gantry verifies the `source` image's signature at job creation; a failure rejects
-  # the job (422) and nothing is created. Disabled unless `mode` is set.
+  # the job (gRPC FAILED_PRECONDITION) and nothing is created. Disabled unless a
+  # `mode` is set here or on a source store (stores.<name>.verify.mode) — a per-store
+  # mode enables verification for that registry even when this global mode is unset.
   #
   # Trust model (important): there is no OS/system-root fallback. You must supply
   # the CA cert(s) you trust in `trust_store`; without it the server refuses to

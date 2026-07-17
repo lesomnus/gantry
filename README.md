@@ -55,6 +55,25 @@ The cache-side reference is derived from the target store's `rewrite` rules
 (ordered `{glob: template}`, first match wins). `source`/`target` may be a
 declared store name or a bare registry host (when `allow_unknown_stores` is set).
 
+## Install
+
+Prebuilt multi-arch image (amd64/arm64), published to GHCR by CI:
+
+```sh
+docker pull ghcr.io/lesomnus/gantry:edge
+```
+
+Or build from source. The binary is static (CGO disabled), so the runtime image is
+`FROM scratch` (runs as UID 65532, entrypoint `/gantry`):
+
+```sh
+docker buildx bake build app   # cross-build binaries into ./dist, then the image
+go build ./...                 # or a plain host build
+```
+
+`gantry version` prints the build stamp (`GANTRY_VERSION` / `GANTRY_GIT_REV` /
+`GANTRY_GIT_DIRTY`).
+
 ## Quick start
 
 Server reflection is on (and public), so `grpcurl` works without proto files:
@@ -90,15 +109,15 @@ The contract lives in [proto/gantry](proto/gantry) (entities plus the merged
 service definitions) with generated Go stubs, ergonomic request constructors,
 and client/server wiring in the [pb](pb) package
 (`github.com/lesomnus/gantry/pb`). Entity services follow a resource-oriented
-CRUD shape — `Add` / `Get` / `Patch` / `Erase` returning the entity, `Ref`
-messages addressing it by key or unique index — with `List` and the custom
-actions merged on top. Write RPCs without a domain operation (stores are
+CRUD shape — `Add` / `Get` / `Patch` return the entity and `Erase` returns
+`Empty`, `Ref` messages addressing it by key or unique index — with `List` and
+the custom actions merged on top. Write RPCs without a domain operation (stores are
 declared in configuration; image records and audit events are written
 internally) answer `UNIMPLEMENTED`.
 
 | Service | RPCs | Notes |
 |---|---|---|
-| `JobService` | `Add` · `Get` · `List` · `Erase` · `Watch` · `Plan` · `Cancel` · `Retry` | `Add` coalesces onto an identical in-flight move (the `gantry-coalesced` response trailer tells which) and honors an `idempotency-key` request metadata; `Watch` streams job snapshots until terminal; `Plan` is dry-run admission; `Erase` evicts (cancels first when running). Verification rejections are `FAILED_PRECONDITION`, a full queue is `RESOURCE_EXHAUSTED`. |
+| `JobService` | `Add` · `Get` · `List` · `Erase` · `Watch` · `Plan` · `Cancel` · `Retry` | `Add` coalesces onto an identical in-flight move (a `gantry-coalesced` response trailer flags **whether** the submit joined one, not which) and honors an `idempotency-key` request metadata (a repeat with the same key replays the remembered job even if the body differs, until the record is swept); `Watch` streams job snapshots until terminal; `Plan` is dry-run admission; `Erase` evicts (cancels first when running). Jobs carry a free-form `labels` map (filterable on `List`). Verification rejections are `FAILED_PRECONDITION`, a full queue is `RESOURCE_EXHAUSTED`. |
 | `StoreService` | `Get` · `List` · `Pull` · `Remove` · `Health` · `GcStatus` · `GcPlan` · `GcApply` | Stores are declared in config. `Pull`/`Remove` drive one engine daemon (and keep the retention index in sync). The GC RPCs need the store's `retention`; `GcPlan` dry-runs, `GcApply` executes, both take a one-shot policy override. `GcStatus` includes the usage-watcher health. |
 | `ImageService` | `Get` · `List` · `Erase` | The retention inventory. `List` filters by `repo`/`ref`/`pinned`/`in_use` (the live daemon set) and carries the untagged reap clocks on unfiltered lists; `Erase` purges an orphan record without touching the engine. |
 | `PinService` | `Add` · `Get` · `List` · `Erase` | GC exemptions: an exact ref or a doublestar `pattern`. `Add` upserts; `Erase` is idempotent. |
@@ -106,19 +125,52 @@ internally) answer `UNIMPLEMENTED`.
 | `VerifyService` | `Describe` · `Check` · `Reload` | Trust introspection (never key material), preflight ("would this gantry accept the image"), and truststore hot-reload for CA rotation. |
 | `grpc.health.v1.Health` | `Check` · `Watch` | Liveness and readiness: the overall status follows aggregate health over the gated stores (`serve.health.ready_stores`). Public. |
 
-Every RPC is guarded by bearer token (`authorization: Bearer <token>` request
-metadata) and/or mTLS when configured (see `serve.auth`); with neither set,
-auth is disabled (intended to sit behind a trusted network). The standard
-health and reflection services are always exempt — they expose liveness and
-the schema, not the data.
+Every RPC is guarded by a bearer token (`authorization: Bearer <token>` request
+metadata) when `serve.auth.tokens` is set; with none set, auth is disabled
+(intended to sit behind a trusted network). The standard health and reflection
+services are always exempt — they expose liveness and the schema, not the data.
+
+> **mTLS is not currently enforced.** `serve.auth.client_ca` is parsed but the
+> server never requests or verifies a client certificate, so a bearer token is the
+> only working credential. Setting `client_ca` with no `tokens` turns the guard on
+> with nothing able to satisfy it, rejecting every non-exempt RPC — don't use it as
+> an auth gate.
+
+A few behaviors worth knowing:
+
+- **Verification & proxy** — a verifying job refuses a `proxy`-mode destination
+  (the proxy cache never learns the digest to anchor).
+- **Verbatim commits** — a digest-ref registry copy, and any job with
+  `copy_referrers`, commit the source index byte-for-byte, so they refuse platform
+  narrowing (`platforms` must be empty). `copy_referrers` is a per-job `Add` flag,
+  on by default when the job verified a signature and platforms weren't narrowed.
+- **Listing** — `List` RPCs paginate with `page_size` / `page_token`;
+  `EventService.List` returns at most 1000 events (default 100), older ones
+  reachable only by `Get`.
+- **Stable ids** — `Image` and `Pin` ids are deterministic UUIDs derived from
+  `(store, ref)` / `(store, value)`, so they survive restarts.
+- **Plan** — `JobService.Plan` returns the resolved plan: the rewritten target ref,
+  chosen platforms, `as` names, the `copy_referrers` default, the verification
+  outcome, and which in-flight job an identical `Add` would coalesce onto.
 
 ## Configuration
+
+gantry reads `--config <file>` (a root flag, so it precedes the subcommand),
+defaulting to `./gantry.yaml` then `./gantry.yml`, and falling back to built-in
+defaults when none exists. `gantry config` prints the effective configuration with
+defaults applied. Example deployments: [gantry.nomad.hcl](gantry.nomad.hcl) (Nomad)
+and [gantry.hday.yaml](gantry.hday.yaml) (a lab config); [docker-compose.yaml](docker-compose.yaml)
+is a smoke test.
 
 See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
 
 - `stores` (top-level) — the unified store map (keyed by name). `kind: oci` (`host`,
-  `mode`, `insecure`, `rewrite`, `downstream_host`) or `kind: docker`/`containerd`
-  (`address`, `namespace`, `pull_host`).
+  `mode`, `insecure`, `rewrite`, `downstream_host`, `username`/`password`) or
+  `kind: docker`/`containerd` (`address`, `namespace`, `pull_host`). Any store may
+  also carry outbound TLS: `ca_cert` (verify a private-CA server, usable on its own)
+  and TPM-sealed client mTLS (`tpm`/`tpm_handle`/`tpm_cert`, **ECC keys only**) —
+  gantry presents the client cert and signs the handshake with the TPM-held key,
+  which never leaves the device. See [gantry.yaml](gantry.yaml) for the annotated forms.
 - `worker` (top-level) — `max_concurrent_jobs`/`max_concurrent_layers` pool sizes.
 - `serve.addr` — the gRPC listen address.
 - `serve.allow_unknown_stores` — let a job name a bare registry host not declared
@@ -130,9 +182,10 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
 - `serve.verify` — source-image signature verification (Notary Project / notation)
   at job creation. `mode` (`off` | `verify-if-present` | `require`), a `trust_store`
   of CA certs (required when enabled — no OS-root fallback; missing ⇒ the server
-  refuses to start), an optional notation `trust_policy`, and `level`. A verified
-  image is pinned to its digest for the copy/pull. Per-source-registry `verify.mode`
-  overrides the global default.
+  refuses to start), an optional notation `trust_policy` (must reference exactly one
+  `ca:<name>` trust store, else startup fails), and `level`. A verified image is
+  pinned to its digest for the copy/pull. Setting `verify.mode` on a source `oci`
+  store enables verification for that registry even when the global mode is unset.
 - `stores.<name>.retention` — image GC, configured **per engine store** (there is
   no global policy). Each store has its own `path` (usage index), scheduler
   cadence, `grace`, and per-repo `rules`. gantry tracks last-used time from the
@@ -160,16 +213,22 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
 - `serve.events` — the audit log (disabled unless `path` is set): a bounded bbolt
   ring (`cap` entries) of jobs, GC, pins, and manual ops, queryable via
   `EventService`.
-- `serve.auth` — `tokens` (env-expanded), `client_ca`, and server `tls_cert`/`tls_key`.
+- `serve.auth` — `tokens` (env-expanded) and server `tls_cert`/`tls_key` for TLS.
+  (`client_ca` is parsed but mTLS client-cert auth is not enforced — see the note
+  under the API table.)
 - `otel` (top-level, not under `serve`) — the OpenTelemetry pipeline (mkot-style).
   Instruments are a no-op until an exporter is wired to a provider; the `otlp`
-  exporter pushes metrics/traces/logs over OTLP/gRPC.
+  exporter pushes metrics/traces/logs over OTLP/gRPC. Metric instruments:
+  `gantry.bytes`, `gantry.job.duration`, `gantry.jobs` (by state),
+  `gantry.jobs.active`, `gantry.queue.depth` / `gantry.queue.capacity`,
+  `gantry.health.probe.duration`, and per-engine `gantry.retention.records` /
+  `gantry.retention.pins` / `gantry.retention.untagged`.
 
 ## Development
 
-The devcontainer runs gantry against a Docker-in-Docker daemon (and its bundled
-containerd). Test layout, the live integration tests, the full job loop, and the
-insecure-registry constraints are documented in
+The devcontainer runs gantry against a Docker-in-Docker daemon and a dedicated
+containerd sidecar. Test layout, the live integration tests, the full job loop, and
+the insecure-registry constraints are documented in
 [docs/test-environment.md](docs/test-environment.md).
 
 ```sh

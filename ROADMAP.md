@@ -131,63 +131,12 @@ audit가 `missing`/`partial`로 판정한 항목. 우선순위·성격별로 분
 
 ---
 
-## 4. 문서 갭 (v1 감사 결과)
+## 4. 문서 갭 (v1 감사 결과) — ✅ 해결 (2026-07-17)
 
-### 4a. 문서가 **틀린** 것 (릴리즈 전 수정)
-
-| 위치 | 문서가 말하는 것 | 실제 | 조치 |
-|---|---|---|---|
-| README API 표 | 엔티티 서비스 `Erase`가 엔티티 반환 | 전 서비스에서 `google.protobuf.Empty` 반환 (Add/Get/Patch만 엔티티) | 문구 수정 |
-| README API 표 | `gantry-coalesced` 트레일러가 "어느 잡에 합류했는지" 알림 | 합류 **여부**(true/false)만. 합류 대상은 `Plan`의 `Coalesces`가 유일 | 문구 수정 |
-| README auth / gantry.yaml / config 주석 | `serve.auth.client_ca`로 mTLS 클라이언트 인증 | **죽은 기능** — CA를 서버 TLS에 안 싣고 클라이언트 인증서를 요청조차 안 함. client_ca만 설정 시 모든 RPC가 Unauthenticated로 잠김 | 구현하거나 키·문서 제거 (5a 참조) |
-| README Development | devcontainer가 dind의 "번들 containerd" 사용 | containerd는 이제 전용 사이드카 서비스 | 문구 수정 |
-| gantry.yaml | `allow_unknown_stores`가 job의 "from/to" 적용 | 필드명은 `source`/`target` (9bc76ff) | 용어 수정 |
-| gantry.yaml | verify 실패 시 "422" 거부 | gRPC `FAILED_PRECONDITION` (422는 삭제된 HTTP API 잔재) | 문구 수정 |
-| gantry.yaml | `serve.verify.mode` 미설정이면 verify 비활성 | per-store `verify.mode`만 설정해도 활성화(global은 default) | 문구 수정 |
-| docs/test-environment.md | `Distributor` fake-target 테스트 / `worker.platforms` / `targets` 스키마 / transfer `"pulled"` 상태 / `downstream_host` 예시 | 전부 구식 — 제거·개명된 심볼/키/상태 (platforms는 per-job, pulled는 `DONE`) | 예시·서술 갱신 |
-| gantry.nomad.hcl / gantry.hday.yaml | `gantry serve --config X` 실행 안내 | 플래그가 서브커맨드 앞에 와야 함 → `gantry --config X serve` (안 그러면 `unknown flag`로 즉사) | args 순서 수정 (5a 참조) |
-| gantry.hday.yaml 주석 | 캐시 이미지 로드 = `POST /v1/store/{name}/pull` | HTTP API 삭제됨, 지금은 gRPC `JobService.Add` | 주석 수정 |
-| ui/README.md · ui/CLAUDE.md | 삭제할 demo 파일 존재 / `vp test` 실행 대상 있음 | demo 파일 이미 제거됨, 테스트 파일 0개 | 스캐폴드 문서 정리 |
-
-### 4b. 구현됐지만 **미문서화** (문서 추가)
-
-사용자가 발견조차 못 하는 것들 (중요도순):
-
-- **레지스트리 인증** — oci store `username`/`password`와 docker keychain 폴백이 문서
-  전무. 크리덴셜 설정법을 알 방법이 없다.
-- **설치/빌드** — Dockerfile, `docker buildx bake`, `ghcr.io/lesomnus/gantry` 이미지와
-  태그 체계가 문서 전무. README에 설치 섹션 자체가 없다.
-- **메트릭 카탈로그** — `gantry.bytes` · `gantry.job.duration` · `gantry.jobs.active` ·
-  큐 depth/capacity 게이지 · `gantry.retention.records/pins/untagged` 등 계측 이름이
-  문서 전무. OTLP 켜는 법만 있고 뭘 수집하는지 없어 대시보드를 만들 수 없다.
-- **TPM mTLS** — README에 TPM이라는 단어 자체가 없음(gantry.yaml 주석에만). docker 엔진에
-  TPM 클라이언트 인증서로 접속하는 기능(hday 실사용)과 ECC 전용 제약도 미문서.
-- **`ca_cert`** — 사설 CA 서버 검증(TPM 없이도 사용 가능)이 gantry.yaml 주석에만.
-- **job `labels`** — 최근 추가된 Add 필드와 List 필터, 문서 0건.
-- **CLI** — `--config` 플래그와 기본 탐색 경로(`./gantry.yaml`, `./gantry.yml`),
-  `config`/`version` 서브커맨드, `greet`(스캐폴드).
-
-동작이 문서와 다르게 느껴질 **함정**들 (문서에 명시 필요):
-
-- verify 활성 시 **proxy 모드 목적지 거부** — proxy 캐시 + verify 조합은 전부 거부됨.
-- verbatim(digest-ref / `copy_referrers`) 잡의 **`platforms` 지정 거부**, `copy_referrers`가
-  per-job 플래그라는 것과 자동 기본값(검증됐고 platforms 안 좁혔을 때 on) 규칙.
-- coalesce의 dedup key 정의(`ref+platforms+source+target+as`), per-caller 핸들의 Cancel
-  의미론, idempotency-key의 리플레이 규칙과 `job_ttl` 만료.
-- `allow_unknown_stores=false`여도 bare host가 선언된 store의 `host`와 일치하면 resolve됨.
-- EventService `List`의 하드 1000건 윈도우(기본 cap 10000이면 그 이상은 `Get(seq)`로만).
-- List RPC들의 `page_size`/`page_token` 페이지네이션, Image/Pin id가 `(store, ref)`에서
-  재유도되는 결정적 UUID라는 점.
-- rewrite 템플릿 변수 전체 목록(`Ref`/`Full`/`CacheHost`/`Registry`/`Repo`/`Tag`/`Digest`/
-  `Identifier`) — 예시엔 `{{.CacheHost}}/{{.Repo}}`만.
-- `Plan`(dry-run)이 반환하는 payload(rewrite된 target ref, resolved platforms, as 이름,
-  copy_referrers 기본값, 검증 결과, 합류할 활성 잡).
-- 사용자 지정 `trust_policy`는 정확히 하나의 `ca:<name>` trust store를 참조해야 함
-  (multi-store/signingAuthority는 기동 실패).
-
-배포 예시·UI:
-- nomad/compose/hday 배포 예시가 어느 문서에서도 참조되지 않음(4a의 CLI arg 순서 버그와 중복).
-- ui/는 아직 stock TanStack 스캐폴드 — v1 스토리에서의 위치(빌드/배포/제외)를 명시해야 함.
+문서↔구현 대조에서 나온 문서 오류(4a)와 미문서화(4b)는 문서 전용 패스로 모두 반영했다
+(코드 로직 변경 없음; `README.md` · `gantry.yaml` · `docs/test-environment.md` ·
+`gantry.nomad.hcl` · `gantry.hday.yaml` 수정). 유일한 잔여는 `client_ca`/mTLS로, 문서는
+"미작동"으로 정직하게 고쳤지만 구현할지 키·코드를 제거할지는 아래 5a-3 결정 사항이다.
 
 ---
 
@@ -228,7 +177,7 @@ audit가 `missing`/`partial`로 판정한 항목. 우선순위·성격별로 분
 - **deps** — 미태깅 pseudo-version 8개(lesomnus/{mkot,otx,xli,z} 계열 + protobuf-orm +
   google.golang.org/protobuf pre-release 커밋). 자체 라이브러리 태깅 + protobuf 정식 버전.
 - **정리** — `greet` 서브커맨드/설정 블록(스캐폴드), 한국어 스크래치 `task.md`(→ 본 통합으로
-  삭제), stock `ui/` 스캐폴드(빌드·배포·문서 없음 — 완성하거나 v1에서 제외 선언).
+  삭제).
 
 ---
 

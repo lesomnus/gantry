@@ -72,10 +72,12 @@ go test -race ./...
 ```
 
 - **단위 테스트**(데몬 불필요): config round-trip, rewrite 규칙, Store 동시성,
-  Source copy/proxy(in-memory registry), Warmer, Distributor(fake target) 등.
+  Source copy/proxy(in-memory registry), Warmer, 엔진 목적지(`internal/warm/dest`,
+  fake target) 등.
 - **라이브 통합 테스트**(자기-skip): 실데몬이 있으면 돌고 없으면 skip.
   - `internal/down/docker_integration_test.go` → `tcp://docker:2375`에 Ping 후
-    `hello-world` 실제 pull.
+    `alpine:latest` 실제 pull (docker 29의 공유 containerd 콘텐츠 스토어에서
+    containerd 테스트의 busybox와 겹치지 않도록 다른 이미지 사용).
   - `internal/down/containerd_integration_test.go` → `CONTAINERD_ADDRESS` 소켓이
     있으면 `CONTAINERD_NAMESPACE`(기본 `gantry`)로 실제 pull + digest-anchored pull
     (retag 후 **요청되지 않은** digest-named 레코드가 안 남는지까지 검증) +
@@ -117,9 +119,11 @@ stores:
   cache:       { kind: "oci", host: "127.0.0.1:5000", insecure: true, mode: "copy" }
   dind-docker: { kind: "docker",     address: "tcp://docker:2375" }
   dind-ctr:    { kind: "containerd", address: "/run/containerd/containerd.sock", namespace: "gantry" }
-worker:
-  platforms: ["linux/amd64"]
 ```
+
+> 플랫폼은 job별로 정한다(아래 Add 요청의 `platforms`) — 워커 전역 설정은 없다.
+> 생략하면 registry copy는 소스의 모든 플랫폼을, 엔진 target은 데몬 호스트의
+> 플랫폼을 받는다.
 
 ### 3. job + 확인
 
@@ -128,17 +132,23 @@ go run . --config gantry-e2e.yaml serve &
 
 grpcurl -plaintext 127.0.0.1:18080 gantry.StoreService/List   # 3 stores, capabilities, ready
 
-# 사전에 어디에도 없는 이미지로(content-store 캐시 혼동 방지)
-ID=$(grpcurl -plaintext -d '{"ref":"busybox:latest","source":{"name":"docker.io"},"target":{"name":"cache"}}' \
-       127.0.0.1:18080 gantry.JobService/Add \
-     | sed -n 's/.*"id": "\([^"]*\)".*/\1/p')
+add() { grpcurl -plaintext -d "$1" 127.0.0.1:18080 gantry.JobService/Add \
+          | sed -n 's/.*"id": "\([^"]*\)".*/\1/p'; }
+get() { grpcurl -plaintext -d "{\"ref\":{\"id\":\"$1\"}}" 127.0.0.1:18080 gantry.JobService/Get; }
 
-grpcurl -plaintext -d "{\"ref\":{\"id\":\"$ID\"}}" 127.0.0.1:18080 gantry.JobService/Get  # transfers[]
+# 1) 캐시로 복사 (registry copy). 사전에 어디에도 없는 이미지로(콘텐츠 스토어 혼동 방지).
+CP=$(add '{"ref":"busybox:latest","source":{"name":"docker.io"},"target":{"name":"cache"},"platforms":["linux/amd64"]}')
+get "$CP"   # transfers[]: 캐시 복사
+
+# 2) 캐시에서 각 엔진으로 pull. job 하나 = target 하나이므로 엔진마다 별도 job.
+D=$(add '{"ref":"busybox:latest","source":{"name":"cache"},"target":{"name":"dind-docker"}}')
+C=$(add '{"ref":"busybox:latest","source":{"name":"cache"},"target":{"name":"dind-ctr"}}')
+get "$D"; get "$C"
 ```
 
-기대 결과: `state=done`, cache transfer는 `bytes_done==bytes_total`, `dind-docker`·`dind-ctr` 모두
-`pulled`. registry(`curl http://127.0.0.1:5000/v2/library/busybox/tags/list`)와
-`docker images`에 적재 확인.
+기대 결과: 세 job 모두 `state=done`, 각 job의 transfer가 `TRANSFER_STATE_DONE`으로 끝난다
+(캐시 복사는 `bytes_done==bytes_total`). registry
+(`curl http://127.0.0.1:5000/v2/library/busybox/tags/list`)와 `docker images`에 적재 확인.
 
 ### 4. 정리
 
@@ -167,16 +177,20 @@ gantry는 다운스트림의 insecure 정책을 강제하지 않는다(split-bra
 
 ### downstream 호스트 오버라이드
 
-gantry가 **푸시한 주소**와 데몬이 **pull하는 주소**를 분리할 수 있다. `registry.host`로
-cache의 실제 위치에 push하되, 데몬에게는 자기가 신뢰하도록 설정해 둔 다른 이름으로 pull하게
+gantry가 **푸시한 주소**와 데몬이 **pull하는 주소**를 분리할 수 있다. cache oci 스토어의
+`host`로 실제 위치에 push하되, 데몬에게는 자기가 신뢰하도록 설정해 둔 다른 이름으로 pull하게
 시키는 것:
 
 ```yaml
-registry:
-  host: "192.168.0.22:5000"     # gantry가 push/read 하는 실제 주소
-  downstream_host: "cache.cr.com"  # 데몬이 pull 하는 주소(전역 기본)
-targets:
-  - { name: "k3s", kind: "containerd", address: "...", pull_host: "cache.cr.com:5000" }  # per-target override
+stores:
+  cache:
+    kind: "oci"
+    host: "192.168.0.22:5000"        # gantry가 push/read 하는 실제 주소
+    downstream_host: "cache.cr.com"  # 데몬이 pull 하는 주소(이 registry의 기본)
+  k3s:
+    kind: "containerd"
+    address: "..."
+    pull_host: "cache.cr.com:5000"   # per-store override (downstream_host를 이김)
 ```
 
 이러면 gantry는 `192.168.0.22:5000/library/redis:7`로 push하지만 데몬에는
