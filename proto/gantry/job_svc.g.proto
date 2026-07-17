@@ -34,6 +34,11 @@ service JobService {
   rpc Retry(JobRef) returns (Job);
 }
 
+// JobAddRequest submits a move. Add coalesces onto an identical in-flight job;
+// the dedup key is (ref, platforms, source, target, as). A tag is treated as
+// stable for the life of an active job, so a tag re-pushed mid-job does not
+// start a second move until the first finishes — and with digest pinning the
+// first job carries the digest resolved at admission (the pre-repush image).
 message JobAddRequest {
   string id = 1;
   map<string, string> labels = 7;

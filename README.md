@@ -140,6 +140,11 @@ A few behaviors worth knowing:
   `copy_referrers`, commit the source index byte-for-byte, so they refuse platform
   narrowing (`platforms` must be empty). `copy_referrers` is a per-job `Add` flag,
   on by default when the job verified a signature and platforms weren't narrowed.
+- **Dedup & mutable tags** — coalescing keys on `(ref, platforms, source, target,
+  as)` and treats a tag as stable for the life of an active job: a tag re-pushed
+  mid-job does not start a second copy until the first finishes, and with digest
+  pinning the first job carries the digest resolved at admission (the pre-repush
+  image).
 - **Listing** — `List` RPCs paginate with `page_size` / `page_token`;
   `EventService.List` returns at most 1000 events (default 100), older ones
   reachable only by `Get`.

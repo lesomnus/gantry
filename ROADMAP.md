@@ -123,8 +123,8 @@
   렌더링) — mkot main에서 직접 작업, 단계별 커밋(사용자 위임).
 
 ### 문서화
-- **mutable-tag dedup 주의사항** — README/proto 주석에 명시. dedup은 active job 동안 태그를
-  stable로 취급하므로, mid-job에 재push된 태그는 첫 job 종료까지 두 번째 copy를 안 띄운다.
+- **mutable-tag dedup 주의사항** — ✅ 완료. README "Behavior notes"와 `JobAddRequest` proto
+  주석에 dedup key와 mutable-tag 주의사항 명시.
 
 ---
 
