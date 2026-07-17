@@ -147,11 +147,12 @@ type ScheduleStatus struct {
 
 // RuleStatus mirrors a per-repo rule for the API; unset fields are omitted.
 type RuleStatus struct {
-	Repo   string   `json:"repo"`
-	MaxAge string   `json:"max_age,omitempty"`
-	KeepN  *int     `json:"keep_n,omitempty"`
-	MaxN   *int     `json:"max_n,omitempty"`
-	Pins   []string `json:"pins,omitempty"`
+	Repo    string   `json:"repo"`
+	MaxAge  string   `json:"max_age,omitempty"`
+	KeepN   *int     `json:"keep_n,omitempty"`
+	MaxN    *int     `json:"max_n,omitempty"`
+	MaxIdle string   `json:"max_idle,omitempty"`
+	Pins    []string `json:"pins,omitempty"`
 }
 
 // Status snapshots each store's scheduler state and cheap index counts. It never
@@ -194,6 +195,9 @@ func ruleStatuses(rules []Rule) []RuleStatus {
 		rs := RuleStatus{Repo: r.Repo, KeepN: r.KeepN, MaxN: r.MaxN, Pins: r.Pins}
 		if r.MaxAge != nil {
 			rs.MaxAge = r.MaxAge.String()
+		}
+		if r.MaxIdle != nil {
+			rs.MaxIdle = r.MaxIdle.String()
 		}
 		out = append(out, rs)
 	}
@@ -427,7 +431,7 @@ func (m *Manager) Apply(ctx context.Context, engine string, dec Decision) (Apply
 
 // blanketRules wraps a Policy as a single catch-all rule applied to every repo.
 func blanketRules(p Policy) []Rule {
-	return []Rule{{Repo: "**", MaxAge: &p.MaxAge, KeepN: &p.KeepN, MaxN: &p.MaxN, Pins: p.Pins}}
+	return []Rule{{Repo: "**", MaxAge: &p.MaxAge, KeepN: &p.KeepN, MaxN: &p.MaxN, MaxIdle: &p.MaxIdle, Pins: p.Pins}}
 }
 
 // plan evaluates the rules plus, when the reaper is on, the untagged axis. A

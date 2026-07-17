@@ -192,7 +192,10 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   cadence, `grace`, and per-repo `rules`. gantry tracks last-used time from the
   engine's container events, then keeps in-use, pinned, the `keep_n` most-recent
   tags per repo, and anything newer than `max_age`; `max_n` caps the tags kept per
-  repo (oldest beyond the cap deleted even before `max_age`). Each rule's `repo`
+  repo (oldest beyond the cap deleted even before `max_age`). `max_idle` is a hard
+  cap — an image unused longer than it is deleted regardless of `keep_n`/`max_n`
+  (only in-use and pins protect it), so a settled-but-ancient tag doesn't linger.
+  Each rule's `repo`
   is a doublestar pattern; for a repo the matching rules cascade field-by-field
   (the longest-prefix match wins each field, pins are unioned), and a repo that
   matches no rule is left untouched. The scheduler is adaptive — it idles up to

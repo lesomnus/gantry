@@ -94,9 +94,11 @@ stores:
   #     # matching rules. A repo matching no rule is left unmanaged (never GC'd).
   #     rules:
   #       - repo: "**"                       # catch-all defaults (least specific)
-  #         max_age: "168h"                  # delete if unused for 7d
+  #         max_age: "168h"                  # delete if unused for 7d (keep_n protects)
   #         keep_n: 2                        # keep the 2 most-recent tags per repo
   #         max_n: 10                        # cap at 10 tags per repo (oldest deleted)
+  #         max_idle: "2160h"                # HARD cap: delete if unused 90d even if
+  #                                          # in keep_n (only in-use/pins protect)
   #       - repo: "cache.cr.com/prod/**"     # prod: overrides only what it sets
   #         max_age: "2160h"                 # 90d; keep_n/max_n inherited from **
   #         pins: ["*:stable"]               # never GC stable tags here
@@ -157,11 +159,13 @@ serve:
   #   2. pinned         - matches a rule `pins` entry or an API pin (exact ref, or
   #                       a doublestar pattern tried against the full ref,
   #                       name:tag, and the bare tag)
-  #   3. max_n cap      - keep only the max_n most-recent tags in the repo; the
+  #   3. idle_exceeded  - unused longer than `max_idle`: deleted regardless of
+  #                       keep_n/max_n (a hard cap; only in_use/pinned protect)
+  #   4. max_n cap      - keep only the max_n most-recent tags in the repo; the
   #                       oldest beyond the cap are deleted (reason max_n_exceeded)
   #                       even if still within max_age
-  #   4. keep_n_recent  - the keep_n most-recently-used tags
-  #   5. within_max_age - last used more recently than `max_age`
+  #   5. keep_n_recent  - the keep_n most-recently-used tags
+  #   6. within_max_age - last used more recently than `max_age`
   # A repo matching no rule is left unmanaged (never deleted); anything else is
   # deleted (held only by the store's post-startup `grace` window).
 

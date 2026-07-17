@@ -173,6 +173,9 @@ type RetentionRule struct {
 	// MaxN caps the tags kept: the oldest beyond the cap are deleted even before
 	// max_age. When both are set MaxN must be >= KeepN.
 	MaxN *int `yaml:"max_n"`
+	// MaxIdle is a hard idle cap: an image unused longer than this is deleted
+	// regardless of keep_n/max_n (only in-use and pins protect it). Zero disables.
+	MaxIdle *Duration `yaml:"max_idle"`
 	// Pins are never GC'd within a matching repo: exact refs or doublestar
 	// patterns matched against the full ref, its name:tag short form, and the tag.
 	Pins []string `yaml:"pins"`

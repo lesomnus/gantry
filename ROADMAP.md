@@ -96,9 +96,9 @@
 2절 결정 + 감사 backlog. 성격별.
 
 ### retention (2절 결정)
-- **하드 idle-age 삭제** — keep_n과 무관하게 M시간 이상 미사용이면 삭제(정책에 idle-age
-  상한 knob 추가; 평가 순서에서 age가 keep_n_recent를 이기도록). disk-pressure 기반 추가
-  삭제는 선택 후속.
+- **하드 idle-age 삭제** — ✅ 완료. 정책에 `max_idle` knob 추가: 평가 순서 in_use/pinned
+  다음(keep_n/max_n 이전)에서 idle > max_idle이면 삭제(`idle_exceeded`). disk-pressure 기반
+  추가 삭제는 선택 후속(미착수).
 - **keep-N/max-N digest 단위 카운트** — 태그가 아닌 `Record.Digest` 기준으로 센다
   (현재 태그 단위).
 - **in-use 주기 heartbeat** — 저부하 주기 스캔으로 in-use 이미지의 LastUsed=now 갱신.

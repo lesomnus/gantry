@@ -85,7 +85,7 @@ func resolvePolicy(repo string, rules []Rule) (p Policy, managed bool) {
 		return moreSpecific(matched[i].Repo, matched[j].Repo)
 	})
 
-	var age *time.Duration
+	var age, idle *time.Duration
 	var keepN, maxN *int
 	for _, r := range matched { // most specific first; first setter of each field wins
 		if age == nil {
@@ -97,6 +97,9 @@ func resolvePolicy(repo string, rules []Rule) (p Policy, managed bool) {
 		if maxN == nil {
 			maxN = r.MaxN
 		}
+		if idle == nil {
+			idle = r.MaxIdle
+		}
 		p.Pins = append(p.Pins, r.Pins...)
 	}
 	if age != nil {
@@ -107,6 +110,9 @@ func resolvePolicy(repo string, rules []Rule) (p Policy, managed bool) {
 	}
 	if maxN != nil {
 		p.MaxN = *maxN
+	}
+	if idle != nil {
+		p.MaxIdle = *idle
 	}
 	return p, true
 }
@@ -162,10 +168,12 @@ func isWildcardMeta(c rune) bool {
 // Within a managed repo the protection order is:
 //  1. in-use   — referenced by a live container (inUse holds refs and digests)
 //  2. pinned   — Record.Pinned, or a resolved pin pattern matches
-//  3. max-N    — keep only the MaxN most-recently-used tags; delete the oldest
+//  3. idle     — delete those idle longer than MaxIdle regardless of keep-N/max-N
+//     (a hard cap; deferred during the grace window)
+//  4. max-N    — keep only the MaxN most-recently-used tags; delete the oldest
 //     beyond the cap even if not yet stale (deferred during the grace window)
-//  4. keep-N   — the KeepN most-recently-used tags
-//  5. age      — delete those whose last-used age exceeds MaxAge (deferred during
+//  5. keep-N   — the KeepN most-recently-used tags
+//  6. age      — delete those whose last-used age exceeds MaxAge (deferred during
 //     the grace window)
 func Evaluate(now time.Time, recs []Record, inUse map[string]bool, rules []Rule, graceUntil time.Time) Decision {
 	var dec Decision
@@ -310,6 +318,34 @@ func evalGroup(now time.Time, group []Record, inUse map[string]bool, p Policy, g
 		default:
 			remaining = append(remaining, r)
 		}
+	}
+
+	// Hard idle cap: an image unused longer than MaxIdle is deleted regardless of
+	// keep-N / max-N — only in-use and pins (checked above) protect it — so a
+	// settled-but-ancient tag does not linger forever. Deferred during the grace
+	// window like age GC.
+	if p.MaxIdle > 0 {
+		kept := remaining[:0]
+		for _, r := range remaining {
+			idleOut := r.effLastUsed().Add(p.MaxIdle)
+			deletableAt := idleOut
+			if graceUntil.After(deletableAt) {
+				deletableAt = graceUntil
+			}
+			if !now.Before(deletableAt) {
+				dec.Delete = append(dec.Delete, Candidate{
+					Ref: r.Ref, Digest: r.Digest, LastUsed: r.effLastUsed(), Reason: "idle_exceeded",
+				})
+				continue
+			}
+			kept = append(kept, r)
+			if !now.Before(idleOut) { // would idle out, but grace holds it
+				if dec.NextAgeOut.IsZero() || deletableAt.Before(dec.NextAgeOut) {
+					dec.NextAgeOut = deletableAt
+				}
+			}
+		}
+		remaining = kept
 	}
 
 	// max-N cap: keep at most MaxN tags, deleting the oldest beyond the cap

@@ -15,7 +15,7 @@ func rec(ref, repo string, lastUsed time.Time) Record {
 // single-policy tests exercise evalGroup unchanged. All fields are set explicitly
 // so the cascade reproduces the Policy exactly.
 func rules1(p Policy) []Rule {
-	return []Rule{{Repo: "**", MaxAge: &p.MaxAge, KeepN: &p.KeepN, MaxN: &p.MaxN, Pins: p.Pins}}
+	return []Rule{{Repo: "**", MaxAge: &p.MaxAge, KeepN: &p.KeepN, MaxN: &p.MaxN, MaxIdle: &p.MaxIdle, Pins: p.Pins}}
 }
 
 func decided(d Decision) (del map[string]string, keep map[string]string) {
@@ -124,6 +124,24 @@ func TestEvaluateMaxAgeZeroDisablesAgeGC(t *testing.T) {
 	del, keep := decided(d)
 	if len(del) != 0 || keep["r/a:old"] != "age_gc_disabled" {
 		t.Errorf("max_age=0 should keep all: del=%v keep=%v", del, keep)
+	}
+}
+
+func TestEvaluateMaxIdleBeatsKeepN(t *testing.T) {
+	now := time.Now()
+	mk := func(tag string, idleHours int) Record {
+		return rec("r/a:"+tag, "r/a", now.Add(-time.Duration(idleHours)*time.Hour))
+	}
+	// keep_n=2 would protect fresh+mid, but max_idle=50h is a hard cap that
+	// deletes anything idle > 50h regardless of keep-N.
+	recs := []Record{mk("fresh", 10), mk("mid", 100), mk("old", 200)}
+	d := Evaluate(now, recs, nil, rules1(Policy{KeepN: 2, MaxIdle: 50 * time.Hour}), time.Time{})
+	del, keep := decided(d)
+	if del["r/a:mid"] != "idle_exceeded" || del["r/a:old"] != "idle_exceeded" {
+		t.Errorf("mid+old should be idle_exceeded despite keep_n=2: del=%v", del)
+	}
+	if keep["r/a:fresh"] == "" {
+		t.Errorf("fresh (idle 10h < 50h) must be kept: keep=%v", keep)
 	}
 }
 

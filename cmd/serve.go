@@ -65,11 +65,12 @@ func NewCmdServe() *xli.Command {
 					rules := make([]retention.Rule, len(rc.Rules))
 					for i, rr := range rc.Rules {
 						rules[i] = retention.Rule{
-							Repo:   rr.Repo,
-							MaxAge: (*time.Duration)(rr.MaxAge),
-							KeepN:  rr.KeepN,
-							MaxN:   rr.MaxN,
-							Pins:   rr.Pins,
+							Repo:    rr.Repo,
+							MaxAge:  (*time.Duration)(rr.MaxAge),
+							KeepN:   rr.KeepN,
+							MaxN:    rr.MaxN,
+							MaxIdle: (*time.Duration)(rr.MaxIdle),
+							Pins:    rr.Pins,
 						}
 					}
 					gcStores = append(gcStores, retention.Store{

@@ -40,8 +40,13 @@ type Policy struct {
 	// MaxN non-protected tags, the oldest beyond the cap are deleted even if not
 	// yet past MaxAge. Zero disables the cap. When both are set MaxN must be >=
 	// KeepN. The cap is deferred during the startup grace window, like age GC.
-	MaxN int      `json:"max_n"`
-	Pins []string `json:"pins"`
+	MaxN int `json:"max_n"`
+	// MaxIdle is a hard idle cap: an image unused longer than this is deleted
+	// regardless of KeepN/MaxN (only in-use and pins protect it). Zero disables
+	// it. Unlike MaxAge (which KeepN protects), MaxIdle overrides keep-N so a
+	// settled-but-ancient tag does not linger forever. Deferred during grace.
+	MaxIdle time.Duration `json:"max_idle,omitempty"`
+	Pins    []string      `json:"pins"`
 	// UntaggedAfter is store-level, not per-repo (an untagged image has no repo
 	// for a rule to match): reap an image this long after it was first observed
 	// with no tags. Zero disables the reaper — so a /gc override body that does
@@ -54,11 +59,12 @@ type Policy struct {
 // so an unset field (inherit from a less specific matching rule) is distinct from
 // an explicit zero. resolvePolicy cascades a store's rules into a Policy per repo.
 type Rule struct {
-	Repo   string
-	MaxAge *time.Duration
-	KeepN  *int
-	MaxN   *int
-	Pins   []string
+	Repo    string
+	MaxAge  *time.Duration
+	KeepN   *int
+	MaxN    *int
+	MaxIdle *time.Duration
+	Pins    []string
 }
 
 // Candidate is one image marked for deletion. A tag candidate carries the ref
