@@ -109,10 +109,15 @@
   refs는 50개 cap, count는 전체). proto 재생성 불요라 트레일러 방식 채택.
 
 ### 제품 기능
-- **영속 job store** — 접근: `protoc-gen-orm-ent`(protobuf-orm 생태계) + **sqlite3** 백엔드로
-  `memStore`를 `Store` seam 뒤에서 교체 → 재시작 시 job history 소실 해소. ⚠️ 정적/scratch
-  (CGO=0) 빌드를 유지하려면 **pure-Go 드라이버(modernc.org/sqlite)** 필수 — mattn/go-sqlite3
-  (CGO)는 배제.
+- **영속 job store** — ⏸ **설계 결정 필요(미착수)**. 드라이버는 `ncruces/go-sqlite3`(WASM,
+  순수 Go/CGO-free — scratch 빌드 유지 OK)로 확정. **블로커**: 현재 `cpx.Store`는 실행 중
+  엔진이 직접 변형하는 라이브 `*Job`(atomic 바이트 카운터·cancel 함수)을 반환하는 in-memory
+  레지스트리라 sqlite로 drop-in이 안 됨 — 라이브 실행 상태와 영속 스냅샷을 분리해야 한다.
+  참고: job 히스토리(admitted/finished)는 이미 이벤트 로그가 영속화하므로, 남는 실질은
+  `JobService.Get/List`가 재시작 후에도 잡을 반환하는 것. 선택지: **(a)** memStore는 라이브용
+  유지 + 별도 sqlite 스냅샷 스토어로 터미널 잡 영속(추가형, 단일 Job 엔티티라 ORM 코드젠 불요),
+  **(b)** Store 인터페이스 재설계로 라이브 레지스트리/영속 분리. (`protoc-gen-orm-ent` 소스는
+  로컬에 있으나 `protoc` 미설치.) → 방향 확정 후 착수.
 - **registry-store digest resolve** (낮은 우선순위) — registry의 태그→digest 라이브 조회.
   인벤토리 질의 API가 맞고, 있어서 나쁠 것 없는 nice-to-have.
 
@@ -124,7 +129,8 @@
 
 ### 외부 의존 (mkot, `/workspaces/github.com/lesomnus/mkot`)
 - **mkot CI `GOWORK=off` per-module build** + **`pretty` 모듈 테스트 수정**(otx ingress/egress
-  렌더링) — mkot main에서 직접 작업, 단계별 커밋(사용자 위임).
+  렌더링) — ✅ 완료(mkot main). pretty 로그 exporter가 `internal.otx.ingress`/`egress`를
+  `›»`/`«‹` 마커로 렌더(커밋 `2d0cc66`), 4개 모듈 GOWORK=off matrix CI 추가(`ff01b50`).
 
 ### 문서화
 - **mutable-tag dedup 주의사항** — ✅ 완료. README "Behavior notes"와 `JobAddRequest` proto
