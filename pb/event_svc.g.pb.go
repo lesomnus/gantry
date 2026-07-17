@@ -25,14 +25,14 @@ const (
 type EventAddRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Seq         uint64                 `protobuf:"varint,1,opt,name=seq"`
-	xxx_hidden_At          *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at"`
-	xxx_hidden_Type        EventType              `protobuf:"varint,3,opt,name=type,enum=gantry.EventType"`
-	xxx_hidden_Store       string                 `protobuf:"bytes,4,opt,name=store"`
-	xxx_hidden_Ref         string                 `protobuf:"bytes,5,opt,name=ref"`
-	xxx_hidden_State       JobState               `protobuf:"varint,6,opt,name=state,enum=gantry.JobState"`
-	xxx_hidden_Digest      string                 `protobuf:"bytes,7,opt,name=digest"`
-	xxx_hidden_Error       string                 `protobuf:"bytes,8,opt,name=error"`
-	xxx_hidden_Detail      *EventDetail           `protobuf:"bytes,9,opt,name=detail"`
+	xxx_hidden_Store       string                 `protobuf:"bytes,2,opt,name=store"`
+	xxx_hidden_Type        EventType              `protobuf:"varint,5,opt,name=type,enum=gantry.EventType"`
+	xxx_hidden_Ref         string                 `protobuf:"bytes,8,opt,name=ref"`
+	xxx_hidden_Digest      string                 `protobuf:"bytes,9,opt,name=digest"`
+	xxx_hidden_Detail      *EventDetail           `protobuf:"bytes,10,opt,name=detail"`
+	xxx_hidden_State       JobState               `protobuf:"varint,16,opt,name=state,enum=gantry.JobState"`
+	xxx_hidden_Error       string                 `protobuf:"bytes,17,opt,name=error"`
+	xxx_hidden_DateCreated *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_created,json=dateCreated"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -71,11 +71,11 @@ func (x *EventAddRequest) GetSeq() uint64 {
 	return 0
 }
 
-func (x *EventAddRequest) GetAt() *timestamppb.Timestamp {
+func (x *EventAddRequest) GetStore() string {
 	if x != nil {
-		return x.xxx_hidden_At
+		return x.xxx_hidden_Store
 	}
-	return nil
+	return ""
 }
 
 func (x *EventAddRequest) GetType() EventType {
@@ -85,13 +85,6 @@ func (x *EventAddRequest) GetType() EventType {
 	return EventType_EVENT_TYPE_UNSPECIFIED
 }
 
-func (x *EventAddRequest) GetStore() string {
-	if x != nil {
-		return x.xxx_hidden_Store
-	}
-	return ""
-}
-
 func (x *EventAddRequest) GetRef() string {
 	if x != nil {
 		return x.xxx_hidden_Ref
@@ -99,23 +92,9 @@ func (x *EventAddRequest) GetRef() string {
 	return ""
 }
 
-func (x *EventAddRequest) GetState() JobState {
-	if x != nil {
-		return x.xxx_hidden_State
-	}
-	return JobState_JOB_STATE_UNSPECIFIED
-}
-
 func (x *EventAddRequest) GetDigest() string {
 	if x != nil {
 		return x.xxx_hidden_Digest
-	}
-	return ""
-}
-
-func (x *EventAddRequest) GetError() string {
-	if x != nil {
-		return x.xxx_hidden_Error
 	}
 	return ""
 }
@@ -127,41 +106,62 @@ func (x *EventAddRequest) GetDetail() *EventDetail {
 	return nil
 }
 
+func (x *EventAddRequest) GetState() JobState {
+	if x != nil {
+		return x.xxx_hidden_State
+	}
+	return JobState_JOB_STATE_UNSPECIFIED
+}
+
+func (x *EventAddRequest) GetError() string {
+	if x != nil {
+		return x.xxx_hidden_Error
+	}
+	return ""
+}
+
+func (x *EventAddRequest) GetDateCreated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_DateCreated
+	}
+	return nil
+}
+
 func (x *EventAddRequest) SetSeq(v uint64) {
 	x.xxx_hidden_Seq = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 9)
-}
-
-func (x *EventAddRequest) SetAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_At = v
-}
-
-func (x *EventAddRequest) SetType(v EventType) {
-	x.xxx_hidden_Type = v
 }
 
 func (x *EventAddRequest) SetStore(v string) {
 	x.xxx_hidden_Store = v
 }
 
-func (x *EventAddRequest) SetRef(v string) {
-	x.xxx_hidden_Ref = v
+func (x *EventAddRequest) SetType(v EventType) {
+	x.xxx_hidden_Type = v
 }
 
-func (x *EventAddRequest) SetState(v JobState) {
-	x.xxx_hidden_State = v
+func (x *EventAddRequest) SetRef(v string) {
+	x.xxx_hidden_Ref = v
 }
 
 func (x *EventAddRequest) SetDigest(v string) {
 	x.xxx_hidden_Digest = v
 }
 
+func (x *EventAddRequest) SetDetail(v *EventDetail) {
+	x.xxx_hidden_Detail = v
+}
+
+func (x *EventAddRequest) SetState(v JobState) {
+	x.xxx_hidden_State = v
+}
+
 func (x *EventAddRequest) SetError(v string) {
 	x.xxx_hidden_Error = v
 }
 
-func (x *EventAddRequest) SetDetail(v *EventDetail) {
-	x.xxx_hidden_Detail = v
+func (x *EventAddRequest) SetDateCreated(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateCreated = v
 }
 
 func (x *EventAddRequest) HasSeq() bool {
@@ -171,13 +171,6 @@ func (x *EventAddRequest) HasSeq() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *EventAddRequest) HasAt() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_At != nil
-}
-
 func (x *EventAddRequest) HasDetail() bool {
 	if x == nil {
 		return false
@@ -185,31 +178,38 @@ func (x *EventAddRequest) HasDetail() bool {
 	return x.xxx_hidden_Detail != nil
 }
 
+func (x *EventAddRequest) HasDateCreated() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_DateCreated != nil
+}
+
 func (x *EventAddRequest) ClearSeq() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 0)
 	x.xxx_hidden_Seq = 0
-}
-
-func (x *EventAddRequest) ClearAt() {
-	x.xxx_hidden_At = nil
 }
 
 func (x *EventAddRequest) ClearDetail() {
 	x.xxx_hidden_Detail = nil
 }
 
+func (x *EventAddRequest) ClearDateCreated() {
+	x.xxx_hidden_DateCreated = nil
+}
+
 type EventAddRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Seq    *uint64
-	At     *timestamppb.Timestamp
-	Type   EventType
-	Store  string
-	Ref    string
-	State  JobState
-	Digest string
-	Error  string
-	Detail *EventDetail
+	Seq         *uint64
+	Store       string
+	Type        EventType
+	Ref         string
+	Digest      string
+	Detail      *EventDetail
+	State       JobState
+	Error       string
+	DateCreated *timestamppb.Timestamp
 }
 
 func (b0 EventAddRequest_builder) Build() *EventAddRequest {
@@ -220,14 +220,14 @@ func (b0 EventAddRequest_builder) Build() *EventAddRequest {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 9)
 		x.xxx_hidden_Seq = *b.Seq
 	}
-	x.xxx_hidden_At = b.At
-	x.xxx_hidden_Type = b.Type
 	x.xxx_hidden_Store = b.Store
+	x.xxx_hidden_Type = b.Type
 	x.xxx_hidden_Ref = b.Ref
-	x.xxx_hidden_State = b.State
 	x.xxx_hidden_Digest = b.Digest
-	x.xxx_hidden_Error = b.Error
 	x.xxx_hidden_Detail = b.Detail
+	x.xxx_hidden_State = b.State
+	x.xxx_hidden_Error = b.Error
+	x.xxx_hidden_DateCreated = b.DateCreated
 	return m0
 }
 
@@ -450,14 +450,14 @@ func (*eventRef_Seq) isEventRef_Key() {}
 type EventSelect struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_All         bool                   `protobuf:"varint,1,opt,name=all"`
-	xxx_hidden_At          bool                   `protobuf:"varint,2,opt,name=at"`
-	xxx_hidden_Type        bool                   `protobuf:"varint,3,opt,name=type"`
-	xxx_hidden_Store       bool                   `protobuf:"varint,4,opt,name=store"`
-	xxx_hidden_Ref         bool                   `protobuf:"varint,5,opt,name=ref"`
-	xxx_hidden_State       bool                   `protobuf:"varint,6,opt,name=state"`
-	xxx_hidden_Digest      bool                   `protobuf:"varint,7,opt,name=digest"`
-	xxx_hidden_Error       bool                   `protobuf:"varint,8,opt,name=error"`
-	xxx_hidden_Detail      bool                   `protobuf:"varint,9,opt,name=detail"`
+	xxx_hidden_Store       bool                   `protobuf:"varint,2,opt,name=store"`
+	xxx_hidden_Type        bool                   `protobuf:"varint,5,opt,name=type"`
+	xxx_hidden_Ref         bool                   `protobuf:"varint,8,opt,name=ref"`
+	xxx_hidden_Digest      bool                   `protobuf:"varint,9,opt,name=digest"`
+	xxx_hidden_Detail      bool                   `protobuf:"varint,10,opt,name=detail"`
+	xxx_hidden_State       bool                   `protobuf:"varint,16,opt,name=state"`
+	xxx_hidden_Error       bool                   `protobuf:"varint,17,opt,name=error"`
+	xxx_hidden_DateCreated bool                   `protobuf:"varint,15,opt,name=date_created,json=dateCreated"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -496,9 +496,9 @@ func (x *EventSelect) GetAll() bool {
 	return false
 }
 
-func (x *EventSelect) GetAt() bool {
+func (x *EventSelect) GetStore() bool {
 	if x != nil {
-		return x.xxx_hidden_At
+		return x.xxx_hidden_Store
 	}
 	return false
 }
@@ -510,23 +510,9 @@ func (x *EventSelect) GetType() bool {
 	return false
 }
 
-func (x *EventSelect) GetStore() bool {
-	if x != nil {
-		return x.xxx_hidden_Store
-	}
-	return false
-}
-
 func (x *EventSelect) GetRef() bool {
 	if x != nil {
 		return x.xxx_hidden_Ref
-	}
-	return false
-}
-
-func (x *EventSelect) GetState() bool {
-	if x != nil {
-		return x.xxx_hidden_State
 	}
 	return false
 }
@@ -538,6 +524,20 @@ func (x *EventSelect) GetDigest() bool {
 	return false
 }
 
+func (x *EventSelect) GetDetail() bool {
+	if x != nil {
+		return x.xxx_hidden_Detail
+	}
+	return false
+}
+
+func (x *EventSelect) GetState() bool {
+	if x != nil {
+		return x.xxx_hidden_State
+	}
+	return false
+}
+
 func (x *EventSelect) GetError() bool {
 	if x != nil {
 		return x.xxx_hidden_Error
@@ -545,9 +545,9 @@ func (x *EventSelect) GetError() bool {
 	return false
 }
 
-func (x *EventSelect) GetDetail() bool {
+func (x *EventSelect) GetDateCreated() bool {
 	if x != nil {
-		return x.xxx_hidden_Detail
+		return x.xxx_hidden_DateCreated
 	}
 	return false
 }
@@ -557,8 +557,8 @@ func (x *EventSelect) SetAll(v bool) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 9)
 }
 
-func (x *EventSelect) SetAt(v bool) {
-	x.xxx_hidden_At = v
+func (x *EventSelect) SetStore(v bool) {
+	x.xxx_hidden_Store = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 9)
 }
 
@@ -567,23 +567,23 @@ func (x *EventSelect) SetType(v bool) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 9)
 }
 
-func (x *EventSelect) SetStore(v bool) {
-	x.xxx_hidden_Store = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 9)
-}
-
 func (x *EventSelect) SetRef(v bool) {
 	x.xxx_hidden_Ref = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 9)
-}
-
-func (x *EventSelect) SetState(v bool) {
-	x.xxx_hidden_State = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 9)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 9)
 }
 
 func (x *EventSelect) SetDigest(v bool) {
 	x.xxx_hidden_Digest = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 9)
+}
+
+func (x *EventSelect) SetDetail(v bool) {
+	x.xxx_hidden_Detail = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 9)
+}
+
+func (x *EventSelect) SetState(v bool) {
+	x.xxx_hidden_State = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 9)
 }
 
@@ -592,8 +592,8 @@ func (x *EventSelect) SetError(v bool) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 9)
 }
 
-func (x *EventSelect) SetDetail(v bool) {
-	x.xxx_hidden_Detail = v
+func (x *EventSelect) SetDateCreated(v bool) {
+	x.xxx_hidden_DateCreated = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 9)
 }
 
@@ -604,7 +604,7 @@ func (x *EventSelect) HasAll() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *EventSelect) HasAt() bool {
+func (x *EventSelect) HasStore() bool {
 	if x == nil {
 		return false
 	}
@@ -618,28 +618,28 @@ func (x *EventSelect) HasType() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
 }
 
-func (x *EventSelect) HasStore() bool {
+func (x *EventSelect) HasRef() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
 }
 
-func (x *EventSelect) HasRef() bool {
+func (x *EventSelect) HasDigest() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
 }
 
-func (x *EventSelect) HasState() bool {
+func (x *EventSelect) HasDetail() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 5)
 }
 
-func (x *EventSelect) HasDigest() bool {
+func (x *EventSelect) HasState() bool {
 	if x == nil {
 		return false
 	}
@@ -653,7 +653,7 @@ func (x *EventSelect) HasError() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 7)
 }
 
-func (x *EventSelect) HasDetail() bool {
+func (x *EventSelect) HasDateCreated() bool {
 	if x == nil {
 		return false
 	}
@@ -665,9 +665,9 @@ func (x *EventSelect) ClearAll() {
 	x.xxx_hidden_All = false
 }
 
-func (x *EventSelect) ClearAt() {
+func (x *EventSelect) ClearStore() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
-	x.xxx_hidden_At = false
+	x.xxx_hidden_Store = false
 }
 
 func (x *EventSelect) ClearType() {
@@ -675,24 +675,24 @@ func (x *EventSelect) ClearType() {
 	x.xxx_hidden_Type = false
 }
 
-func (x *EventSelect) ClearStore() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
-	x.xxx_hidden_Store = false
-}
-
 func (x *EventSelect) ClearRef() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
 	x.xxx_hidden_Ref = false
 }
 
-func (x *EventSelect) ClearState() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
-	x.xxx_hidden_State = false
+func (x *EventSelect) ClearDigest() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	x.xxx_hidden_Digest = false
 }
 
-func (x *EventSelect) ClearDigest() {
+func (x *EventSelect) ClearDetail() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
+	x.xxx_hidden_Detail = false
+}
+
+func (x *EventSelect) ClearState() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 6)
-	x.xxx_hidden_Digest = false
+	x.xxx_hidden_State = false
 }
 
 func (x *EventSelect) ClearError() {
@@ -700,23 +700,23 @@ func (x *EventSelect) ClearError() {
 	x.xxx_hidden_Error = false
 }
 
-func (x *EventSelect) ClearDetail() {
+func (x *EventSelect) ClearDateCreated() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 8)
-	x.xxx_hidden_Detail = false
+	x.xxx_hidden_DateCreated = false
 }
 
 type EventSelect_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	All    *bool
-	At     *bool
-	Type   *bool
-	Store  *bool
-	Ref    *bool
-	State  *bool
-	Digest *bool
-	Error  *bool
-	Detail *bool
+	All         *bool
+	Store       *bool
+	Type        *bool
+	Ref         *bool
+	Digest      *bool
+	Detail      *bool
+	State       *bool
+	Error       *bool
+	DateCreated *bool
 }
 
 func (b0 EventSelect_builder) Build() *EventSelect {
@@ -727,37 +727,37 @@ func (b0 EventSelect_builder) Build() *EventSelect {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 9)
 		x.xxx_hidden_All = *b.All
 	}
-	if b.At != nil {
+	if b.Store != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 9)
-		x.xxx_hidden_At = *b.At
+		x.xxx_hidden_Store = *b.Store
 	}
 	if b.Type != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 9)
 		x.xxx_hidden_Type = *b.Type
 	}
-	if b.Store != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 9)
-		x.xxx_hidden_Store = *b.Store
-	}
 	if b.Ref != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 9)
 		x.xxx_hidden_Ref = *b.Ref
 	}
-	if b.State != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 9)
-		x.xxx_hidden_State = *b.State
-	}
 	if b.Digest != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 9)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 9)
 		x.xxx_hidden_Digest = *b.Digest
+	}
+	if b.Detail != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 9)
+		x.xxx_hidden_Detail = *b.Detail
+	}
+	if b.State != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 9)
+		x.xxx_hidden_State = *b.State
 	}
 	if b.Error != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 9)
 		x.xxx_hidden_Error = *b.Error
 	}
-	if b.Detail != nil {
+	if b.DateCreated != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 9)
-		x.xxx_hidden_Detail = *b.Detail
+		x.xxx_hidden_DateCreated = *b.DateCreated
 	}
 	return m0
 }
@@ -1052,14 +1052,20 @@ func (x *EventListRequest) ClearPageToken() {
 type EventListRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Type  *EventType
+	// Keep only events of this type.
+	Type *EventType
+	// Exact match on the store name.
 	Store *string
-	Ref   *string
+	// Exact match on the recorded ref.
+	Ref *string
 	// Terminal job state, for job_done events.
 	State *JobState
 	// Events recorded at or after this instant.
-	Since     *timestamppb.Timestamp
-	PageSize  *int32
+	Since *timestamppb.Timestamp
+	// Maximum items to return; 0 = no limit.
+	PageSize *int32
+	// Continuation token from the previous response; empty starts from the
+	// beginning.
 	PageToken *string
 }
 
@@ -1173,7 +1179,9 @@ func (x *EventListResponse) ClearNextPageToken() {
 type EventListResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Items         []*Event
+	// One page of results, newest-first.
+	Items []*Event
+	// Empty when there are no further results.
 	NextPageToken *string
 }
 
@@ -1193,33 +1201,35 @@ var File_gantry_event_svc_g_proto protoreflect.FileDescriptor
 
 const file_gantry_event_svc_g_proto_rawDesc = "" +
 	"\n" +
-	"\x18gantry/event_svc.g.proto\x12\x06gantry\x1a\x12gantry/event.proto\x1a\x10gantry/job.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcb\x02\n" +
+	"\x18gantry/event_svc.g.proto\x12\x06gantry\x1a\x12gantry/event.proto\x1a\x10gantry/job.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xde\x02\n" +
 	"\x0fEventAddRequest\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n" +
-	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12,\n" +
-	"\x04type\x18\x03 \x01(\x0e2\x11.gantry.EventTypeB\x05\xaa\x01\x02\b\x02R\x04type\x12\x1b\n" +
-	"\x05store\x18\x04 \x01(\tB\x05\xaa\x01\x02\b\x02R\x05store\x12\x17\n" +
-	"\x03ref\x18\x05 \x01(\tB\x05\xaa\x01\x02\b\x02R\x03ref\x12-\n" +
-	"\x05state\x18\x06 \x01(\x0e2\x10.gantry.JobStateB\x05\xaa\x01\x02\b\x02R\x05state\x12\x1d\n" +
-	"\x06digest\x18\a \x01(\tB\x05\xaa\x01\x02\b\x02R\x06digest\x12\x1b\n" +
-	"\x05error\x18\b \x01(\tB\x05\xaa\x01\x02\b\x02R\x05error\x12+\n" +
-	"\x06detail\x18\t \x01(\v2\x13.gantry.EventDetailR\x06detail\"b\n" +
+	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12\x1b\n" +
+	"\x05store\x18\x02 \x01(\tB\x05\xaa\x01\x02\b\x02R\x05store\x12,\n" +
+	"\x04type\x18\x05 \x01(\x0e2\x11.gantry.EventTypeB\x05\xaa\x01\x02\b\x02R\x04type\x12\x17\n" +
+	"\x03ref\x18\b \x01(\tB\x05\xaa\x01\x02\b\x02R\x03ref\x12\x1d\n" +
+	"\x06digest\x18\t \x01(\tB\x05\xaa\x01\x02\b\x02R\x06digest\x12+\n" +
+	"\x06detail\x18\n" +
+	" \x01(\v2\x13.gantry.EventDetailR\x06detail\x12-\n" +
+	"\x05state\x18\x10 \x01(\x0e2\x10.gantry.JobStateB\x05\xaa\x01\x02\b\x02R\x05state\x12\x1b\n" +
+	"\x05error\x18\x11 \x01(\tB\x05\xaa\x01\x02\b\x02R\x05error\x12=\n" +
+	"\fdate_created\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\vdateCreated\"b\n" +
 	"\x0fEventGetRequest\x12\"\n" +
 	"\x03ref\x18\x01 \x01(\v2\x10.gantry.EventRefR\x03ref\x12+\n" +
 	"\x06select\x18\x02 \x01(\v2\x13.gantry.EventSelectR\x06select\"%\n" +
 	"\bEventRef\x12\x12\n" +
 	"\x03seq\x18\x01 \x01(\x04H\x00R\x03seqB\x05\n" +
-	"\x03key\"\xc7\x01\n" +
+	"\x03key\"\xda\x01\n" +
 	"\vEventSelect\x12\x10\n" +
-	"\x03all\x18\x01 \x01(\bR\x03all\x12\x0e\n" +
-	"\x02at\x18\x02 \x01(\bR\x02at\x12\x12\n" +
-	"\x04type\x18\x03 \x01(\bR\x04type\x12\x14\n" +
-	"\x05store\x18\x04 \x01(\bR\x05store\x12\x10\n" +
-	"\x03ref\x18\x05 \x01(\bR\x03ref\x12\x14\n" +
-	"\x05state\x18\x06 \x01(\bR\x05state\x12\x16\n" +
-	"\x06digest\x18\a \x01(\bR\x06digest\x12\x14\n" +
-	"\x05error\x18\b \x01(\bR\x05error\x12\x16\n" +
-	"\x06detail\x18\t \x01(\bR\x06detail\"7\n" +
+	"\x03all\x18\x01 \x01(\bR\x03all\x12\x14\n" +
+	"\x05store\x18\x02 \x01(\bR\x05store\x12\x12\n" +
+	"\x04type\x18\x05 \x01(\bR\x04type\x12\x10\n" +
+	"\x03ref\x18\b \x01(\bR\x03ref\x12\x16\n" +
+	"\x06digest\x18\t \x01(\bR\x06digest\x12\x16\n" +
+	"\x06detail\x18\n" +
+	" \x01(\bR\x06detail\x12\x14\n" +
+	"\x05state\x18\x10 \x01(\bR\x05state\x12\x14\n" +
+	"\x05error\x18\x11 \x01(\bR\x05error\x12!\n" +
+	"\fdate_created\x18\x0f \x01(\bR\vdateCreated\"7\n" +
 	"\x11EventPatchRequest\x12\"\n" +
 	"\x03ref\x18\x01 \x01(\v2\x10.gantry.EventRefR\x03ref\"\xf7\x01\n" +
 	"\x10EventListRequest\x12%\n" +
@@ -1251,24 +1261,24 @@ var file_gantry_event_svc_g_proto_goTypes = []any{
 	(*EventPatchRequest)(nil),     // 4: gantry.EventPatchRequest
 	(*EventListRequest)(nil),      // 5: gantry.EventListRequest
 	(*EventListResponse)(nil),     // 6: gantry.EventListResponse
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
-	(EventType)(0),                // 8: gantry.EventType
+	(EventType)(0),                // 7: gantry.EventType
+	(*EventDetail)(nil),           // 8: gantry.EventDetail
 	(JobState)(0),                 // 9: gantry.JobState
-	(*EventDetail)(nil),           // 10: gantry.EventDetail
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
 	(*Event)(nil),                 // 11: gantry.Event
 	(*emptypb.Empty)(nil),         // 12: google.protobuf.Empty
 }
 var file_gantry_event_svc_g_proto_depIdxs = []int32{
-	7,  // 0: gantry.EventAddRequest.at:type_name -> google.protobuf.Timestamp
-	8,  // 1: gantry.EventAddRequest.type:type_name -> gantry.EventType
+	7,  // 0: gantry.EventAddRequest.type:type_name -> gantry.EventType
+	8,  // 1: gantry.EventAddRequest.detail:type_name -> gantry.EventDetail
 	9,  // 2: gantry.EventAddRequest.state:type_name -> gantry.JobState
-	10, // 3: gantry.EventAddRequest.detail:type_name -> gantry.EventDetail
+	10, // 3: gantry.EventAddRequest.date_created:type_name -> google.protobuf.Timestamp
 	2,  // 4: gantry.EventGetRequest.ref:type_name -> gantry.EventRef
 	3,  // 5: gantry.EventGetRequest.select:type_name -> gantry.EventSelect
 	2,  // 6: gantry.EventPatchRequest.ref:type_name -> gantry.EventRef
-	8,  // 7: gantry.EventListRequest.type:type_name -> gantry.EventType
+	7,  // 7: gantry.EventListRequest.type:type_name -> gantry.EventType
 	9,  // 8: gantry.EventListRequest.state:type_name -> gantry.JobState
-	7,  // 9: gantry.EventListRequest.since:type_name -> google.protobuf.Timestamp
+	10, // 9: gantry.EventListRequest.since:type_name -> google.protobuf.Timestamp
 	11, // 10: gantry.EventListResponse.items:type_name -> gantry.Event
 	0,  // 11: gantry.EventService.Add:input_type -> gantry.EventAddRequest
 	1,  // 12: gantry.EventService.Get:input_type -> gantry.EventGetRequest

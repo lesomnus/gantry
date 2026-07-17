@@ -85,19 +85,27 @@ message StorePatchRequest {
 }
 
 message StoreListRequest {
+  // Keep only stores of this kind.
   StoreKind kind = 1;
 
+  // Maximum items to return; 0 = no limit.
   int32 page_size = 10;
+  // Continuation token from the previous response; empty starts from the
+  // beginning.
   string page_token = 11;
 }
 
 message StoreListResponse {
+  // One page of results, sorted by name.
   repeated Store items = 1;
+  // Empty when there are no further results.
   string next_page_token = 2;
 }
 
 message StorePullRequest {
+  // Engine store that pulls.
   StoreRef store = 1;
+  // Image reference to pull.
   string ref = 2;
   // Platform to pull ("os/arch"); empty uses the daemon's default.
   string platform = 3;
@@ -109,7 +117,9 @@ message StorePullResponse {
 }
 
 message StoreRemoveRequest {
+  // Engine store to remove from.
   StoreRef store = 1;
+  // Image reference to remove.
   string ref = 2;
 }
 
@@ -122,11 +132,15 @@ message StoreRemoveResponse {
 }
 
 message StoreHealthResponse {
+  // The probe succeeded.
   bool healthy = 1;
+  // Kind of the probed store.
   StoreKind kind = 2;
+  // Probe round-trip in milliseconds.
   int64 latency_ms = 3;
+  // Probe failure text.
   string error = 4;
-  google.protobuf.Timestamp checked_at = 5;
+  google.protobuf.Timestamp date_checked = 5;
   // True when served from the TTL cache rather than probed for this call.
   bool cached = 6;
 }
@@ -134,29 +148,39 @@ message StoreHealthResponse {
 message StoreGcStatusResponse {
   // Scheduling is on for this store.
   bool enabled = 1;
+  // A GC run is in flight right now.
   bool running = 2;
   google.protobuf.Timestamp started = 3;
   google.protobuf.Timestamp last_run = 4;
   google.protobuf.Timestamp next_wake = 5;
   google.protobuf.Timestamp grace_until = 6;
+  // Effective scheduler settings.
   GcSchedule schedule = 7;
+  // Configured retention rules.
   repeated GcRule rules = 8;
+  // Tracked image records.
   int32 records = 9;
+  // Live pins.
   int32 pins = 10;
   // Tracked untagged images (reap clocks running).
   int32 untagged = 11;
   // Reap delay; absent when the reaper is off.
   google.protobuf.Duration untagged_after = 12;
+  // Usage-event stream health.
   GcWatcherStatus watcher = 13;
 }
 
 message StoreGcRequest {
+  // Store to run GC against.
   StoreRef store = 1;
+  // Optional one-shot policy override.
   GcOverride override = 2;
 }
 
 message StoreGcPlanResponse {
+  // Images that would be deleted.
   repeated GcCandidate delete = 1;
+  // Records kept, and why.
   repeated GcKept keep = 2;
   // The soonest a currently-kept record could become age-deletable; absent
   // when nothing is on an age path.

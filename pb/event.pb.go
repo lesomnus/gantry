@@ -202,14 +202,18 @@ type EventDetail_builder struct {
 
 	// job_admitted: the source store.
 	Source string
-	// job_done: the job id and total bytes moved.
-	Job   string
+	// job_done: the job id.
+	Job string
+	// job_done: total bytes moved.
 	Bytes int64
-	// gc_applied: apply counters.
-	Deleted  int32
+	// gc_applied: content IDs whose bytes were freed.
+	Deleted int32
+	// gc_applied: tag refs removed.
 	Untagged int32
-	Reaped   int32
-	Errors   int32
+	// gc_applied: untagged images whose content was reaped.
+	Reaped int32
+	// gc_applied: per-ref removal failures.
+	Errors int32
 }
 
 func (b0 EventDetail_builder) Build() *EventDetail {
@@ -231,18 +235,18 @@ func (b0 EventDetail_builder) Build() *EventDetail {
 // The store is recorded by name (not an edge) so audit entries outlive
 // store re-configuration.
 type Event struct {
-	state             protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Seq    uint64                 `protobuf:"varint,1,opt,name=seq"`
-	xxx_hidden_At     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at"`
-	xxx_hidden_Type   EventType              `protobuf:"varint,3,opt,name=type,enum=gantry.EventType"`
-	xxx_hidden_Store  string                 `protobuf:"bytes,4,opt,name=store"`
-	xxx_hidden_Ref    string                 `protobuf:"bytes,5,opt,name=ref"`
-	xxx_hidden_State  JobState               `protobuf:"varint,6,opt,name=state,enum=gantry.JobState"`
-	xxx_hidden_Digest string                 `protobuf:"bytes,7,opt,name=digest"`
-	xxx_hidden_Error  string                 `protobuf:"bytes,8,opt,name=error"`
-	xxx_hidden_Detail *EventDetail           `protobuf:"bytes,9,opt,name=detail"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Seq         uint64                 `protobuf:"varint,1,opt,name=seq"`
+	xxx_hidden_Store       string                 `protobuf:"bytes,2,opt,name=store"`
+	xxx_hidden_Type        EventType              `protobuf:"varint,5,opt,name=type,enum=gantry.EventType"`
+	xxx_hidden_Ref         string                 `protobuf:"bytes,8,opt,name=ref"`
+	xxx_hidden_Digest      string                 `protobuf:"bytes,9,opt,name=digest"`
+	xxx_hidden_Detail      *EventDetail           `protobuf:"bytes,10,opt,name=detail"`
+	xxx_hidden_State       JobState               `protobuf:"varint,16,opt,name=state,enum=gantry.JobState"`
+	xxx_hidden_Error       string                 `protobuf:"bytes,17,opt,name=error"`
+	xxx_hidden_DateCreated *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_created,json=dateCreated"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *Event) Reset() {
@@ -277,11 +281,11 @@ func (x *Event) GetSeq() uint64 {
 	return 0
 }
 
-func (x *Event) GetAt() *timestamppb.Timestamp {
+func (x *Event) GetStore() string {
 	if x != nil {
-		return x.xxx_hidden_At
+		return x.xxx_hidden_Store
 	}
-	return nil
+	return ""
 }
 
 func (x *Event) GetType() EventType {
@@ -291,13 +295,6 @@ func (x *Event) GetType() EventType {
 	return EventType_EVENT_TYPE_UNSPECIFIED
 }
 
-func (x *Event) GetStore() string {
-	if x != nil {
-		return x.xxx_hidden_Store
-	}
-	return ""
-}
-
 func (x *Event) GetRef() string {
 	if x != nil {
 		return x.xxx_hidden_Ref
@@ -305,23 +302,9 @@ func (x *Event) GetRef() string {
 	return ""
 }
 
-func (x *Event) GetState() JobState {
-	if x != nil {
-		return x.xxx_hidden_State
-	}
-	return JobState_JOB_STATE_UNSPECIFIED
-}
-
 func (x *Event) GetDigest() string {
 	if x != nil {
 		return x.xxx_hidden_Digest
-	}
-	return ""
-}
-
-func (x *Event) GetError() string {
-	if x != nil {
-		return x.xxx_hidden_Error
 	}
 	return ""
 }
@@ -333,47 +316,61 @@ func (x *Event) GetDetail() *EventDetail {
 	return nil
 }
 
+func (x *Event) GetState() JobState {
+	if x != nil {
+		return x.xxx_hidden_State
+	}
+	return JobState_JOB_STATE_UNSPECIFIED
+}
+
+func (x *Event) GetError() string {
+	if x != nil {
+		return x.xxx_hidden_Error
+	}
+	return ""
+}
+
+func (x *Event) GetDateCreated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_DateCreated
+	}
+	return nil
+}
+
 func (x *Event) SetSeq(v uint64) {
 	x.xxx_hidden_Seq = v
-}
-
-func (x *Event) SetAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_At = v
-}
-
-func (x *Event) SetType(v EventType) {
-	x.xxx_hidden_Type = v
 }
 
 func (x *Event) SetStore(v string) {
 	x.xxx_hidden_Store = v
 }
 
-func (x *Event) SetRef(v string) {
-	x.xxx_hidden_Ref = v
+func (x *Event) SetType(v EventType) {
+	x.xxx_hidden_Type = v
 }
 
-func (x *Event) SetState(v JobState) {
-	x.xxx_hidden_State = v
+func (x *Event) SetRef(v string) {
+	x.xxx_hidden_Ref = v
 }
 
 func (x *Event) SetDigest(v string) {
 	x.xxx_hidden_Digest = v
 }
 
-func (x *Event) SetError(v string) {
-	x.xxx_hidden_Error = v
-}
-
 func (x *Event) SetDetail(v *EventDetail) {
 	x.xxx_hidden_Detail = v
 }
 
-func (x *Event) HasAt() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_At != nil
+func (x *Event) SetState(v JobState) {
+	x.xxx_hidden_State = v
+}
+
+func (x *Event) SetError(v string) {
+	x.xxx_hidden_Error = v
+}
+
+func (x *Event) SetDateCreated(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateCreated = v
 }
 
 func (x *Event) HasDetail() bool {
@@ -383,32 +380,42 @@ func (x *Event) HasDetail() bool {
 	return x.xxx_hidden_Detail != nil
 }
 
-func (x *Event) ClearAt() {
-	x.xxx_hidden_At = nil
+func (x *Event) HasDateCreated() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_DateCreated != nil
 }
 
 func (x *Event) ClearDetail() {
 	x.xxx_hidden_Detail = nil
 }
 
+func (x *Event) ClearDateCreated() {
+	x.xxx_hidden_DateCreated = nil
+}
+
 type Event_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
 	// Assigned from the log's monotonic sequence.
-	Seq   uint64
-	At    *timestamppb.Timestamp
-	Type  EventType
+	Seq uint64
+	// Name of the store the event concerns.
 	Store string
+	// What happened; selects which of the fields below are set.
+	Type EventType
 	// Image reference; a pin value for pinned/unpinned, an image ID for
 	// untagged reaps.
 	Ref string
-	// Terminal job state, on job_done.
-	State JobState
 	// Verified source digest, on job_admitted.
 	Digest string
-	// Failure text, on job_done of a failed job.
-	Error  string
+	// Type-specific payload.
 	Detail *EventDetail
+	// Terminal job state, on job_done.
+	State JobState
+	// Failure text, on job_done of a failed job.
+	Error       string
+	DateCreated *timestamppb.Timestamp
 }
 
 func (b0 Event_builder) Build() *Event {
@@ -416,14 +423,14 @@ func (b0 Event_builder) Build() *Event {
 	b, x := &b0, m0
 	_, _ = b, x
 	x.xxx_hidden_Seq = b.Seq
-	x.xxx_hidden_At = b.At
-	x.xxx_hidden_Type = b.Type
 	x.xxx_hidden_Store = b.Store
+	x.xxx_hidden_Type = b.Type
 	x.xxx_hidden_Ref = b.Ref
-	x.xxx_hidden_State = b.State
 	x.xxx_hidden_Digest = b.Digest
-	x.xxx_hidden_Error = b.Error
 	x.xxx_hidden_Detail = b.Detail
+	x.xxx_hidden_State = b.State
+	x.xxx_hidden_Error = b.Error
+	x.xxx_hidden_DateCreated = b.DateCreated
 	return m0
 }
 
@@ -439,17 +446,18 @@ const file_gantry_event_proto_rawDesc = "" +
 	"\adeleted\x18\x04 \x01(\x05R\adeleted\x12\x1a\n" +
 	"\buntagged\x18\x05 \x01(\x05R\buntagged\x12\x16\n" +
 	"\x06reaped\x18\x06 \x01(\x05R\x06reaped\x12\x16\n" +
-	"\x06errors\x18\a \x01(\x05R\x06errors\"\xec\x02\n" +
+	"\x06errors\x18\a \x01(\x05R\x06errors\"\xff\x02\n" +
 	"\x05Event\x12\x1b\n" +
-	"\x03seq\x18\x01 \x01(\x04B\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x03seq\x122\n" +
-	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xea\x82\x16\x02@\x01R\x02at\x12-\n" +
-	"\x04type\x18\x03 \x01(\x0e2\x11.gantry.EventTypeB\x06\xea\x82\x16\x02@\x01R\x04type\x12\x1c\n" +
-	"\x05store\x18\x04 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05store\x12\x18\n" +
-	"\x03ref\x18\x05 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12.\n" +
-	"\x05state\x18\x06 \x01(\x0e2\x10.gantry.JobStateB\x06\xea\x82\x16\x02@\x01R\x05state\x12\x1e\n" +
-	"\x06digest\x18\a \x01(\tB\x06\xea\x82\x16\x02@\x01R\x06digest\x12\x1c\n" +
-	"\x05error\x18\b \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05error\x123\n" +
-	"\x06detail\x18\t \x01(\v2\x13.gantry.EventDetailB\x06\xea\x82\x16\x02@\x01R\x06detail:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\xe3\x01\n" +
+	"\x03seq\x18\x01 \x01(\x04B\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x03seq\x12\x1c\n" +
+	"\x05store\x18\x02 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05store\x12-\n" +
+	"\x04type\x18\x05 \x01(\x0e2\x11.gantry.EventTypeB\x06\xea\x82\x16\x02@\x01R\x04type\x12\x18\n" +
+	"\x03ref\x18\b \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12\x1e\n" +
+	"\x06digest\x18\t \x01(\tB\x06\xea\x82\x16\x02@\x01R\x06digest\x123\n" +
+	"\x06detail\x18\n" +
+	" \x01(\v2\x13.gantry.EventDetailB\x06\xea\x82\x16\x02@\x01R\x06detail\x12.\n" +
+	"\x05state\x18\x10 \x01(\x0e2\x10.gantry.JobStateB\x06\xea\x82\x16\x02@\x01R\x05state\x12\x1c\n" +
+	"\x05error\x18\x11 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05error\x12E\n" +
+	"\fdate_created\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\x06\xea\x82\x16\x02@\x01R\vdateCreated:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\xe3\x01\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17EVENT_TYPE_JOB_ADMITTED\x10\x01\x12\x17\n" +
@@ -466,14 +474,14 @@ var file_gantry_event_proto_goTypes = []any{
 	(EventType)(0),                // 0: gantry.EventType
 	(*EventDetail)(nil),           // 1: gantry.EventDetail
 	(*Event)(nil),                 // 2: gantry.Event
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
-	(JobState)(0),                 // 4: gantry.JobState
+	(JobState)(0),                 // 3: gantry.JobState
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_gantry_event_proto_depIdxs = []int32{
-	3, // 0: gantry.Event.at:type_name -> google.protobuf.Timestamp
-	0, // 1: gantry.Event.type:type_name -> gantry.EventType
-	4, // 2: gantry.Event.state:type_name -> gantry.JobState
-	1, // 3: gantry.Event.detail:type_name -> gantry.EventDetail
+	0, // 0: gantry.Event.type:type_name -> gantry.EventType
+	1, // 1: gantry.Event.detail:type_name -> gantry.EventDetail
+	3, // 2: gantry.Event.state:type_name -> gantry.JobState
+	4, // 3: gantry.Event.date_created:type_name -> google.protobuf.Timestamp
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name

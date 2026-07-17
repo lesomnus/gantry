@@ -221,11 +221,17 @@ func (x *StoreCapabilities) SetReconcile(v bool) {
 type StoreCapabilities_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Read      bool
-	Write     bool
-	Pull      bool
-	Verify    bool
-	Gc        bool
+	// Registry: gantry can pull blobs.
+	Read bool
+	// Registry: gantry can push blobs.
+	Write bool
+	// Engine: the daemon can be told to pull.
+	Pull bool
+	// Engine: the daemon can verify signatures.
+	Verify bool
+	// Engine: the daemon supports image GC.
+	Gc bool
+	// Engine: inventory scans and untagged reaping.
 	Reconcile bool
 }
 
@@ -398,18 +404,25 @@ func (x *Store) ClearCapabilities() {
 type Store_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// Unique name from configuration; the key clients address stores by.
 	Name string
+	// Registry (oci) or engine (docker/containerd).
 	Kind StoreKind
-	// Registry (oci) stores only.
+	// Registry (oci) stores only: the registry host.
 	Host string
+	// Registry (oci) stores only: how the registry is filled as a copy
+	// destination.
 	Mode StoreMode
-	// Engine (docker/containerd) stores only.
-	Address   string
+	// Engine (docker/containerd) stores only: the daemon endpoint.
+	Address string
+	// containerd stores only: the containerd namespace.
 	Namespace string
 	// Live status, derived per read: registries report ready from config,
 	// engines are probed.
-	Ready        bool
-	Error        string
+	Ready bool
+	// Engine readiness error, when not ready.
+	Error string
+	// What operations the store supports.
 	Capabilities *StoreCapabilities
 }
 

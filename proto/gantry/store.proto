@@ -24,11 +24,17 @@ enum StoreMode {
 // What operations the store supports. Registries get read/write; engines get
 // pull plus the optional daemon capabilities discovered at dial time.
 message StoreCapabilities {
+  // Registry: gantry can pull blobs.
   bool read = 1;
+  // Registry: gantry can push blobs.
   bool write = 2;
+  // Engine: the daemon can be told to pull.
   bool pull = 3;
+  // Engine: the daemon can verify signatures.
   bool verify = 4;
+  // Engine: the daemon supports image GC.
   bool gc = 5;
+  // Engine: inventory scans and untagged reaping.
   bool reconcile = 6;
 }
 
@@ -36,21 +42,28 @@ message StoreCapabilities {
 // gantry.yaml today; Add/Patch/Erase exist for the contract (and for seeding
 // fakes in tests) even though the current server resolves stores from config.
 message Store {
+  // Unique name from configuration; the key clients address stores by.
   string name = 1 [(orm.field) = {key: true}];
+  // Registry (oci) or engine (docker/containerd).
   StoreKind kind = 2 [(orm.field) = {immutable: true}];
 
-  // Registry (oci) stores only.
+  // Registry (oci) stores only: the registry host.
   string host = 3;
+  // Registry (oci) stores only: how the registry is filled as a copy
+  // destination.
   StoreMode mode = 4;
 
-  // Engine (docker/containerd) stores only.
+  // Engine (docker/containerd) stores only: the daemon endpoint.
   string address = 5;
+  // containerd stores only: the containerd namespace.
   string namespace = 6;
 
   // Live status, derived per read: registries report ready from config,
   // engines are probed.
   bool ready = 7;
+  // Engine readiness error, when not ready.
   string error = 8;
+  // What operations the store supports.
   StoreCapabilities capabilities = 9;
 
   option (orm.message) = {

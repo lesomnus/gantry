@@ -14,13 +14,19 @@ service PinService {
 }
 
 message PinListRequest {
+  // Store whose pins to list.
   StoreRef store = 1;
 
+  // Maximum items to return; 0 = no limit.
   int32 page_size = 10;
+  // Continuation token from the previous response; empty starts from the
+  // beginning.
   string page_token = 11;
 }
 
 message PinListResponse {
+  // One page of results.
   repeated Pin items = 1;
+  // Empty when there are no further results.
   string next_page_token = 2;
 }

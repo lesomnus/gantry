@@ -110,7 +110,7 @@ func TestPin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pin.GetPattern() || pin.GetPinnedAt() == nil {
+	if pin.GetPattern() || pin.GetDatePinned() == nil {
 		t.Errorf("unexpected pin: %v", pin)
 	}
 

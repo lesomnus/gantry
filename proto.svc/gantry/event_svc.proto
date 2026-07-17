@@ -15,19 +15,27 @@ service EventService {
 }
 
 message EventListRequest {
+  // Keep only events of this type.
   EventType type = 1;
+  // Exact match on the store name.
   string store = 2;
+  // Exact match on the recorded ref.
   string ref = 3;
   // Terminal job state, for job_done events.
   JobState state = 4;
   // Events recorded at or after this instant.
   google.protobuf.Timestamp since = 5;
 
+  // Maximum items to return; 0 = no limit.
   int32 page_size = 10;
+  // Continuation token from the previous response; empty starts from the
+  // beginning.
   string page_token = 11;
 }
 
 message EventListResponse {
+  // One page of results, newest-first.
   repeated Event items = 1;
+  // Empty when there are no further results.
   string next_page_token = 2;
 }

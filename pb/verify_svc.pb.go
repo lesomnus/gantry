@@ -210,13 +210,18 @@ func (x *VerifyDescribeResponse) ClearLevel() {
 type VerifyDescribeResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Enabled  *bool
+	// Verification is configured on.
+	Enabled *bool
+	// Verifier implementation, e.g. "notation".
 	Provider *string
 	// Global default mode.
-	Mode     *VerifyMode
-	Level    *string
+	Mode *VerifyMode
+	// Effective verification level, e.g. "strict".
+	Level *string
+	// Trust-policy statements.
 	Policies []*VerifyPolicy
-	Anchors  []*VerifyAnchor
+	// Trust-anchor certificates.
+	Anchors []*VerifyAnchor
 	// Effective mode per source registry store (per-store override or the
 	// global default), keyed by store name.
 	Stores map[string]VerifyMode
@@ -248,6 +253,7 @@ func (b0 VerifyDescribeResponse_builder) Build() *VerifyDescribeResponse {
 	return m0
 }
 
+// One trust-policy statement.
 type VerifyPolicy struct {
 	state                        protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Name              *string                `protobuf:"bytes,1,opt,name=name"`
@@ -364,9 +370,13 @@ func (x *VerifyPolicy) ClearVerificationLevel() {
 type VerifyPolicy_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Name              *string
-	RegistryScopes    []string
+	// Statement name.
+	Name *string
+	// Registries the statement applies to.
+	RegistryScopes []string
+	// Certificate identities accepted for those scopes.
 	TrustedIdentities []string
+	// Level the statement enforces, e.g. "strict".
 	VerificationLevel *string
 }
 
@@ -387,6 +397,7 @@ func (b0 VerifyPolicy_builder) Build() *VerifyPolicy {
 	return m0
 }
 
+// One trust-anchor certificate; never key material.
 type VerifyAnchor struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Subject     *string                `protobuf:"bytes,1,opt,name=subject"`
@@ -502,6 +513,7 @@ func (x *VerifyAnchor) ClearNotAfter() {
 type VerifyAnchor_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// Certificate subject.
 	Subject *string
 	// sha256 over the DER encoding.
 	Fingerprint *string
@@ -611,6 +623,7 @@ func (x *VerifyCheckRequest) ClearSource() {
 type VerifyCheckRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// Image reference to check.
 	Ref *string
 	// Source registry; defaults to the ref's registry.
 	Source *StoreRef

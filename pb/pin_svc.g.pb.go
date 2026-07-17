@@ -26,9 +26,9 @@ type PinAddRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Id          []byte                 `protobuf:"bytes,1,opt,name=id"`
 	xxx_hidden_Store       *StoreRef              `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Value       string                 `protobuf:"bytes,3,opt,name=value"`
-	xxx_hidden_Pattern     bool                   `protobuf:"varint,4,opt,name=pattern"`
-	xxx_hidden_PinnedAt    *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=pinned_at,json=pinnedAt"`
+	xxx_hidden_Value       string                 `protobuf:"bytes,8,opt,name=value"`
+	xxx_hidden_Pattern     bool                   `protobuf:"varint,9,opt,name=pattern"`
+	xxx_hidden_DatePinned  *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_pinned,json=datePinned"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -88,9 +88,9 @@ func (x *PinAddRequest) GetPattern() bool {
 	return false
 }
 
-func (x *PinAddRequest) GetPinnedAt() *timestamppb.Timestamp {
+func (x *PinAddRequest) GetDatePinned() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_PinnedAt
+		return x.xxx_hidden_DatePinned
 	}
 	return nil
 }
@@ -115,8 +115,8 @@ func (x *PinAddRequest) SetPattern(v bool) {
 	x.xxx_hidden_Pattern = v
 }
 
-func (x *PinAddRequest) SetPinnedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_PinnedAt = v
+func (x *PinAddRequest) SetDatePinned(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DatePinned = v
 }
 
 func (x *PinAddRequest) HasId() bool {
@@ -133,11 +133,11 @@ func (x *PinAddRequest) HasStore() bool {
 	return x.xxx_hidden_Store != nil
 }
 
-func (x *PinAddRequest) HasPinnedAt() bool {
+func (x *PinAddRequest) HasDatePinned() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_PinnedAt != nil
+	return x.xxx_hidden_DatePinned != nil
 }
 
 func (x *PinAddRequest) ClearId() {
@@ -149,18 +149,18 @@ func (x *PinAddRequest) ClearStore() {
 	x.xxx_hidden_Store = nil
 }
 
-func (x *PinAddRequest) ClearPinnedAt() {
-	x.xxx_hidden_PinnedAt = nil
+func (x *PinAddRequest) ClearDatePinned() {
+	x.xxx_hidden_DatePinned = nil
 }
 
 type PinAddRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Id       []byte
-	Store    *StoreRef
-	Value    string
-	Pattern  bool
-	PinnedAt *timestamppb.Timestamp
+	Id         []byte
+	Store      *StoreRef
+	Value      string
+	Pattern    bool
+	DatePinned *timestamppb.Timestamp
 }
 
 func (b0 PinAddRequest_builder) Build() *PinAddRequest {
@@ -174,7 +174,7 @@ func (b0 PinAddRequest_builder) Build() *PinAddRequest {
 	x.xxx_hidden_Store = b.Store
 	x.xxx_hidden_Value = b.Value
 	x.xxx_hidden_Pattern = b.Pattern
-	x.xxx_hidden_PinnedAt = b.PinnedAt
+	x.xxx_hidden_DatePinned = b.DatePinned
 	return m0
 }
 
@@ -444,7 +444,7 @@ func (*pinRef_Value) isPinRef_Key() {}
 type PinRefByValue struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Store       *StoreRef              `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Value       *string                `protobuf:"bytes,3,opt,name=value"`
+	xxx_hidden_Value       *string                `protobuf:"bytes,8,opt,name=value"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -548,9 +548,9 @@ type PinSelect struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_All         bool                   `protobuf:"varint,1,opt,name=all"`
 	xxx_hidden_Store       *StoreSelect           `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Value       bool                   `protobuf:"varint,3,opt,name=value"`
-	xxx_hidden_Pattern     bool                   `protobuf:"varint,4,opt,name=pattern"`
-	xxx_hidden_PinnedAt    bool                   `protobuf:"varint,5,opt,name=pinned_at,json=pinnedAt"`
+	xxx_hidden_Value       bool                   `protobuf:"varint,8,opt,name=value"`
+	xxx_hidden_Pattern     bool                   `protobuf:"varint,9,opt,name=pattern"`
+	xxx_hidden_DatePinned  bool                   `protobuf:"varint,15,opt,name=date_pinned,json=datePinned"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -610,9 +610,9 @@ func (x *PinSelect) GetPattern() bool {
 	return false
 }
 
-func (x *PinSelect) GetPinnedAt() bool {
+func (x *PinSelect) GetDatePinned() bool {
 	if x != nil {
-		return x.xxx_hidden_PinnedAt
+		return x.xxx_hidden_DatePinned
 	}
 	return false
 }
@@ -636,8 +636,8 @@ func (x *PinSelect) SetPattern(v bool) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 5)
 }
 
-func (x *PinSelect) SetPinnedAt(v bool) {
-	x.xxx_hidden_PinnedAt = v
+func (x *PinSelect) SetDatePinned(v bool) {
+	x.xxx_hidden_DatePinned = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 5)
 }
 
@@ -669,7 +669,7 @@ func (x *PinSelect) HasPattern() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
 }
 
-func (x *PinSelect) HasPinnedAt() bool {
+func (x *PinSelect) HasDatePinned() bool {
 	if x == nil {
 		return false
 	}
@@ -695,19 +695,19 @@ func (x *PinSelect) ClearPattern() {
 	x.xxx_hidden_Pattern = false
 }
 
-func (x *PinSelect) ClearPinnedAt() {
+func (x *PinSelect) ClearDatePinned() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
-	x.xxx_hidden_PinnedAt = false
+	x.xxx_hidden_DatePinned = false
 }
 
 type PinSelect_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	All      *bool
-	Store    *StoreSelect
-	Value    *bool
-	Pattern  *bool
-	PinnedAt *bool
+	All        *bool
+	Store      *StoreSelect
+	Value      *bool
+	Pattern    *bool
+	DatePinned *bool
 }
 
 func (b0 PinSelect_builder) Build() *PinSelect {
@@ -727,9 +727,9 @@ func (b0 PinSelect_builder) Build() *PinSelect {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 5)
 		x.xxx_hidden_Pattern = *b.Pattern
 	}
-	if b.PinnedAt != nil {
+	if b.DatePinned != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 5)
-		x.xxx_hidden_PinnedAt = *b.PinnedAt
+		x.xxx_hidden_DatePinned = *b.DatePinned
 	}
 	return m0
 }
@@ -737,8 +737,8 @@ func (b0 PinSelect_builder) Build() *PinSelect {
 type PinPatchRequest struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Ref         *PinRef                `protobuf:"bytes,1,opt,name=ref"`
-	xxx_hidden_Pattern     bool                   `protobuf:"varint,7,opt,name=pattern"`
-	xxx_hidden_PinnedAt    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=pinned_at,json=pinnedAt"`
+	xxx_hidden_Pattern     bool                   `protobuf:"varint,17,opt,name=pattern"`
+	xxx_hidden_DatePinned  *timestamppb.Timestamp `protobuf:"bytes,29,opt,name=date_pinned,json=datePinned"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -784,9 +784,9 @@ func (x *PinPatchRequest) GetPattern() bool {
 	return false
 }
 
-func (x *PinPatchRequest) GetPinnedAt() *timestamppb.Timestamp {
+func (x *PinPatchRequest) GetDatePinned() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_PinnedAt
+		return x.xxx_hidden_DatePinned
 	}
 	return nil
 }
@@ -800,8 +800,8 @@ func (x *PinPatchRequest) SetPattern(v bool) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 3)
 }
 
-func (x *PinPatchRequest) SetPinnedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_PinnedAt = v
+func (x *PinPatchRequest) SetDatePinned(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DatePinned = v
 }
 
 func (x *PinPatchRequest) HasRef() bool {
@@ -818,11 +818,11 @@ func (x *PinPatchRequest) HasPattern() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
-func (x *PinPatchRequest) HasPinnedAt() bool {
+func (x *PinPatchRequest) HasDatePinned() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_PinnedAt != nil
+	return x.xxx_hidden_DatePinned != nil
 }
 
 func (x *PinPatchRequest) ClearRef() {
@@ -834,16 +834,16 @@ func (x *PinPatchRequest) ClearPattern() {
 	x.xxx_hidden_Pattern = false
 }
 
-func (x *PinPatchRequest) ClearPinnedAt() {
-	x.xxx_hidden_PinnedAt = nil
+func (x *PinPatchRequest) ClearDatePinned() {
+	x.xxx_hidden_DatePinned = nil
 }
 
 type PinPatchRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Ref      *PinRef
-	Pattern  *bool
-	PinnedAt *timestamppb.Timestamp
+	Ref        *PinRef
+	Pattern    *bool
+	DatePinned *timestamppb.Timestamp
 }
 
 func (b0 PinPatchRequest_builder) Build() *PinPatchRequest {
@@ -855,7 +855,7 @@ func (b0 PinPatchRequest_builder) Build() *PinPatchRequest {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 3)
 		x.xxx_hidden_Pattern = *b.Pattern
 	}
-	x.xxx_hidden_PinnedAt = b.PinnedAt
+	x.xxx_hidden_DatePinned = b.DatePinned
 	return m0
 }
 
@@ -971,8 +971,12 @@ func (x *PinListRequest) ClearPageToken() {
 type PinListRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Store     *StoreRef
-	PageSize  *int32
+	// Store whose pins to list.
+	Store *StoreRef
+	// Maximum items to return; 0 = no limit.
+	PageSize *int32
+	// Continuation token from the previous response; empty starts from the
+	// beginning.
 	PageToken *string
 }
 
@@ -1070,7 +1074,9 @@ func (x *PinListResponse) ClearNextPageToken() {
 type PinListResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Items         []*Pin
+	// One page of results.
+	Items []*Pin
+	// Empty when there are no further results.
 	NextPageToken *string
 }
 
@@ -1090,13 +1096,14 @@ var File_gantry_pin_svc_g_proto protoreflect.FileDescriptor
 
 const file_gantry_pin_svc_g_proto_rawDesc = "" +
 	"\n" +
-	"\x16gantry/pin_svc.g.proto\x12\x06gantry\x1a\x10gantry/pin.proto\x1a\x18gantry/store_svc.g.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbe\x01\n" +
+	"\x16gantry/pin_svc.g.proto\x12\x06gantry\x1a\x10gantry/pin.proto\x1a\x18gantry/store_svc.g.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc2\x01\n" +
 	"\rPinAddRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12&\n" +
 	"\x05store\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x1b\n" +
-	"\x05value\x18\x03 \x01(\tB\x05\xaa\x01\x02\b\x02R\x05value\x12\x1f\n" +
-	"\apattern\x18\x04 \x01(\bB\x05\xaa\x01\x02\b\x02R\apattern\x127\n" +
-	"\tpinned_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bpinnedAt\"\\\n" +
+	"\x05value\x18\b \x01(\tB\x05\xaa\x01\x02\b\x02R\x05value\x12\x1f\n" +
+	"\apattern\x18\t \x01(\bB\x05\xaa\x01\x02\b\x02R\apattern\x12;\n" +
+	"\vdate_pinned\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"datePinned\"\\\n" +
 	"\rPinGetRequest\x12 \n" +
 	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.PinRefR\x03ref\x12)\n" +
 	"\x06select\x18\x02 \x01(\v2\x11.gantry.PinSelectR\x06select\"P\n" +
@@ -1106,17 +1113,19 @@ const file_gantry_pin_svc_g_proto_rawDesc = "" +
 	"\x03key\"M\n" +
 	"\rPinRefByValue\x12&\n" +
 	"\x05store\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\x95\x01\n" +
+	"\x05value\x18\b \x01(\tR\x05value\"\x99\x01\n" +
 	"\tPinSelect\x12\x10\n" +
 	"\x03all\x18\x01 \x01(\bR\x03all\x12)\n" +
 	"\x05store\x18\x02 \x01(\v2\x13.gantry.StoreSelectR\x05store\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\bR\x05value\x12\x18\n" +
-	"\apattern\x18\x04 \x01(\bR\apattern\x12\x1b\n" +
-	"\tpinned_at\x18\x05 \x01(\bR\bpinnedAt\"\x86\x01\n" +
+	"\x05value\x18\b \x01(\bR\x05value\x12\x18\n" +
+	"\apattern\x18\t \x01(\bR\apattern\x12\x1f\n" +
+	"\vdate_pinned\x18\x0f \x01(\bR\n" +
+	"datePinned\"\x8a\x01\n" +
 	"\x0fPinPatchRequest\x12 \n" +
 	"\x03ref\x18\x01 \x01(\v2\x0e.gantry.PinRefR\x03ref\x12\x18\n" +
-	"\apattern\x18\a \x01(\bR\apattern\x127\n" +
-	"\tpinned_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\bpinnedAt\"t\n" +
+	"\apattern\x18\x11 \x01(\bR\apattern\x12;\n" +
+	"\vdate_pinned\x18\x1d \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"datePinned\"t\n" +
 	"\x0ePinListRequest\x12&\n" +
 	"\x05store\x18\x01 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x1b\n" +
 	"\tpage_size\x18\n" +
@@ -1152,14 +1161,14 @@ var file_gantry_pin_svc_g_proto_goTypes = []any{
 }
 var file_gantry_pin_svc_g_proto_depIdxs = []int32{
 	8,  // 0: gantry.PinAddRequest.store:type_name -> gantry.StoreRef
-	9,  // 1: gantry.PinAddRequest.pinned_at:type_name -> google.protobuf.Timestamp
+	9,  // 1: gantry.PinAddRequest.date_pinned:type_name -> google.protobuf.Timestamp
 	2,  // 2: gantry.PinGetRequest.ref:type_name -> gantry.PinRef
 	4,  // 3: gantry.PinGetRequest.select:type_name -> gantry.PinSelect
 	3,  // 4: gantry.PinRef.value:type_name -> gantry.PinRefByValue
 	8,  // 5: gantry.PinRefByValue.store:type_name -> gantry.StoreRef
 	10, // 6: gantry.PinSelect.store:type_name -> gantry.StoreSelect
 	2,  // 7: gantry.PinPatchRequest.ref:type_name -> gantry.PinRef
-	9,  // 8: gantry.PinPatchRequest.pinned_at:type_name -> google.protobuf.Timestamp
+	9,  // 8: gantry.PinPatchRequest.date_pinned:type_name -> google.protobuf.Timestamp
 	8,  // 9: gantry.PinListRequest.store:type_name -> gantry.StoreRef
 	11, // 10: gantry.PinListResponse.items:type_name -> gantry.Pin
 	0,  // 11: gantry.PinService.Add:input_type -> gantry.PinAddRequest

@@ -300,7 +300,9 @@ func (x *Verification) SetDigest(v string) {
 type Verification_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Mode     VerifyMode
+	// Effective mode for the job's source store.
+	Mode VerifyMode
+	// A signature was verified.
 	Verified bool
 	// The digest the job was pinned to when verified.
 	Digest string
@@ -411,11 +413,16 @@ func (x *Layer) SetState(v LayerState) {
 type Layer_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Digest   string
+	// Blob digest.
+	Digest string
+	// "os/arch" of the manifest this blob belongs to.
 	Platform string
-	Total    int64
-	Done     int64
-	State    LayerState
+	// Blob size in bytes, when known.
+	Total int64
+	// Bytes fetched so far.
+	Done int64
+	// Per-blob pull state.
+	State LayerState
 }
 
 func (b0 Layer_builder) Build() *Layer {
@@ -587,18 +594,26 @@ func (x *Transfer) SetError(v string) {
 type Transfer_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Store  string
-	Kind   StoreKind
+	// Target store name (or registry host).
+	Store string
+	// Kind of the target store — which side ran this step.
+	Kind StoreKind
+	// Source store name (or registry host).
 	Source string
 	// The reference placed in the target.
 	Ref string
 	// Manifest/index digest the step was anchored to, when known.
-	Digest     string
-	State      TransferState
+	Digest string
+	// Step state.
+	State TransferState
+	// Total bytes to move, when known.
 	BytesTotal int64
-	BytesDone  int64
-	Layers     []*Layer
-	Error      string
+	// Bytes moved so far.
+	BytesDone int64
+	// Per-blob progress.
+	Layers []*Layer
+	// Failure text, on a failed step.
+	Error string
 }
 
 func (b0 Transfer_builder) Build() *Transfer {
@@ -622,20 +637,20 @@ func (b0 Transfer_builder) Build() *Transfer {
 type Job struct {
 	state                    protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Id            string                 `protobuf:"bytes,1,opt,name=id"`
-	xxx_hidden_Ref           string                 `protobuf:"bytes,2,opt,name=ref"`
-	xxx_hidden_Source        *Store                 `protobuf:"bytes,3,opt,name=source"`
-	xxx_hidden_Target        *Store                 `protobuf:"bytes,4,opt,name=target"`
-	xxx_hidden_Platforms     []string               `protobuf:"bytes,5,rep,name=platforms"`
-	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,6,opt,name=copy_referrers,json=copyReferrers"`
-	xxx_hidden_As            []string               `protobuf:"bytes,14,rep,name=as"`
-	xxx_hidden_Labels        map[string]string      `protobuf:"bytes,15,rep,name=labels" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_State         JobState               `protobuf:"varint,7,opt,name=state,enum=gantry.JobState"`
-	xxx_hidden_Error         string                 `protobuf:"bytes,8,opt,name=error"`
-	xxx_hidden_Verification  *Verification          `protobuf:"bytes,9,opt,name=verification"`
-	xxx_hidden_Transfers     *[]*Transfer           `protobuf:"bytes,10,rep,name=transfers"`
-	xxx_hidden_CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt"`
-	xxx_hidden_StartedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=started_at,json=startedAt"`
-	xxx_hidden_EndedAt       *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=ended_at,json=endedAt"`
+	xxx_hidden_Labels        map[string]string      `protobuf:"bytes,7,rep,name=labels" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	xxx_hidden_Ref           string                 `protobuf:"bytes,8,opt,name=ref"`
+	xxx_hidden_Source        *Store                 `protobuf:"bytes,9,opt,name=source"`
+	xxx_hidden_Target        *Store                 `protobuf:"bytes,10,opt,name=target"`
+	xxx_hidden_Platforms     []string               `protobuf:"bytes,11,rep,name=platforms"`
+	xxx_hidden_As            []string               `protobuf:"bytes,12,rep,name=as"`
+	xxx_hidden_DateEnded     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=date_ended,json=dateEnded"`
+	xxx_hidden_DateStarted   *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=date_started,json=dateStarted"`
+	xxx_hidden_DateCreated   *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_created,json=dateCreated"`
+	xxx_hidden_State         JobState               `protobuf:"varint,16,opt,name=state,enum=gantry.JobState"`
+	xxx_hidden_Error         string                 `protobuf:"bytes,17,opt,name=error"`
+	xxx_hidden_Verification  *Verification          `protobuf:"bytes,18,opt,name=verification"`
+	xxx_hidden_Transfers     *[]*Transfer           `protobuf:"bytes,19,rep,name=transfers"`
+	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,20,opt,name=copy_referrers,json=copyReferrers"`
 	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
 	XXX_presence             [1]uint32
 	unknownFields            protoimpl.UnknownFields
@@ -674,6 +689,13 @@ func (x *Job) GetId() string {
 	return ""
 }
 
+func (x *Job) GetLabels() map[string]string {
+	if x != nil {
+		return x.xxx_hidden_Labels
+	}
+	return nil
+}
+
 func (x *Job) GetRef() string {
 	if x != nil {
 		return x.xxx_hidden_Ref
@@ -702,13 +724,6 @@ func (x *Job) GetPlatforms() []string {
 	return nil
 }
 
-func (x *Job) GetCopyReferrers() bool {
-	if x != nil {
-		return x.xxx_hidden_CopyReferrers
-	}
-	return false
-}
-
 func (x *Job) GetAs() []string {
 	if x != nil {
 		return x.xxx_hidden_As
@@ -716,9 +731,23 @@ func (x *Job) GetAs() []string {
 	return nil
 }
 
-func (x *Job) GetLabels() map[string]string {
+func (x *Job) GetDateEnded() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_Labels
+		return x.xxx_hidden_DateEnded
+	}
+	return nil
+}
+
+func (x *Job) GetDateStarted() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_DateStarted
+	}
+	return nil
+}
+
+func (x *Job) GetDateCreated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.xxx_hidden_DateCreated
 	}
 	return nil
 }
@@ -753,29 +782,19 @@ func (x *Job) GetTransfers() []*Transfer {
 	return nil
 }
 
-func (x *Job) GetCreatedAt() *timestamppb.Timestamp {
+func (x *Job) GetCopyReferrers() bool {
 	if x != nil {
-		return x.xxx_hidden_CreatedAt
+		return x.xxx_hidden_CopyReferrers
 	}
-	return nil
-}
-
-func (x *Job) GetStartedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.xxx_hidden_StartedAt
-	}
-	return nil
-}
-
-func (x *Job) GetEndedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.xxx_hidden_EndedAt
-	}
-	return nil
+	return false
 }
 
 func (x *Job) SetId(v string) {
 	x.xxx_hidden_Id = v
+}
+
+func (x *Job) SetLabels(v map[string]string) {
+	x.xxx_hidden_Labels = v
 }
 
 func (x *Job) SetRef(v string) {
@@ -794,17 +813,20 @@ func (x *Job) SetPlatforms(v []string) {
 	x.xxx_hidden_Platforms = v
 }
 
-func (x *Job) SetCopyReferrers(v bool) {
-	x.xxx_hidden_CopyReferrers = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 15)
-}
-
 func (x *Job) SetAs(v []string) {
 	x.xxx_hidden_As = v
 }
 
-func (x *Job) SetLabels(v map[string]string) {
-	x.xxx_hidden_Labels = v
+func (x *Job) SetDateEnded(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateEnded = v
+}
+
+func (x *Job) SetDateStarted(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateStarted = v
+}
+
+func (x *Job) SetDateCreated(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateCreated = v
 }
 
 func (x *Job) SetState(v JobState) {
@@ -823,16 +845,9 @@ func (x *Job) SetTransfers(v []*Transfer) {
 	x.xxx_hidden_Transfers = &v
 }
 
-func (x *Job) SetCreatedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_CreatedAt = v
-}
-
-func (x *Job) SetStartedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_StartedAt = v
-}
-
-func (x *Job) SetEndedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_EndedAt = v
+func (x *Job) SetCopyReferrers(v bool) {
+	x.xxx_hidden_CopyReferrers = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 15)
 }
 
 func (x *Job) HasSource() bool {
@@ -849,11 +864,25 @@ func (x *Job) HasTarget() bool {
 	return x.xxx_hidden_Target != nil
 }
 
-func (x *Job) HasCopyReferrers() bool {
+func (x *Job) HasDateEnded() bool {
 	if x == nil {
 		return false
 	}
-	return protoimpl.X.Present(&(x.XXX_presence[0]), 5)
+	return x.xxx_hidden_DateEnded != nil
+}
+
+func (x *Job) HasDateStarted() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_DateStarted != nil
+}
+
+func (x *Job) HasDateCreated() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_DateCreated != nil
 }
 
 func (x *Job) HasVerification() bool {
@@ -863,25 +892,11 @@ func (x *Job) HasVerification() bool {
 	return x.xxx_hidden_Verification != nil
 }
 
-func (x *Job) HasCreatedAt() bool {
+func (x *Job) HasCopyReferrers() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_CreatedAt != nil
-}
-
-func (x *Job) HasStartedAt() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_StartedAt != nil
-}
-
-func (x *Job) HasEndedAt() bool {
-	if x == nil {
-		return false
-	}
-	return x.xxx_hidden_EndedAt != nil
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 14)
 }
 
 func (x *Job) ClearSource() {
@@ -892,25 +907,25 @@ func (x *Job) ClearTarget() {
 	x.xxx_hidden_Target = nil
 }
 
-func (x *Job) ClearCopyReferrers() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
-	x.xxx_hidden_CopyReferrers = false
+func (x *Job) ClearDateEnded() {
+	x.xxx_hidden_DateEnded = nil
+}
+
+func (x *Job) ClearDateStarted() {
+	x.xxx_hidden_DateStarted = nil
+}
+
+func (x *Job) ClearDateCreated() {
+	x.xxx_hidden_DateCreated = nil
 }
 
 func (x *Job) ClearVerification() {
 	x.xxx_hidden_Verification = nil
 }
 
-func (x *Job) ClearCreatedAt() {
-	x.xxx_hidden_CreatedAt = nil
-}
-
-func (x *Job) ClearStartedAt() {
-	x.xxx_hidden_StartedAt = nil
-}
-
-func (x *Job) ClearEndedAt() {
-	x.xxx_hidden_EndedAt = nil
+func (x *Job) ClearCopyReferrers() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 14)
+	x.xxx_hidden_CopyReferrers = false
 }
 
 type Job_builder struct {
@@ -918,6 +933,13 @@ type Job_builder struct {
 
 	// Server-generated, e.g. "job_1f2e...".
 	Id string
+	// Free-form key/value labels for organizing and selecting jobs. Purely
+	// caller metadata — they do not change how the move runs, only how it is
+	// found (List label matching). Fixed at submission and not changed through
+	// the client surface (JobService.Patch is not a client operation); coalesced
+	// callers still keep their own labels, since each holds a distinct job handle
+	// server-side.
+	Labels map[string]string
 	// Image reference to move, e.g. "docker.io/library/redis:7".
 	Ref string
 	// Source registry; defaults to the ref's registry. Unlike the REST API,
@@ -929,9 +951,6 @@ type Job_builder struct {
 	// Registry target: platforms to copy (empty = all). Engine
 	// target: the single platform to pull (empty = daemon's).
 	Platforms []string
-	// Copy source referrer artifacts (signatures) along with the image.
-	// Absent = server default (on when the job is verified).
-	CopyReferrers *bool
 	// Engine target only: record the pulled image under these names
 	// instead of the pull reference, so a cache-fed engine keeps the image
 	// under its upstream name (e.g. "docker.io/library/redis:7"). Tag
@@ -942,21 +961,21 @@ type Job_builder struct {
 	// registry (containerd image store; a classic docker graph store skips
 	// them with a warning). Non-empty replaces the pull-reference name
 	// entirely — include it in the list to keep it.
-	As []string
-	// Free-form key/value labels for organizing and selecting jobs. Purely
-	// caller metadata — they do not change how the move runs, only how it is
-	// found (List label matching). Fixed at submission and not changed through
-	// the client surface (JobService.Patch is not a client operation); coalesced
-	// callers still keep their own labels, since each holds a distinct job handle
-	// server-side.
-	Labels       map[string]string
-	State        JobState
-	Error        string
+	As          []string
+	DateEnded   *timestamppb.Timestamp
+	DateStarted *timestamppb.Timestamp
+	DateCreated *timestamppb.Timestamp
+	// Lifecycle state.
+	State JobState
+	// Failure text, on a failed job.
+	Error string
+	// Admission verification record; absent when verification was off.
 	Verification *Verification
-	Transfers    []*Transfer
-	CreatedAt    *timestamppb.Timestamp
-	StartedAt    *timestamppb.Timestamp
-	EndedAt      *timestamppb.Timestamp
+	// The job's steps, in execution order.
+	Transfers []*Transfer
+	// Copy source referrer artifacts (signatures) along with the image.
+	// Absent = server default (on when the job is verified).
+	CopyReferrers *bool
 }
 
 func (b0 Job_builder) Build() *Job {
@@ -964,23 +983,23 @@ func (b0 Job_builder) Build() *Job {
 	b, x := &b0, m0
 	_, _ = b, x
 	x.xxx_hidden_Id = b.Id
+	x.xxx_hidden_Labels = b.Labels
 	x.xxx_hidden_Ref = b.Ref
 	x.xxx_hidden_Source = b.Source
 	x.xxx_hidden_Target = b.Target
 	x.xxx_hidden_Platforms = b.Platforms
-	if b.CopyReferrers != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 15)
-		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
-	}
 	x.xxx_hidden_As = b.As
-	x.xxx_hidden_Labels = b.Labels
+	x.xxx_hidden_DateEnded = b.DateEnded
+	x.xxx_hidden_DateStarted = b.DateStarted
+	x.xxx_hidden_DateCreated = b.DateCreated
 	x.xxx_hidden_State = b.State
 	x.xxx_hidden_Error = b.Error
 	x.xxx_hidden_Verification = b.Verification
 	x.xxx_hidden_Transfers = &b.Transfers
-	x.xxx_hidden_CreatedAt = b.CreatedAt
-	x.xxx_hidden_StartedAt = b.StartedAt
-	x.xxx_hidden_EndedAt = b.EndedAt
+	if b.CopyReferrers != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 15)
+		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
+	}
 	return m0
 }
 
@@ -1012,26 +1031,25 @@ const file_gantry_job_proto_rawDesc = "" +
 	"bytes_done\x18\b \x01(\x03R\tbytesDone\x12%\n" +
 	"\x06layers\x18\t \x03(\v2\r.gantry.LayerR\x06layers\x12\x14\n" +
 	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"\xe2\x05\n" +
+	" \x01(\tR\x05error\"\xee\x05\n" +
 	"\x03Job\x12\x19\n" +
-	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12\x18\n" +
-	"\x03ref\x18\x02 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12/\n" +
-	"\x06source\x18\x03 \x01(\v2\r.gantry.StoreB\b\xf2\x82\x16\x048\x01@\x01R\x06source\x12-\n" +
-	"\x06target\x18\x04 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x06target\x12$\n" +
-	"\tplatforms\x18\x05 \x03(\tB\x06\xea\x82\x16\x02@\x01R\tplatforms\x122\n" +
-	"\x0ecopy_referrers\x18\x06 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x12\x16\n" +
-	"\x02as\x18\x0e \x03(\tB\x06\xea\x82\x16\x02@\x01R\x02as\x12/\n" +
-	"\x06labels\x18\x0f \x03(\v2\x17.gantry.Job.LabelsEntryR\x06labels\x12&\n" +
-	"\x05state\x18\a \x01(\x0e2\x10.gantry.JobStateR\x05state\x12\x14\n" +
-	"\x05error\x18\b \x01(\tR\x05error\x128\n" +
-	"\fverification\x18\t \x01(\v2\x14.gantry.VerificationR\fverification\x12.\n" +
-	"\ttransfers\x18\n" +
-	" \x03(\v2\x10.gantry.TransferR\ttransfers\x12D\n" +
+	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12/\n" +
+	"\x06labels\x18\a \x03(\v2\x17.gantry.Job.LabelsEntryR\x06labels\x12\x18\n" +
+	"\x03ref\x18\b \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12/\n" +
+	"\x06source\x18\t \x01(\v2\r.gantry.StoreB\b\xf2\x82\x16\x048\x01@\x01R\x06source\x12-\n" +
+	"\x06target\x18\n" +
+	" \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x06target\x12$\n" +
+	"\tplatforms\x18\v \x03(\tB\x06\xea\x82\x16\x02@\x01R\tplatforms\x12\x16\n" +
+	"\x02as\x18\f \x03(\tB\x06\xea\x82\x16\x02@\x01R\x02as\x129\n" +
 	"\n" +
-	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampB\t\xea\x82\x16\x05@\x01\x82\x01\x00R\tcreatedAt\x129\n" +
-	"\n" +
-	"started_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
-	"\bended_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x1a9\n" +
+	"date_ended\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tdateEnded\x12=\n" +
+	"\fdate_started\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\vdateStarted\x12H\n" +
+	"\fdate_created\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\t\xea\x82\x16\x05@\x01\x82\x01\x00R\vdateCreated\x12&\n" +
+	"\x05state\x18\x10 \x01(\x0e2\x10.gantry.JobStateR\x05state\x12\x14\n" +
+	"\x05error\x18\x11 \x01(\tR\x05error\x128\n" +
+	"\fverification\x18\x12 \x01(\v2\x14.gantry.VerificationR\fverification\x12.\n" +
+	"\ttransfers\x18\x13 \x03(\v2\x10.gantry.TransferR\ttransfers\x122\n" +
+	"\x0ecopy_referrers\x18\x14 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\x95\x01\n" +
@@ -1086,15 +1104,15 @@ var file_gantry_job_proto_depIdxs = []int32{
 	9,  // 2: gantry.Transfer.kind:type_name -> gantry.StoreKind
 	2,  // 3: gantry.Transfer.state:type_name -> gantry.TransferState
 	5,  // 4: gantry.Transfer.layers:type_name -> gantry.Layer
-	10, // 5: gantry.Job.source:type_name -> gantry.Store
-	10, // 6: gantry.Job.target:type_name -> gantry.Store
-	8,  // 7: gantry.Job.labels:type_name -> gantry.Job.LabelsEntry
-	0,  // 8: gantry.Job.state:type_name -> gantry.JobState
-	4,  // 9: gantry.Job.verification:type_name -> gantry.Verification
-	6,  // 10: gantry.Job.transfers:type_name -> gantry.Transfer
-	11, // 11: gantry.Job.created_at:type_name -> google.protobuf.Timestamp
-	11, // 12: gantry.Job.started_at:type_name -> google.protobuf.Timestamp
-	11, // 13: gantry.Job.ended_at:type_name -> google.protobuf.Timestamp
+	8,  // 5: gantry.Job.labels:type_name -> gantry.Job.LabelsEntry
+	10, // 6: gantry.Job.source:type_name -> gantry.Store
+	10, // 7: gantry.Job.target:type_name -> gantry.Store
+	11, // 8: gantry.Job.date_ended:type_name -> google.protobuf.Timestamp
+	11, // 9: gantry.Job.date_started:type_name -> google.protobuf.Timestamp
+	11, // 10: gantry.Job.date_created:type_name -> google.protobuf.Timestamp
+	0,  // 11: gantry.Job.state:type_name -> gantry.JobState
+	4,  // 12: gantry.Job.verification:type_name -> gantry.Verification
+	6,  // 13: gantry.Job.transfers:type_name -> gantry.Transfer
 	14, // [14:14] is the sub-list for method output_type
 	14, // [14:14] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name

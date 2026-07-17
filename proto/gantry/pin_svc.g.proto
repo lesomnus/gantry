@@ -24,9 +24,9 @@ service PinService {
 message PinAddRequest {
   bytes id = 1;
   StoreRef store = 2;
-  string value = 3 [features.field_presence = IMPLICIT];
-  bool pattern = 4 [features.field_presence = IMPLICIT];
-  google.protobuf.Timestamp pinned_at = 5;
+  string value = 8 [features.field_presence = IMPLICIT];
+  bool pattern = 9 [features.field_presence = IMPLICIT];
+  google.protobuf.Timestamp date_pinned = 15;
 }
 
 message PinGetRequest {
@@ -43,31 +43,37 @@ message PinRef {
 
 message PinRefByValue {
   StoreRef store = 2;
-  string value = 3;
+  string value = 8;
 }
 
 message PinSelect {
   bool all = 1;
   StoreSelect store = 2;
-  bool value = 3;
-  bool pattern = 4;
-  bool pinned_at = 5;
+  bool value = 8;
+  bool pattern = 9;
+  bool date_pinned = 15;
 }
 
 message PinPatchRequest {
   PinRef ref = 1;
-  bool pattern = 7;
-  google.protobuf.Timestamp pinned_at = 9;
+  bool pattern = 17;
+  google.protobuf.Timestamp date_pinned = 29;
 }
 
 message PinListRequest {
+  // Store whose pins to list.
   StoreRef store = 1;
 
+  // Maximum items to return; 0 = no limit.
   int32 page_size = 10;
+  // Continuation token from the previous response; empty starts from the
+  // beginning.
   string page_token = 11;
 }
 
 message PinListResponse {
+  // One page of results.
   repeated Pin items = 1;
+  // Empty when there are no further results.
   string next_page_token = 2;
 }

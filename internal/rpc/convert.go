@@ -252,9 +252,9 @@ func jobToPB(snap warm.JobSnapshot) *pb.Job {
 		Error:        snap.Err,
 		Verification: verificationToPB(snap.Verification),
 		Transfers:    transfers,
-		CreatedAt:    ts(snap.CreatedAt),
-		StartedAt:    ts(snap.StartedAt),
-		EndedAt:      ts(snap.EndedAt),
+		DateCreated:  ts(snap.CreatedAt),
+		DateStarted:  ts(snap.StartedAt),
+		DateEnded:    ts(snap.EndedAt),
 	}
 	// The snapshot carries the resolved stores inside its transfer step.
 	if len(snap.Transfers) > 0 {
@@ -266,40 +266,40 @@ func jobToPB(snap warm.JobSnapshot) *pb.Job {
 
 func recordToPB(storeName string, rec retention.Record, inUse bool) *pb.Image {
 	return pb.Image_builder{
-		Id:              imageID(storeName, rec.Ref),
-		Store:           storeByName(storeName),
-		Ref:             rec.Ref,
-		Repo:            rec.Repo,
-		Tag:             rec.Tag,
-		Digest:          rec.Digest,
-		FirstSeen:       ts(rec.FirstSeen),
-		LastUsed:        ts(rec.LastUsed),
-		LastDistributed: ts(rec.LastDistributed),
-		Pinned:          rec.Pinned,
-		InUse:           inUse,
+		Id:                  imageID(storeName, rec.Ref),
+		Store:               storeByName(storeName),
+		Ref:                 rec.Ref,
+		Repo:                rec.Repo,
+		Tag:                 rec.Tag,
+		Digest:              rec.Digest,
+		DateFirstSeen:       ts(rec.FirstSeen),
+		DateLastUsed:        ts(rec.LastUsed),
+		DateLastDistributed: ts(rec.LastDistributed),
+		Pinned:              rec.Pinned,
+		InUse:               inUse,
 	}.Build()
 }
 
 func pinToPB(storeName string, e retention.PinEntry) *pb.Pin {
 	return pb.Pin_builder{
-		Id:       pinID(storeName, e.Value),
-		Store:    storeByName(storeName),
-		Value:    e.Value,
-		Pattern:  e.Pattern,
-		PinnedAt: ts(e.At),
+		Id:         pinID(storeName, e.Value),
+		Store:      storeByName(storeName),
+		Value:      e.Value,
+		Pattern:    e.Pattern,
+		DatePinned: ts(e.At),
 	}.Build()
 }
 
 func eventToPB(e event.Event) *pb.Event {
 	b := pb.Event_builder{
-		Seq:    e.Seq,
-		At:     ts(e.At),
-		Type:   eventTypeToPB[e.Type],
-		Store:  e.Store,
-		Ref:    e.Ref,
-		State:  jobStateToPB[warm.JobState(e.State)],
-		Digest: e.Digest,
-		Error:  e.Error,
+		Seq:         e.Seq,
+		DateCreated: ts(e.At),
+		Type:        eventTypeToPB[e.Type],
+		Store:       e.Store,
+		Ref:         e.Ref,
+		State:       jobStateToPB[warm.JobState(e.State)],
+		Digest:      e.Digest,
+		Error:       e.Error,
 	}
 	if len(e.Detail) > 0 {
 		var d struct {
@@ -328,10 +328,10 @@ func eventToPB(e event.Event) *pb.Event {
 
 func reportToPB(rep health.Report) *pb.StoreHealthResponse {
 	b := pb.StoreHealthResponse_builder{
-		Healthy:   proto.Bool(rep.Healthy),
-		LatencyMs: proto.Int64(rep.LatencyMS),
-		CheckedAt: ts(rep.CheckedAt),
-		Cached:    proto.Bool(rep.Cached),
+		Healthy:     proto.Bool(rep.Healthy),
+		LatencyMs:   proto.Int64(rep.LatencyMS),
+		DateChecked: ts(rep.CheckedAt),
+		Cached:      proto.Bool(rep.Cached),
 	}
 	if k, ok := storeKindToPB[rep.Kind]; ok {
 		b.Kind = &k
@@ -346,8 +346,8 @@ func watcherToPB(ws retention.WatcherStatus) *pb.GcWatcherStatus {
 	b := pb.GcWatcherStatus_builder{
 		Connected:     proto.Bool(ws.Connected),
 		WatchingSince: ts(ws.Since),
-		LastEventAt:   ts(ws.LastEventAt),
-		LastSeedAt:    ts(ws.LastSeedAt),
+		DateLastEvent: ts(ws.LastEventAt),
+		DateLastSeed:  ts(ws.LastSeedAt),
 		Reconnects:    proto.Int32(int32(ws.Reconnects)),
 	}
 	if ws.LastError != "" {

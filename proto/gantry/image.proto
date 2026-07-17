@@ -13,33 +13,37 @@ option go_package = "github.com/lesomnus/gantry/pb";
 // entry. Created and updated by gantry's usage watcher and job pipeline;
 // identity is (store, ref).
 message Image {
+  // Deterministic UUID synthesized from (store, ref).
   bytes id = 1 [(orm.field) = {
     type: TYPE_UUID
     key: true
     default: ""
   }];
+  // Engine store holding the image.
   Store store = 2 [(orm.edge) = {immutable: true}];
+  
   // Full local image reference, e.g. "cache.local/team/app:1.2".
-  string ref = 3 [(orm.field) = {immutable: true}];
+  string ref = 8 [(orm.field) = {immutable: true}];
 
-  // Derived from ref at creation.
-  string repo = 4 [(orm.field) = {immutable: true}];
-  string tag = 5 [(orm.field) = {immutable: true}];
   // Resolved manifest digest, when known.
-  string digest = 6;
+  string digest = 9;
+  // Host-qualified repository, derived from ref at creation.
+  string repo = 10 [(orm.field) = {immutable: true}];
+  // Tag part of ref, derived at creation.
+  string tag = 11 [(orm.field) = {immutable: true}];
 
-  // Age clock for images never observed used.
-  google.protobuf.Timestamp first_seen = 7 [(orm.field) = {immutable: true}];
-  // Last time a container ran with this image; absent = never observed.
-  google.protobuf.Timestamp last_used = 8;
   // Last time gantry pushed this ref to the engine.
-  google.protobuf.Timestamp last_distributed = 9;
+  google.protobuf.Timestamp date_last_distributed = 13;
+  // Last time a container ran with this image; absent = never observed.
+  google.protobuf.Timestamp date_last_used = 14;
+  // Age clock for images never observed used.
+  google.protobuf.Timestamp date_first_seen = 15 [(orm.field) = {immutable: true}];
 
   // Derived: whether any pin currently protects this record.
-  bool pinned = 10;
+  bool pinned = 16;
   // Derived: whether a live container on the engine currently references
   // this image (by tag ref or image ID).
-  bool in_use = 11;
+  bool in_use = 17;
 
   option (orm.message) = {
     rpc: {crud: true}
@@ -54,7 +58,7 @@ message Image {
           },
           {
             name: "ref"
-            number: 3
+            number: 8
           }
         ]
       }

@@ -46,7 +46,9 @@ enum LayerState {
 // Admission-time signature verification audit record; absent when
 // verification is disabled.
 message Verification {
+  // Effective mode for the job's source store.
   VerifyMode mode = 1;
+  // A signature was verified.
   bool verified = 2;
   // The digest the job was pinned to when verified.
   string digest = 3;
@@ -54,26 +56,39 @@ message Verification {
 
 // Per-blob progress of a transfer step.
 message Layer {
+  // Blob digest.
   string digest = 1;
+  // "os/arch" of the manifest this blob belongs to.
   string platform = 2;
+  // Blob size in bytes, when known.
   int64 total = 3;
+  // Bytes fetched so far.
   int64 done = 4;
+  // Per-blob pull state.
   LayerState state = 5;
 }
 
 // One step of a job: a registry copy or an engine pull.
 message Transfer {
+  // Target store name (or registry host).
   string store = 1;
+  // Kind of the target store — which side ran this step.
   StoreKind kind = 2;
+  // Source store name (or registry host).
   string source = 3;
   // The reference placed in the target.
   string ref = 4;
   // Manifest/index digest the step was anchored to, when known.
   string digest = 5;
+  // Step state.
   TransferState state = 6;
+  // Total bytes to move, when known.
   int64 bytes_total = 7;
+  // Bytes moved so far.
   int64 bytes_done = 8;
+  // Per-blob progress.
   repeated Layer layers = 9;
+  // Failure text, on a failed step.
   string error = 10;
 }
 
@@ -84,26 +99,29 @@ message Job {
     key: true
     default: ""
   }];
+
+  // Free-form key/value labels for organizing and selecting jobs. Purely
+  // caller metadata — they do not change how the move runs, only how it is
+  // found (List label matching). Fixed at submission and not changed through
+  // the client surface (JobService.Patch is not a client operation); coalesced
+  // callers still keep their own labels, since each holds a distinct job handle
+  // server-side.
+  map<string, string> labels = 7;
+  
   // Image reference to move, e.g. "docker.io/library/redis:7".
-  string ref = 2 [(orm.field) = {immutable: true}];
+  string ref = 8 [(orm.field) = {immutable: true}];
   // Source registry; defaults to the ref's registry. Unlike the REST API,
   // the gRPC surface addresses declared stores only — bare registry hosts
   // (allow_unknown_stores) are not expressible through a StoreRef.
-  Store source = 3 [(orm.edge) = {
+  Store source = 9 [(orm.edge) = {
     nullable: true
     immutable: true
   }];
   // Target store: a registry (gantry copies) or an engine (daemon pulls).
-  Store target = 4 [(orm.edge) = {immutable: true}];
+  Store target = 10 [(orm.edge) = {immutable: true}];
   // Registry target: platforms to copy (empty = all). Engine
   // target: the single platform to pull (empty = daemon's).
-  repeated string platforms = 5 [(orm.field) = {immutable: true}];
-  // Copy source referrer artifacts (signatures) along with the image.
-  // Absent = server default (on when the job is verified).
-  bool copy_referrers = 6 [
-    features.field_presence = EXPLICIT,
-    (orm.field) = {immutable: true}
-  ];
+  repeated string platforms = 11 [(orm.field) = {immutable: true}];
   // Engine target only: record the pulled image under these names
   // instead of the pull reference, so a cache-fed engine keeps the image
   // under its upstream name (e.g. "docker.io/library/redis:7"). Tag
@@ -114,26 +132,30 @@ message Job {
   // registry (containerd image store; a classic docker graph store skips
   // them with a warning). Non-empty replaces the pull-reference name
   // entirely — include it in the list to keep it.
-  repeated string as = 14 [(orm.field) = {immutable: true}];
-  // Free-form key/value labels for organizing and selecting jobs. Purely
-  // caller metadata — they do not change how the move runs, only how it is
-  // found (List label matching). Fixed at submission and not changed through
-  // the client surface (JobService.Patch is not a client operation); coalesced
-  // callers still keep their own labels, since each holds a distinct job handle
-  // server-side.
-  map<string, string> labels = 15;
+  repeated string as = 12 [(orm.field) = {immutable: true}];
 
-  JobState state = 7;
-  string error = 8;
-  Verification verification = 9;
-  repeated Transfer transfers = 10;
-
-  google.protobuf.Timestamp created_at = 11 [(orm.field) = {
+  google.protobuf.Timestamp date_ended = 13;
+  google.protobuf.Timestamp date_started = 14;
+  google.protobuf.Timestamp date_created = 15 [(orm.field) = {
     immutable: true
     default: ""
   }];
-  google.protobuf.Timestamp started_at = 12;
-  google.protobuf.Timestamp ended_at = 13;
+
+  // Lifecycle state.
+  JobState state = 16;
+  // Failure text, on a failed job.
+  string error = 17;
+  // Admission verification record; absent when verification was off.
+  Verification verification = 18;
+  // The job's steps, in execution order.
+  repeated Transfer transfers = 19;
+
+  // Copy source referrer artifacts (signatures) along with the image.
+  // Absent = server default (on when the job is verified).
+  bool copy_referrers = 20 [
+    features.field_presence = EXPLICIT,
+    (orm.field) = {immutable: true}
+  ];
 
   option (orm.message) = {
     rpc: {crud: true}

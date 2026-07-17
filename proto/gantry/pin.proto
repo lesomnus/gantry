@@ -11,22 +11,26 @@ option go_package = "github.com/lesomnus/gantry/pb";
 
 // A GC exemption on an engine store: an exact image reference or a
 // doublestar pattern. Identity is (store, value); re-pinning the same value
-// is an upsert that refreshes pinned_at.
+// is an upsert that refreshes date_pinned.
 message Pin {
+  // Deterministic UUID synthesized from (store, value).
   bytes id = 1 [(orm.field) = {
     type: TYPE_UUID
     key: true
     default: ""
   }];
+  // Engine store the pin applies to.
   Store store = 2 [(orm.edge) = {immutable: true}];
+
   // Exact reference (pattern=false) or doublestar glob (pattern=true),
   // e.g. "docker.io/library/nginx:1.27" or "*:stable".
-  string value = 3 [(orm.field) = {immutable: true}];
+  string value = 8 [(orm.field) = {immutable: true}];
   // May flip on re-pin of the same value: pattern-ness is an attribute of
   // the pin, not part of its identity.
-  bool pattern = 4;
+  bool pattern = 9;
+
   // Server-stamped; absent on pins persisted before entries carried a time.
-  google.protobuf.Timestamp pinned_at = 5;
+  google.protobuf.Timestamp date_pinned = 15;
 
   option (orm.message) = {
     rpc: {crud: true}
@@ -41,7 +45,7 @@ message Pin {
           },
           {
             name: "value"
-            number: 3
+            number: 8
           }
         ]
       }

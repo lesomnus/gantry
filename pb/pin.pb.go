@@ -24,16 +24,16 @@ const (
 
 // A GC exemption on an engine store: an exact image reference or a
 // doublestar pattern. Identity is (store, value); re-pinning the same value
-// is an upsert that refreshes pinned_at.
+// is an upsert that refreshes date_pinned.
 type Pin struct {
-	state               protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Id       []byte                 `protobuf:"bytes,1,opt,name=id"`
-	xxx_hidden_Store    *Store                 `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Value    string                 `protobuf:"bytes,3,opt,name=value"`
-	xxx_hidden_Pattern  bool                   `protobuf:"varint,4,opt,name=pattern"`
-	xxx_hidden_PinnedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=pinned_at,json=pinnedAt"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id         []byte                 `protobuf:"bytes,1,opt,name=id"`
+	xxx_hidden_Store      *Store                 `protobuf:"bytes,2,opt,name=store"`
+	xxx_hidden_Value      string                 `protobuf:"bytes,8,opt,name=value"`
+	xxx_hidden_Pattern    bool                   `protobuf:"varint,9,opt,name=pattern"`
+	xxx_hidden_DatePinned *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_pinned,json=datePinned"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *Pin) Reset() {
@@ -89,9 +89,9 @@ func (x *Pin) GetPattern() bool {
 	return false
 }
 
-func (x *Pin) GetPinnedAt() *timestamppb.Timestamp {
+func (x *Pin) GetDatePinned() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_PinnedAt
+		return x.xxx_hidden_DatePinned
 	}
 	return nil
 }
@@ -115,8 +115,8 @@ func (x *Pin) SetPattern(v bool) {
 	x.xxx_hidden_Pattern = v
 }
 
-func (x *Pin) SetPinnedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_PinnedAt = v
+func (x *Pin) SetDatePinned(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DatePinned = v
 }
 
 func (x *Pin) HasStore() bool {
@@ -126,25 +126,27 @@ func (x *Pin) HasStore() bool {
 	return x.xxx_hidden_Store != nil
 }
 
-func (x *Pin) HasPinnedAt() bool {
+func (x *Pin) HasDatePinned() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_PinnedAt != nil
+	return x.xxx_hidden_DatePinned != nil
 }
 
 func (x *Pin) ClearStore() {
 	x.xxx_hidden_Store = nil
 }
 
-func (x *Pin) ClearPinnedAt() {
-	x.xxx_hidden_PinnedAt = nil
+func (x *Pin) ClearDatePinned() {
+	x.xxx_hidden_DatePinned = nil
 }
 
 type Pin_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Id    []byte
+	// Deterministic UUID synthesized from (store, value).
+	Id []byte
+	// Engine store the pin applies to.
 	Store *Store
 	// Exact reference (pattern=false) or doublestar glob (pattern=true),
 	// e.g. "docker.io/library/nginx:1.27" or "*:stable".
@@ -153,7 +155,7 @@ type Pin_builder struct {
 	// the pin, not part of its identity.
 	Pattern bool
 	// Server-stamped; absent on pins persisted before entries carried a time.
-	PinnedAt *timestamppb.Timestamp
+	DatePinned *timestamppb.Timestamp
 }
 
 func (b0 Pin_builder) Build() *Pin {
@@ -164,7 +166,7 @@ func (b0 Pin_builder) Build() *Pin {
 	x.xxx_hidden_Store = b.Store
 	x.xxx_hidden_Value = b.Value
 	x.xxx_hidden_Pattern = b.Pattern
-	x.xxx_hidden_PinnedAt = b.PinnedAt
+	x.xxx_hidden_DatePinned = b.DatePinned
 	return m0
 }
 
@@ -172,15 +174,16 @@ var File_gantry_pin_proto protoreflect.FileDescriptor
 
 const file_gantry_pin_proto_rawDesc = "" +
 	"\n" +
-	"\x10gantry/pin.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xeb\x01\n" +
+	"\x10gantry/pin.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xef\x01\n" +
 	"\x03Pin\x12\x1b\n" +
 	"\x02id\x18\x01 \x01(\fB\v\xea\x82\x16\a\x10@(\x01\x82\x01\x00R\x02id\x12+\n" +
 	"\x05store\x18\x02 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x05store\x12\x1c\n" +
-	"\x05value\x18\x03 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05value\x12\x18\n" +
-	"\apattern\x18\x04 \x01(\bR\apattern\x127\n" +
-	"\tpinned_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bpinnedAt:)\xca\xfc\x15%\x12\x02\x10\x01\x1a\x1f\x12\x05value\x1a\t\n" +
+	"\x05value\x18\b \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05value\x12\x18\n" +
+	"\apattern\x18\t \x01(\bR\apattern\x12;\n" +
+	"\vdate_pinned\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"datePinned:)\xca\xfc\x15%\x12\x02\x10\x01\x1a\x1f\x12\x05value\x1a\t\n" +
 	"\x05store\x10\x02\x1a\t\n" +
-	"\x05value\x10\x030\x01B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
+	"\x05value\x10\b0\x01B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
 
 var file_gantry_pin_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_gantry_pin_proto_goTypes = []any{
@@ -190,7 +193,7 @@ var file_gantry_pin_proto_goTypes = []any{
 }
 var file_gantry_pin_proto_depIdxs = []int32{
 	1, // 0: gantry.Pin.store:type_name -> gantry.Store
-	2, // 1: gantry.Pin.pinned_at:type_name -> google.protobuf.Timestamp
+	2, // 1: gantry.Pin.date_pinned:type_name -> google.protobuf.Timestamp
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name

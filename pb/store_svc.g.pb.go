@@ -1169,8 +1169,12 @@ func (x *StoreListRequest) ClearPageToken() {
 type StoreListRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Kind      *StoreKind
-	PageSize  *int32
+	// Keep only stores of this kind.
+	Kind *StoreKind
+	// Maximum items to return; 0 = no limit.
+	PageSize *int32
+	// Continuation token from the previous response; empty starts from the
+	// beginning.
 	PageToken *string
 }
 
@@ -1271,7 +1275,9 @@ func (x *StoreListResponse) ClearNextPageToken() {
 type StoreListResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Items         []*Store
+	// One page of results, sorted by name.
+	Items []*Store
+	// Empty when there are no further results.
 	NextPageToken *string
 }
 
@@ -1402,8 +1408,10 @@ func (x *StorePullRequest) ClearPlatform() {
 type StorePullRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// Engine store that pulls.
 	Store *StoreRef
-	Ref   *string
+	// Image reference to pull.
+	Ref *string
 	// Platform to pull ("os/arch"); empty uses the daemon's default.
 	Platform *string
 }
@@ -1590,8 +1598,10 @@ func (x *StoreRemoveRequest) ClearRef() {
 type StoreRemoveRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// Engine store to remove from.
 	Store *StoreRef
-	Ref   *string
+	// Image reference to remove.
+	Ref *string
 }
 
 func (b0 StoreRemoveRequest_builder) Build() *StoreRemoveRequest {
@@ -1686,7 +1696,7 @@ type StoreHealthResponse struct {
 	xxx_hidden_Kind        StoreKind              `protobuf:"varint,2,opt,name=kind,enum=gantry.StoreKind"`
 	xxx_hidden_LatencyMs   int64                  `protobuf:"varint,3,opt,name=latency_ms,json=latencyMs"`
 	xxx_hidden_Error       *string                `protobuf:"bytes,4,opt,name=error"`
-	xxx_hidden_CheckedAt   *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=checked_at,json=checkedAt"`
+	xxx_hidden_DateChecked *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=date_checked,json=dateChecked"`
 	xxx_hidden_Cached      bool                   `protobuf:"varint,6,opt,name=cached"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
@@ -1752,9 +1762,9 @@ func (x *StoreHealthResponse) GetError() string {
 	return ""
 }
 
-func (x *StoreHealthResponse) GetCheckedAt() *timestamppb.Timestamp {
+func (x *StoreHealthResponse) GetDateChecked() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_CheckedAt
+		return x.xxx_hidden_DateChecked
 	}
 	return nil
 }
@@ -1786,8 +1796,8 @@ func (x *StoreHealthResponse) SetError(v string) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 6)
 }
 
-func (x *StoreHealthResponse) SetCheckedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_CheckedAt = v
+func (x *StoreHealthResponse) SetDateChecked(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateChecked = v
 }
 
 func (x *StoreHealthResponse) SetCached(v bool) {
@@ -1823,11 +1833,11 @@ func (x *StoreHealthResponse) HasError() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
 }
 
-func (x *StoreHealthResponse) HasCheckedAt() bool {
+func (x *StoreHealthResponse) HasDateChecked() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_CheckedAt != nil
+	return x.xxx_hidden_DateChecked != nil
 }
 
 func (x *StoreHealthResponse) HasCached() bool {
@@ -1857,8 +1867,8 @@ func (x *StoreHealthResponse) ClearError() {
 	x.xxx_hidden_Error = nil
 }
 
-func (x *StoreHealthResponse) ClearCheckedAt() {
-	x.xxx_hidden_CheckedAt = nil
+func (x *StoreHealthResponse) ClearDateChecked() {
+	x.xxx_hidden_DateChecked = nil
 }
 
 func (x *StoreHealthResponse) ClearCached() {
@@ -1869,11 +1879,15 @@ func (x *StoreHealthResponse) ClearCached() {
 type StoreHealthResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Healthy   *bool
-	Kind      *StoreKind
+	// The probe succeeded.
+	Healthy *bool
+	// Kind of the probed store.
+	Kind *StoreKind
+	// Probe round-trip in milliseconds.
 	LatencyMs *int64
-	Error     *string
-	CheckedAt *timestamppb.Timestamp
+	// Probe failure text.
+	Error       *string
+	DateChecked *timestamppb.Timestamp
 	// True when served from the TTL cache rather than probed for this call.
 	Cached *bool
 }
@@ -1898,7 +1912,7 @@ func (b0 StoreHealthResponse_builder) Build() *StoreHealthResponse {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 6)
 		x.xxx_hidden_Error = b.Error
 	}
-	x.xxx_hidden_CheckedAt = b.CheckedAt
+	x.xxx_hidden_DateChecked = b.DateChecked
 	if b.Cached != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 6)
 		x.xxx_hidden_Cached = *b.Cached
@@ -2243,21 +2257,27 @@ type StoreGcStatusResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
 	// Scheduling is on for this store.
-	Enabled    *bool
+	Enabled *bool
+	// A GC run is in flight right now.
 	Running    *bool
 	Started    *timestamppb.Timestamp
 	LastRun    *timestamppb.Timestamp
 	NextWake   *timestamppb.Timestamp
 	GraceUntil *timestamppb.Timestamp
-	Schedule   *GcSchedule
-	Rules      []*GcRule
-	Records    *int32
-	Pins       *int32
+	// Effective scheduler settings.
+	Schedule *GcSchedule
+	// Configured retention rules.
+	Rules []*GcRule
+	// Tracked image records.
+	Records *int32
+	// Live pins.
+	Pins *int32
 	// Tracked untagged images (reap clocks running).
 	Untagged *int32
 	// Reap delay; absent when the reaper is off.
 	UntaggedAfter *durationpb.Duration
-	Watcher       *GcWatcherStatus
+	// Usage-event stream health.
+	Watcher *GcWatcherStatus
 }
 
 func (b0 StoreGcStatusResponse_builder) Build() *StoreGcStatusResponse {
@@ -2375,7 +2395,9 @@ func (x *StoreGcRequest) ClearOverride() {
 type StoreGcRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Store    *StoreRef
+	// Store to run GC against.
+	Store *StoreRef
+	// Optional one-shot policy override.
 	Override *GcOverride
 }
 
@@ -2473,8 +2495,10 @@ func (x *StoreGcPlanResponse) ClearNextAgeOut() {
 type StoreGcPlanResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// Images that would be deleted.
 	Delete []*GcCandidate
-	Keep   []*GcKept
+	// Records kept, and why.
+	Keep []*GcKept
 	// The soonest a currently-kept record could become age-deletable; absent
 	// when nothing is on an age path.
 	NextAgeOut *timestamppb.Timestamp
@@ -2703,15 +2727,14 @@ const file_gantry_store_svc_g_proto_rawDesc = "" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\"K\n" +
 	"\x13StoreRemoveResponse\x12\x1a\n" +
 	"\buntagged\x18\x01 \x03(\tR\buntagged\x12\x18\n" +
-	"\adeleted\x18\x02 \x03(\tR\adeleted\"\xde\x01\n" +
+	"\adeleted\x18\x02 \x03(\tR\adeleted\"\xe2\x01\n" +
 	"\x13StoreHealthResponse\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12%\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x11.gantry.StoreKindR\x04kind\x12\x1d\n" +
 	"\n" +
 	"latency_ms\x18\x03 \x01(\x03R\tlatencyMs\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\x129\n" +
-	"\n" +
-	"checked_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcheckedAt\x12\x16\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12=\n" +
+	"\fdate_checked\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vdateChecked\x12\x16\n" +
 	"\x06cached\x18\x06 \x01(\bR\x06cached\"\xc3\x04\n" +
 	"\x15StoreGcStatusResponse\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x18\n" +
@@ -2803,7 +2826,7 @@ var file_gantry_store_svc_g_proto_depIdxs = []int32{
 	2,  // 10: gantry.StorePullRequest.store:type_name -> gantry.StoreRef
 	2,  // 11: gantry.StoreRemoveRequest.store:type_name -> gantry.StoreRef
 	16, // 12: gantry.StoreHealthResponse.kind:type_name -> gantry.StoreKind
-	20, // 13: gantry.StoreHealthResponse.checked_at:type_name -> google.protobuf.Timestamp
+	20, // 13: gantry.StoreHealthResponse.date_checked:type_name -> google.protobuf.Timestamp
 	20, // 14: gantry.StoreGcStatusResponse.started:type_name -> google.protobuf.Timestamp
 	20, // 15: gantry.StoreGcStatusResponse.last_run:type_name -> google.protobuf.Timestamp
 	20, // 16: gantry.StoreGcStatusResponse.next_wake:type_name -> google.protobuf.Timestamp

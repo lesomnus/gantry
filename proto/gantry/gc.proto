@@ -30,17 +30,29 @@ enum GcKeepReason {
   GC_KEEP_REASON_DIGEST_TRACKED = 9;
 }
 
+// Settings of a store's adaptive GC scheduler.
 message GcSchedule {
+  // Safety/idle cap on sleep between GC checks.
   google.protobuf.Duration interval = 1;
+  // Debounce floor between GC runs.
   google.protobuf.Duration min_interval = 2;
+  // Deletion hold-off after server start.
   google.protobuf.Duration grace = 3;
 }
 
+// One per-repo retention rule. Unset fields inherit from a less specific
+// matching rule.
 message GcRule {
+  // Doublestar pattern selecting the repositories the rule applies to.
   string repo = 1;
+  // Delete tags unused longer than this.
   google.protobuf.Duration max_age = 2;
+  // Always keep the N most recently used tags, regardless of age.
   int32 keep_n = 3;
+  // Cap on non-protected tags: the oldest beyond it are deleted even if
+  // not yet past max_age.
   int32 max_n = 4;
+  // Pin patterns; matching refs are never deleted.
   repeated string pins = 5;
 }
 
@@ -48,24 +60,37 @@ message GcRule {
 // configured rules with a single blanket rule built from these fields; unset
 // fields are zero, which disables the corresponding mechanism for the call.
 message GcOverride {
+  // Delete tags unused longer than this.
   google.protobuf.Duration max_age = 1;
+  // Always keep the N most recently used tags, regardless of age.
   int32 keep_n = 2;
+  // Cap on non-protected tags: the oldest beyond it are deleted even if
+  // not yet past max_age.
   int32 max_n = 3;
+  // Pin patterns; matching refs are never deleted.
   repeated string pins = 4;
+  // Reap an image this long after it was first observed with no tags.
   google.protobuf.Duration untagged_after = 5;
 }
 
+// One image marked for deletion.
 message GcCandidate {
+  // Tag ref the rules selected; the image ID for untagged reaps.
   string ref = 1;
+  // Manifest digest, when known.
   string digest = 2;
   // Set for untagged-reap candidates.
   string image_id = 3;
   google.protobuf.Timestamp last_used = 4;
+  // Why it is deletable.
   GcDeleteReason reason = 5;
 }
 
+// One record kept, and why.
 message GcKept {
+  // Full local image reference.
   string ref = 1;
+  // The protection that applied.
   GcKeepReason reason = 2;
 }
 
@@ -73,12 +98,14 @@ message GcKept {
 // images. A dead stream freezes last_used and slowly turns age-GC against
 // hot images, so it is reported as part of the GC status.
 message GcWatcherStatus {
+  // The stream is live right now.
   bool connected = 1;
   google.protobuf.Timestamp watching_since = 2;
   // Receipt time of the last usage event.
-  google.protobuf.Timestamp last_event_at = 3;
-  google.protobuf.Timestamp last_seed_at = 4;
+  google.protobuf.Timestamp date_last_event = 3;
+  google.protobuf.Timestamp date_last_seed = 4;
   // Times the event stream ended and was re-established.
   int32 reconnects = 5;
+  // Most recent stream failure.
   string last_error = 6;
 }

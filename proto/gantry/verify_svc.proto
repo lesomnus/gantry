@@ -25,26 +25,38 @@ service VerifyService {
 }
 
 message VerifyDescribeResponse {
+  // Verification is configured on.
   bool enabled = 1;
+  // Verifier implementation, e.g. "notation".
   string provider = 2;
   // Global default mode.
   VerifyMode mode = 3;
+  // Effective verification level, e.g. "strict".
   string level = 4;
+  // Trust-policy statements.
   repeated VerifyPolicy policies = 5;
+  // Trust-anchor certificates.
   repeated VerifyAnchor anchors = 6;
   // Effective mode per source registry store (per-store override or the
   // global default), keyed by store name.
   map<string, VerifyMode> stores = 7;
 }
 
+// One trust-policy statement.
 message VerifyPolicy {
+  // Statement name.
   string name = 1;
+  // Registries the statement applies to.
   repeated string registry_scopes = 2;
+  // Certificate identities accepted for those scopes.
   repeated string trusted_identities = 3;
+  // Level the statement enforces, e.g. "strict".
   string verification_level = 4;
 }
 
+// One trust-anchor certificate; never key material.
 message VerifyAnchor {
+  // Certificate subject.
   string subject = 1;
   // sha256 over the DER encoding.
   string fingerprint = 2;
@@ -52,6 +64,7 @@ message VerifyAnchor {
 }
 
 message VerifyCheckRequest {
+  // Image reference to check.
   string ref = 1;
   // Source registry; defaults to the ref's registry.
   StoreRef source = 2;

@@ -24,13 +24,17 @@ enum EventType {
 message EventDetail {
   // job_admitted: the source store.
   string source = 1;
-  // job_done: the job id and total bytes moved.
+  // job_done: the job id.
   string job = 2;
+  // job_done: total bytes moved.
   int64 bytes = 3;
-  // gc_applied: apply counters.
+  // gc_applied: content IDs whose bytes were freed.
   int32 deleted = 4;
+  // gc_applied: tag refs removed.
   int32 untagged = 5;
+  // gc_applied: untagged images whose content was reaped.
   int32 reaped = 6;
+  // gc_applied: per-ref removal failures.
   int32 errors = 7;
 }
 
@@ -44,20 +48,26 @@ message Event {
     key: true
     default: ""
   }];
-  google.protobuf.Timestamp at = 2 [(orm.field) = {immutable: true}];
-  EventType type = 3 [(orm.field) = {immutable: true}];
 
-  string store = 4 [(orm.field) = {immutable: true}];
+  // Name of the store the event concerns.
+  string store = 2 [(orm.field) = {immutable: true}];
+  // What happened; selects which of the fields below are set.
+  EventType type = 5 [(orm.field) = {immutable: true}];
+  
   // Image reference; a pin value for pinned/unpinned, an image ID for
   // untagged reaps.
-  string ref = 5 [(orm.field) = {immutable: true}];
-  // Terminal job state, on job_done.
-  JobState state = 6 [(orm.field) = {immutable: true}];
+  string ref = 8 [(orm.field) = {immutable: true}];
   // Verified source digest, on job_admitted.
-  string digest = 7 [(orm.field) = {immutable: true}];
+  string digest = 9 [(orm.field) = {immutable: true}];
+  // Type-specific payload.
+  EventDetail detail = 10 [(orm.field) = {immutable: true}];
+
+  // Terminal job state, on job_done.
+  JobState state = 16 [(orm.field) = {immutable: true}];
   // Failure text, on job_done of a failed job.
-  string error = 8 [(orm.field) = {immutable: true}];
-  EventDetail detail = 9 [(orm.field) = {immutable: true}];
+  string error = 17 [(orm.field) = {immutable: true}];
+
+  google.protobuf.Timestamp date_created = 15 [(orm.field) = {immutable: true}];
 
   option (orm.message) = {
     rpc: {crud: true}

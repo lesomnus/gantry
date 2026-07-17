@@ -26,20 +26,20 @@ const (
 // entry. Created and updated by gantry's usage watcher and job pipeline;
 // identity is (store, ref).
 type Image struct {
-	state                      protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Id              []byte                 `protobuf:"bytes,1,opt,name=id"`
-	xxx_hidden_Store           *Store                 `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Ref             string                 `protobuf:"bytes,3,opt,name=ref"`
-	xxx_hidden_Repo            string                 `protobuf:"bytes,4,opt,name=repo"`
-	xxx_hidden_Tag             string                 `protobuf:"bytes,5,opt,name=tag"`
-	xxx_hidden_Digest          string                 `protobuf:"bytes,6,opt,name=digest"`
-	xxx_hidden_FirstSeen       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=first_seen,json=firstSeen"`
-	xxx_hidden_LastUsed        *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_used,json=lastUsed"`
-	xxx_hidden_LastDistributed *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_distributed,json=lastDistributed"`
-	xxx_hidden_Pinned          bool                   `protobuf:"varint,10,opt,name=pinned"`
-	xxx_hidden_InUse           bool                   `protobuf:"varint,11,opt,name=in_use,json=inUse"`
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	state                          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id                  []byte                 `protobuf:"bytes,1,opt,name=id"`
+	xxx_hidden_Store               *Store                 `protobuf:"bytes,2,opt,name=store"`
+	xxx_hidden_Ref                 string                 `protobuf:"bytes,8,opt,name=ref"`
+	xxx_hidden_Digest              string                 `protobuf:"bytes,9,opt,name=digest"`
+	xxx_hidden_Repo                string                 `protobuf:"bytes,10,opt,name=repo"`
+	xxx_hidden_Tag                 string                 `protobuf:"bytes,11,opt,name=tag"`
+	xxx_hidden_DateLastDistributed *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=date_last_distributed,json=dateLastDistributed"`
+	xxx_hidden_DateLastUsed        *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=date_last_used,json=dateLastUsed"`
+	xxx_hidden_DateFirstSeen       *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_first_seen,json=dateFirstSeen"`
+	xxx_hidden_Pinned              bool                   `protobuf:"varint,16,opt,name=pinned"`
+	xxx_hidden_InUse               bool                   `protobuf:"varint,17,opt,name=in_use,json=inUse"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *Image) Reset() {
@@ -88,6 +88,13 @@ func (x *Image) GetRef() string {
 	return ""
 }
 
+func (x *Image) GetDigest() string {
+	if x != nil {
+		return x.xxx_hidden_Digest
+	}
+	return ""
+}
+
 func (x *Image) GetRepo() string {
 	if x != nil {
 		return x.xxx_hidden_Repo
@@ -102,30 +109,23 @@ func (x *Image) GetTag() string {
 	return ""
 }
 
-func (x *Image) GetDigest() string {
+func (x *Image) GetDateLastDistributed() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_Digest
-	}
-	return ""
-}
-
-func (x *Image) GetFirstSeen() *timestamppb.Timestamp {
-	if x != nil {
-		return x.xxx_hidden_FirstSeen
+		return x.xxx_hidden_DateLastDistributed
 	}
 	return nil
 }
 
-func (x *Image) GetLastUsed() *timestamppb.Timestamp {
+func (x *Image) GetDateLastUsed() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastUsed
+		return x.xxx_hidden_DateLastUsed
 	}
 	return nil
 }
 
-func (x *Image) GetLastDistributed() *timestamppb.Timestamp {
+func (x *Image) GetDateFirstSeen() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastDistributed
+		return x.xxx_hidden_DateFirstSeen
 	}
 	return nil
 }
@@ -159,6 +159,10 @@ func (x *Image) SetRef(v string) {
 	x.xxx_hidden_Ref = v
 }
 
+func (x *Image) SetDigest(v string) {
+	x.xxx_hidden_Digest = v
+}
+
 func (x *Image) SetRepo(v string) {
 	x.xxx_hidden_Repo = v
 }
@@ -167,20 +171,16 @@ func (x *Image) SetTag(v string) {
 	x.xxx_hidden_Tag = v
 }
 
-func (x *Image) SetDigest(v string) {
-	x.xxx_hidden_Digest = v
+func (x *Image) SetDateLastDistributed(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastDistributed = v
 }
 
-func (x *Image) SetFirstSeen(v *timestamppb.Timestamp) {
-	x.xxx_hidden_FirstSeen = v
+func (x *Image) SetDateLastUsed(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastUsed = v
 }
 
-func (x *Image) SetLastUsed(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastUsed = v
-}
-
-func (x *Image) SetLastDistributed(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastDistributed = v
+func (x *Image) SetDateFirstSeen(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateFirstSeen = v
 }
 
 func (x *Image) SetPinned(v bool) {
@@ -198,61 +198,64 @@ func (x *Image) HasStore() bool {
 	return x.xxx_hidden_Store != nil
 }
 
-func (x *Image) HasFirstSeen() bool {
+func (x *Image) HasDateLastDistributed() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_FirstSeen != nil
+	return x.xxx_hidden_DateLastDistributed != nil
 }
 
-func (x *Image) HasLastUsed() bool {
+func (x *Image) HasDateLastUsed() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastUsed != nil
+	return x.xxx_hidden_DateLastUsed != nil
 }
 
-func (x *Image) HasLastDistributed() bool {
+func (x *Image) HasDateFirstSeen() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastDistributed != nil
+	return x.xxx_hidden_DateFirstSeen != nil
 }
 
 func (x *Image) ClearStore() {
 	x.xxx_hidden_Store = nil
 }
 
-func (x *Image) ClearFirstSeen() {
-	x.xxx_hidden_FirstSeen = nil
+func (x *Image) ClearDateLastDistributed() {
+	x.xxx_hidden_DateLastDistributed = nil
 }
 
-func (x *Image) ClearLastUsed() {
-	x.xxx_hidden_LastUsed = nil
+func (x *Image) ClearDateLastUsed() {
+	x.xxx_hidden_DateLastUsed = nil
 }
 
-func (x *Image) ClearLastDistributed() {
-	x.xxx_hidden_LastDistributed = nil
+func (x *Image) ClearDateFirstSeen() {
+	x.xxx_hidden_DateFirstSeen = nil
 }
 
 type Image_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Id    []byte
+	// Deterministic UUID synthesized from (store, ref).
+	Id []byte
+	// Engine store holding the image.
 	Store *Store
 	// Full local image reference, e.g. "cache.local/team/app:1.2".
 	Ref string
-	// Derived from ref at creation.
-	Repo string
-	Tag  string
 	// Resolved manifest digest, when known.
 	Digest string
-	// Age clock for images never observed used.
-	FirstSeen *timestamppb.Timestamp
-	// Last time a container ran with this image; absent = never observed.
-	LastUsed *timestamppb.Timestamp
+	// Host-qualified repository, derived from ref at creation.
+	Repo string
+	// Tag part of ref, derived at creation.
+	Tag string
 	// Last time gantry pushed this ref to the engine.
-	LastDistributed *timestamppb.Timestamp
+	DateLastDistributed *timestamppb.Timestamp
+	// Last time a container ran with this image; absent = never observed.
+	DateLastUsed *timestamppb.Timestamp
+	// Age clock for images never observed used.
+	DateFirstSeen *timestamppb.Timestamp
 	// Derived: whether any pin currently protects this record.
 	Pinned bool
 	// Derived: whether a live container on the engine currently references
@@ -267,12 +270,12 @@ func (b0 Image_builder) Build() *Image {
 	x.xxx_hidden_Id = b.Id
 	x.xxx_hidden_Store = b.Store
 	x.xxx_hidden_Ref = b.Ref
+	x.xxx_hidden_Digest = b.Digest
 	x.xxx_hidden_Repo = b.Repo
 	x.xxx_hidden_Tag = b.Tag
-	x.xxx_hidden_Digest = b.Digest
-	x.xxx_hidden_FirstSeen = b.FirstSeen
-	x.xxx_hidden_LastUsed = b.LastUsed
-	x.xxx_hidden_LastDistributed = b.LastDistributed
+	x.xxx_hidden_DateLastDistributed = b.DateLastDistributed
+	x.xxx_hidden_DateLastUsed = b.DateLastUsed
+	x.xxx_hidden_DateFirstSeen = b.DateFirstSeen
 	x.xxx_hidden_Pinned = b.Pinned
 	x.xxx_hidden_InUse = b.InUse
 	return m0
@@ -282,23 +285,22 @@ var File_gantry_image_proto protoreflect.FileDescriptor
 
 const file_gantry_image_proto_rawDesc = "" +
 	"\n" +
-	"\x12gantry/image.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xd6\x03\n" +
+	"\x12gantry/image.proto\x12\x06gantry\x1a\x12gantry/store.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xf1\x03\n" +
 	"\x05Image\x12\x1b\n" +
 	"\x02id\x18\x01 \x01(\fB\v\xea\x82\x16\a\x10@(\x01\x82\x01\x00R\x02id\x12+\n" +
 	"\x05store\x18\x02 \x01(\v2\r.gantry.StoreB\x06\xf2\x82\x16\x02@\x01R\x05store\x12\x18\n" +
-	"\x03ref\x18\x03 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12\x1a\n" +
-	"\x04repo\x18\x04 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x04repo\x12\x18\n" +
-	"\x03tag\x18\x05 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03tag\x12\x16\n" +
-	"\x06digest\x18\x06 \x01(\tR\x06digest\x12A\n" +
-	"\n" +
-	"first_seen\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x06\xea\x82\x16\x02@\x01R\tfirstSeen\x127\n" +
-	"\tlast_used\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\blastUsed\x12E\n" +
-	"\x10last_distributed\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0flastDistributed\x12\x16\n" +
-	"\x06pinned\x18\n" +
-	" \x01(\bR\x06pinned\x12\x15\n" +
-	"\x06in_use\x18\v \x01(\bR\x05inUse:)\xca\xfc\x15%\x12\x02\x10\x01\x1a\x1f\x12\alocator\x1a\t\n" +
+	"\x03ref\x18\b \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03ref\x12\x16\n" +
+	"\x06digest\x18\t \x01(\tR\x06digest\x12\x1a\n" +
+	"\x04repo\x18\n" +
+	" \x01(\tB\x06\xea\x82\x16\x02@\x01R\x04repo\x12\x18\n" +
+	"\x03tag\x18\v \x01(\tB\x06\xea\x82\x16\x02@\x01R\x03tag\x12N\n" +
+	"\x15date_last_distributed\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\x13dateLastDistributed\x12@\n" +
+	"\x0edate_last_used\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\fdateLastUsed\x12J\n" +
+	"\x0fdate_first_seen\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\x06\xea\x82\x16\x02@\x01R\rdateFirstSeen\x12\x16\n" +
+	"\x06pinned\x18\x10 \x01(\bR\x06pinned\x12\x15\n" +
+	"\x06in_use\x18\x11 \x01(\bR\x05inUse:)\xca\xfc\x15%\x12\x02\x10\x01\x1a\x1f\x12\alocator\x1a\t\n" +
 	"\x05store\x10\x02\x1a\a\n" +
-	"\x03ref\x10\x030\x01B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
+	"\x03ref\x10\b0\x01B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
 
 var file_gantry_image_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_gantry_image_proto_goTypes = []any{
@@ -308,9 +310,9 @@ var file_gantry_image_proto_goTypes = []any{
 }
 var file_gantry_image_proto_depIdxs = []int32{
 	1, // 0: gantry.Image.store:type_name -> gantry.Store
-	2, // 1: gantry.Image.first_seen:type_name -> google.protobuf.Timestamp
-	2, // 2: gantry.Image.last_used:type_name -> google.protobuf.Timestamp
-	2, // 3: gantry.Image.last_distributed:type_name -> google.protobuf.Timestamp
+	2, // 1: gantry.Image.date_last_distributed:type_name -> google.protobuf.Timestamp
+	2, // 2: gantry.Image.date_last_used:type_name -> google.protobuf.Timestamp
+	2, // 3: gantry.Image.date_first_seen:type_name -> google.protobuf.Timestamp
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name

@@ -36,20 +36,20 @@ service JobService {
 
 message JobAddRequest {
   string id = 1;
-  string ref = 2 [features.field_presence = IMPLICIT];
-  StoreRef source = 3;
-  StoreRef target = 4;
-  repeated string platforms = 5;
-  bool copy_referrers = 6;
-  repeated string as = 14;
-  map<string, string> labels = 15;
-  JobState state = 7 [features.field_presence = IMPLICIT];
-  string error = 8 [features.field_presence = IMPLICIT];
-  Verification verification = 9;
-  repeated Transfer transfers = 10;
-  google.protobuf.Timestamp created_at = 11;
-  google.protobuf.Timestamp started_at = 12;
-  google.protobuf.Timestamp ended_at = 13;
+  map<string, string> labels = 7;
+  string ref = 8 [features.field_presence = IMPLICIT];
+  StoreRef source = 9;
+  StoreRef target = 10;
+  repeated string platforms = 11;
+  repeated string as = 12;
+  google.protobuf.Timestamp date_ended = 13;
+  google.protobuf.Timestamp date_started = 14;
+  google.protobuf.Timestamp date_created = 15;
+  JobState state = 16 [features.field_presence = IMPLICIT];
+  string error = 17 [features.field_presence = IMPLICIT];
+  Verification verification = 18;
+  repeated Transfer transfers = 19;
+  bool copy_referrers = 20;
 }
 
 message JobGetRequest {
@@ -65,35 +65,36 @@ message JobRef {
 
 message JobSelect {
   bool all = 1;
-  bool ref = 2;
-  StoreSelect source = 3;
-  StoreSelect target = 4;
-  bool platforms = 5;
-  bool copy_referrers = 6;
-  bool as = 14;
-  bool labels = 15;
-  bool state = 7;
-  bool error = 8;
-  bool verification = 9;
-  bool transfers = 10;
-  bool created_at = 11;
-  bool started_at = 12;
-  bool ended_at = 13;
+  bool labels = 7;
+  bool ref = 8;
+  StoreSelect source = 9;
+  StoreSelect target = 10;
+  bool platforms = 11;
+  bool as = 12;
+  bool date_ended = 13;
+  bool date_started = 14;
+  bool date_created = 15;
+  bool state = 16;
+  bool error = 17;
+  bool verification = 18;
+  bool transfers = 19;
+  bool copy_referrers = 20;
 }
 
 message JobPatchRequest {
   JobRef ref = 1;
-  map<string, string> labels = 29;
-  JobState state = 13;
-  string error = 15;
-  Verification verification = 17;
-  bool verification_null = 18;
-  repeated Transfer transfers = 19;
-  google.protobuf.Timestamp started_at = 23;
-  google.protobuf.Timestamp ended_at = 25;
+  map<string, string> labels = 13;
+  google.protobuf.Timestamp date_ended = 25;
+  google.protobuf.Timestamp date_started = 27;
+  JobState state = 31;
+  string error = 33;
+  Verification verification = 35;
+  bool verification_null = 36;
+  repeated Transfer transfers = 37;
 }
 
 message JobListRequest {
+  // Keep only jobs in this state.
   JobState state = 1;
   // Substring match on the requested ref.
   string ref = 2;
@@ -103,29 +104,42 @@ message JobListRequest {
   // value (subset match). An empty map matches everything.
   map<string, string> labels = 4;
 
+  // Maximum items to return; 0 = no limit.
   int32 page_size = 10;
+  // Continuation token from the previous response; empty starts from the
+  // beginning.
   string page_token = 11;
 }
 
 message JobListResponse {
+  // One page of results, newest-first.
   repeated Job items = 1;
+  // Empty when there are no further results.
   string next_page_token = 2;
 }
 
 // The same inputs as JobAddRequest, evaluated without submitting.
 message JobPlanRequest {
+  // Image reference to move.
   string ref = 1;
+  // Source registry; defaults to the ref's registry.
   StoreRef source = 2;
+  // Target store: a registry or an engine.
   StoreRef target = 3;
+  // Registry target: platforms to copy (empty = all). Engine target: the
+  // single platform to pull (empty = daemon's).
   repeated string platforms = 4;
+  // Copy source referrer artifacts along with the image; absent = server
+  // default.
   bool copy_referrers = 5;
   // Engine target only: names the image would be recorded under.
   repeated string as = 6;
 }
 
 message JobPlanResponse {
-  // Resolved source and target store names.
+  // Resolved source store name.
   string source = 1;
+  // Resolved target store name.
   string target = 2;
   // Source-side ref, digest-pinned when verified.
   string source_ref = 3;
@@ -135,7 +149,9 @@ message JobPlanResponse {
   // Registry target: empty = all platforms; engine target: the
   // single platform pulled.
   repeated string platforms = 5;
+  // Effective value after the server default is applied.
   bool copy_referrers = 6;
+  // Admission verification outcome, when verification ran.
   Verification verification = 7;
   // The active job an identical submit would coalesce onto, if any.
   string coalesces = 8;

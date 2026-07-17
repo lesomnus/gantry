@@ -138,6 +138,7 @@ func (x GcKeepReason) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
+// Settings of a store's adaptive GC scheduler.
 type GcSchedule struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Interval    *durationpb.Duration   `protobuf:"bytes,1,opt,name=interval"`
@@ -241,9 +242,12 @@ func (x *GcSchedule) ClearGrace() {
 type GcSchedule_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Interval    *durationpb.Duration
+	// Safety/idle cap on sleep between GC checks.
+	Interval *durationpb.Duration
+	// Debounce floor between GC runs.
 	MinInterval *durationpb.Duration
-	Grace       *durationpb.Duration
+	// Deletion hold-off after server start.
+	Grace *durationpb.Duration
 }
 
 func (b0 GcSchedule_builder) Build() *GcSchedule {
@@ -256,6 +260,8 @@ func (b0 GcSchedule_builder) Build() *GcSchedule {
 	return m0
 }
 
+// One per-repo retention rule. Unset fields inherit from a less specific
+// matching rule.
 type GcRule struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Repo        *string                `protobuf:"bytes,1,opt,name=repo"`
@@ -405,11 +411,17 @@ func (x *GcRule) ClearMaxN() {
 type GcRule_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Repo   *string
+	// Doublestar pattern selecting the repositories the rule applies to.
+	Repo *string
+	// Delete tags unused longer than this.
 	MaxAge *durationpb.Duration
-	KeepN  *int32
-	MaxN   *int32
-	Pins   []string
+	// Always keep the N most recently used tags, regardless of age.
+	KeepN *int32
+	// Cap on non-protected tags: the oldest beyond it are deleted even if
+	// not yet past max_age.
+	MaxN *int32
+	// Pin patterns; matching refs are never deleted.
+	Pins []string
 }
 
 func (b0 GcRule_builder) Build() *GcRule {
@@ -580,10 +592,16 @@ func (x *GcOverride) ClearUntaggedAfter() {
 type GcOverride_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	MaxAge        *durationpb.Duration
-	KeepN         *int32
-	MaxN          *int32
-	Pins          []string
+	// Delete tags unused longer than this.
+	MaxAge *durationpb.Duration
+	// Always keep the N most recently used tags, regardless of age.
+	KeepN *int32
+	// Cap on non-protected tags: the oldest beyond it are deleted even if
+	// not yet past max_age.
+	MaxN *int32
+	// Pin patterns; matching refs are never deleted.
+	Pins []string
+	// Reap an image this long after it was first observed with no tags.
 	UntaggedAfter *durationpb.Duration
 }
 
@@ -605,6 +623,7 @@ func (b0 GcOverride_builder) Build() *GcOverride {
 	return m0
 }
 
+// One image marked for deletion.
 type GcCandidate struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Ref         *string                `protobuf:"bytes,1,opt,name=ref"`
@@ -775,12 +794,15 @@ func (x *GcCandidate) ClearReason() {
 type GcCandidate_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Ref    *string
+	// Tag ref the rules selected; the image ID for untagged reaps.
+	Ref *string
+	// Manifest digest, when known.
 	Digest *string
 	// Set for untagged-reap candidates.
 	ImageId  *string
 	LastUsed *timestamppb.Timestamp
-	Reason   *GcDeleteReason
+	// Why it is deletable.
+	Reason *GcDeleteReason
 }
 
 func (b0 GcCandidate_builder) Build() *GcCandidate {
@@ -807,6 +829,7 @@ func (b0 GcCandidate_builder) Build() *GcCandidate {
 	return m0
 }
 
+// One record kept, and why.
 type GcKept struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Ref         *string                `protobuf:"bytes,1,opt,name=ref"`
@@ -898,7 +921,9 @@ func (x *GcKept) ClearReason() {
 type GcKept_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Ref    *string
+	// Full local image reference.
+	Ref *string
+	// The protection that applied.
 	Reason *GcKeepReason
 }
 
@@ -924,8 +949,8 @@ type GcWatcherStatus struct {
 	state                    protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Connected     bool                   `protobuf:"varint,1,opt,name=connected"`
 	xxx_hidden_WatchingSince *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=watching_since,json=watchingSince"`
-	xxx_hidden_LastEventAt   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=last_event_at,json=lastEventAt"`
-	xxx_hidden_LastSeedAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_seed_at,json=lastSeedAt"`
+	xxx_hidden_DateLastEvent *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=date_last_event,json=dateLastEvent"`
+	xxx_hidden_DateLastSeed  *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=date_last_seed,json=dateLastSeed"`
 	xxx_hidden_Reconnects    int32                  `protobuf:"varint,5,opt,name=reconnects"`
 	xxx_hidden_LastError     *string                `protobuf:"bytes,6,opt,name=last_error,json=lastError"`
 	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
@@ -973,16 +998,16 @@ func (x *GcWatcherStatus) GetWatchingSince() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *GcWatcherStatus) GetLastEventAt() *timestamppb.Timestamp {
+func (x *GcWatcherStatus) GetDateLastEvent() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastEventAt
+		return x.xxx_hidden_DateLastEvent
 	}
 	return nil
 }
 
-func (x *GcWatcherStatus) GetLastSeedAt() *timestamppb.Timestamp {
+func (x *GcWatcherStatus) GetDateLastSeed() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastSeedAt
+		return x.xxx_hidden_DateLastSeed
 	}
 	return nil
 }
@@ -1013,12 +1038,12 @@ func (x *GcWatcherStatus) SetWatchingSince(v *timestamppb.Timestamp) {
 	x.xxx_hidden_WatchingSince = v
 }
 
-func (x *GcWatcherStatus) SetLastEventAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastEventAt = v
+func (x *GcWatcherStatus) SetDateLastEvent(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastEvent = v
 }
 
-func (x *GcWatcherStatus) SetLastSeedAt(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastSeedAt = v
+func (x *GcWatcherStatus) SetDateLastSeed(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastSeed = v
 }
 
 func (x *GcWatcherStatus) SetReconnects(v int32) {
@@ -1045,18 +1070,18 @@ func (x *GcWatcherStatus) HasWatchingSince() bool {
 	return x.xxx_hidden_WatchingSince != nil
 }
 
-func (x *GcWatcherStatus) HasLastEventAt() bool {
+func (x *GcWatcherStatus) HasDateLastEvent() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastEventAt != nil
+	return x.xxx_hidden_DateLastEvent != nil
 }
 
-func (x *GcWatcherStatus) HasLastSeedAt() bool {
+func (x *GcWatcherStatus) HasDateLastSeed() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastSeedAt != nil
+	return x.xxx_hidden_DateLastSeed != nil
 }
 
 func (x *GcWatcherStatus) HasReconnects() bool {
@@ -1082,12 +1107,12 @@ func (x *GcWatcherStatus) ClearWatchingSince() {
 	x.xxx_hidden_WatchingSince = nil
 }
 
-func (x *GcWatcherStatus) ClearLastEventAt() {
-	x.xxx_hidden_LastEventAt = nil
+func (x *GcWatcherStatus) ClearDateLastEvent() {
+	x.xxx_hidden_DateLastEvent = nil
 }
 
-func (x *GcWatcherStatus) ClearLastSeedAt() {
-	x.xxx_hidden_LastSeedAt = nil
+func (x *GcWatcherStatus) ClearDateLastSeed() {
+	x.xxx_hidden_DateLastSeed = nil
 }
 
 func (x *GcWatcherStatus) ClearReconnects() {
@@ -1103,14 +1128,16 @@ func (x *GcWatcherStatus) ClearLastError() {
 type GcWatcherStatus_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// The stream is live right now.
 	Connected     *bool
 	WatchingSince *timestamppb.Timestamp
 	// Receipt time of the last usage event.
-	LastEventAt *timestamppb.Timestamp
-	LastSeedAt  *timestamppb.Timestamp
+	DateLastEvent *timestamppb.Timestamp
+	DateLastSeed  *timestamppb.Timestamp
 	// Times the event stream ended and was re-established.
 	Reconnects *int32
-	LastError  *string
+	// Most recent stream failure.
+	LastError *string
 }
 
 func (b0 GcWatcherStatus_builder) Build() *GcWatcherStatus {
@@ -1122,8 +1149,8 @@ func (b0 GcWatcherStatus_builder) Build() *GcWatcherStatus {
 		x.xxx_hidden_Connected = *b.Connected
 	}
 	x.xxx_hidden_WatchingSince = b.WatchingSince
-	x.xxx_hidden_LastEventAt = b.LastEventAt
-	x.xxx_hidden_LastSeedAt = b.LastSeedAt
+	x.xxx_hidden_DateLastEvent = b.DateLastEvent
+	x.xxx_hidden_DateLastSeed = b.DateLastSeed
 	if b.Reconnects != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 6)
 		x.xxx_hidden_Reconnects = *b.Reconnects
@@ -1166,13 +1193,12 @@ const file_gantry_gc_proto_rawDesc = "" +
 	"\x06reason\x18\x05 \x01(\x0e2\x16.gantry.GcDeleteReasonR\x06reason\"H\n" +
 	"\x06GcKept\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12,\n" +
-	"\x06reason\x18\x02 \x01(\x0e2\x14.gantry.GcKeepReasonR\x06reason\"\xaf\x02\n" +
+	"\x06reason\x18\x02 \x01(\x0e2\x14.gantry.GcKeepReasonR\x06reason\"\xb7\x02\n" +
 	"\x0fGcWatcherStatus\x12\x1c\n" +
 	"\tconnected\x18\x01 \x01(\bR\tconnected\x12A\n" +
-	"\x0ewatching_since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\rwatchingSince\x12>\n" +
-	"\rlast_event_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vlastEventAt\x12<\n" +
-	"\flast_seed_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"lastSeedAt\x12\x1e\n" +
+	"\x0ewatching_since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\rwatchingSince\x12B\n" +
+	"\x0fdate_last_event\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rdateLastEvent\x12@\n" +
+	"\x0edate_last_seed\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\fdateLastSeed\x12\x1e\n" +
 	"\n" +
 	"reconnects\x18\x05 \x01(\x05R\n" +
 	"reconnects\x12\x1d\n" +
@@ -1220,8 +1246,8 @@ var file_gantry_gc_proto_depIdxs = []int32{
 	0,  // 7: gantry.GcCandidate.reason:type_name -> gantry.GcDeleteReason
 	1,  // 8: gantry.GcKept.reason:type_name -> gantry.GcKeepReason
 	9,  // 9: gantry.GcWatcherStatus.watching_since:type_name -> google.protobuf.Timestamp
-	9,  // 10: gantry.GcWatcherStatus.last_event_at:type_name -> google.protobuf.Timestamp
-	9,  // 11: gantry.GcWatcherStatus.last_seed_at:type_name -> google.protobuf.Timestamp
+	9,  // 10: gantry.GcWatcherStatus.date_last_event:type_name -> google.protobuf.Timestamp
+	9,  // 11: gantry.GcWatcherStatus.date_last_seed:type_name -> google.protobuf.Timestamp
 	12, // [12:12] is the sub-list for method output_type
 	12, // [12:12] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name

@@ -24,15 +24,15 @@ service ImageService {
 message ImageAddRequest {
   bytes id = 1;
   StoreRef store = 2;
-  string ref = 3 [features.field_presence = IMPLICIT];
-  string repo = 4 [features.field_presence = IMPLICIT];
-  string tag = 5 [features.field_presence = IMPLICIT];
-  string digest = 6 [features.field_presence = IMPLICIT];
-  google.protobuf.Timestamp first_seen = 7;
-  google.protobuf.Timestamp last_used = 8;
-  google.protobuf.Timestamp last_distributed = 9;
-  bool pinned = 10 [features.field_presence = IMPLICIT];
-  bool in_use = 11 [features.field_presence = IMPLICIT];
+  string ref = 8 [features.field_presence = IMPLICIT];
+  string digest = 9 [features.field_presence = IMPLICIT];
+  string repo = 10 [features.field_presence = IMPLICIT];
+  string tag = 11 [features.field_presence = IMPLICIT];
+  google.protobuf.Timestamp date_last_distributed = 13;
+  google.protobuf.Timestamp date_last_used = 14;
+  google.protobuf.Timestamp date_first_seen = 15;
+  bool pinned = 16 [features.field_presence = IMPLICIT];
+  bool in_use = 17 [features.field_presence = IMPLICIT];
 }
 
 message ImageGetRequest {
@@ -49,48 +49,55 @@ message ImageRef {
 
 message ImageRefByLocator {
   StoreRef store = 2;
-  string ref = 3;
+  string ref = 8;
 }
 
 message ImageSelect {
   bool all = 1;
   StoreSelect store = 2;
-  bool ref = 3;
-  bool repo = 4;
-  bool tag = 5;
-  bool digest = 6;
-  bool first_seen = 7;
-  bool last_used = 8;
-  bool last_distributed = 9;
-  bool pinned = 10;
-  bool in_use = 11;
+  bool ref = 8;
+  bool digest = 9;
+  bool repo = 10;
+  bool tag = 11;
+  bool date_last_distributed = 13;
+  bool date_last_used = 14;
+  bool date_first_seen = 15;
+  bool pinned = 16;
+  bool in_use = 17;
 }
 
 message ImagePatchRequest {
   ImageRef ref = 1;
-  string digest = 11;
-  google.protobuf.Timestamp last_used = 15;
-  google.protobuf.Timestamp last_distributed = 17;
-  bool pinned = 19;
-  bool in_use = 21;
+  string digest = 17;
+  google.protobuf.Timestamp date_last_distributed = 25;
+  google.protobuf.Timestamp date_last_used = 27;
+  bool pinned = 31;
+  bool in_use = 33;
 }
 
 message ImageListRequest {
+  // Store whose inventory to list.
   StoreRef store = 1;
   // Exact match on the host-qualified repository.
   string repo = 2;
   // Exact match on the full reference.
   string ref = 3;
+  // Keep only pinned (true) or unpinned (false) images.
   bool pinned = 4;
   // Filter on live container usage; replaces the REST /inuse endpoint.
   bool in_use = 5;
 
+  // Maximum items to return; 0 = no limit.
   int32 page_size = 10;
+  // Continuation token from the previous response; empty starts from the
+  // beginning.
   string page_token = 11;
 }
 
 message ImageListResponse {
+  // One page of results.
   repeated Image items = 1;
+  // Empty when there are no further results.
   string next_page_token = 2;
   // Present only on unfiltered lists, mirroring the REST endpoint.
   repeated UntaggedImage untagged = 3;
@@ -98,6 +105,7 @@ message ImageListResponse {
 
 // Reap clock of an image observed with no tags (docker engines only).
 message UntaggedImage {
+  // Engine image ID.
   string id = 1;
-  google.protobuf.Timestamp first_seen = 2;
+  google.protobuf.Timestamp date_first_seen = 15;
 }

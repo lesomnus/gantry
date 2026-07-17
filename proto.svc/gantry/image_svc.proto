@@ -16,26 +16,34 @@ service ImageService {
 
 // Reap clock of an image observed with no tags (docker engines only).
 message UntaggedImage {
+  // Engine image ID.
   string id = 1;
-  google.protobuf.Timestamp first_seen = 2;
+  google.protobuf.Timestamp date_first_seen = 15;
 }
 
 message ImageListRequest {
+  // Store whose inventory to list.
   StoreRef store = 1;
   // Exact match on the host-qualified repository.
   string repo = 2;
   // Exact match on the full reference.
   string ref = 3;
+  // Keep only pinned (true) or unpinned (false) images.
   bool pinned = 4;
   // Filter on live container usage; replaces the REST /inuse endpoint.
   bool in_use = 5;
 
+  // Maximum items to return; 0 = no limit.
   int32 page_size = 10;
+  // Continuation token from the previous response; empty starts from the
+  // beginning.
   string page_token = 11;
 }
 
 message ImageListResponse {
+  // One page of results.
   repeated Image items = 1;
+  // Empty when there are no further results.
   string next_page_token = 2;
   // Present only on unfiltered lists, mirroring the REST endpoint.
   repeated UntaggedImage untagged = 3;

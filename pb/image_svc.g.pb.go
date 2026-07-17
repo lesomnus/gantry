@@ -23,22 +23,22 @@ const (
 )
 
 type ImageAddRequest struct {
-	state                      protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Id              []byte                 `protobuf:"bytes,1,opt,name=id"`
-	xxx_hidden_Store           *StoreRef              `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Ref             string                 `protobuf:"bytes,3,opt,name=ref"`
-	xxx_hidden_Repo            string                 `protobuf:"bytes,4,opt,name=repo"`
-	xxx_hidden_Tag             string                 `protobuf:"bytes,5,opt,name=tag"`
-	xxx_hidden_Digest          string                 `protobuf:"bytes,6,opt,name=digest"`
-	xxx_hidden_FirstSeen       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=first_seen,json=firstSeen"`
-	xxx_hidden_LastUsed        *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_used,json=lastUsed"`
-	xxx_hidden_LastDistributed *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_distributed,json=lastDistributed"`
-	xxx_hidden_Pinned          bool                   `protobuf:"varint,10,opt,name=pinned"`
-	xxx_hidden_InUse           bool                   `protobuf:"varint,11,opt,name=in_use,json=inUse"`
-	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
-	XXX_presence               [1]uint32
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	state                          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id                  []byte                 `protobuf:"bytes,1,opt,name=id"`
+	xxx_hidden_Store               *StoreRef              `protobuf:"bytes,2,opt,name=store"`
+	xxx_hidden_Ref                 string                 `protobuf:"bytes,8,opt,name=ref"`
+	xxx_hidden_Digest              string                 `protobuf:"bytes,9,opt,name=digest"`
+	xxx_hidden_Repo                string                 `protobuf:"bytes,10,opt,name=repo"`
+	xxx_hidden_Tag                 string                 `protobuf:"bytes,11,opt,name=tag"`
+	xxx_hidden_DateLastDistributed *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=date_last_distributed,json=dateLastDistributed"`
+	xxx_hidden_DateLastUsed        *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=date_last_used,json=dateLastUsed"`
+	xxx_hidden_DateFirstSeen       *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_first_seen,json=dateFirstSeen"`
+	xxx_hidden_Pinned              bool                   `protobuf:"varint,16,opt,name=pinned"`
+	xxx_hidden_InUse               bool                   `protobuf:"varint,17,opt,name=in_use,json=inUse"`
+	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
+	XXX_presence                   [1]uint32
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *ImageAddRequest) Reset() {
@@ -87,6 +87,13 @@ func (x *ImageAddRequest) GetRef() string {
 	return ""
 }
 
+func (x *ImageAddRequest) GetDigest() string {
+	if x != nil {
+		return x.xxx_hidden_Digest
+	}
+	return ""
+}
+
 func (x *ImageAddRequest) GetRepo() string {
 	if x != nil {
 		return x.xxx_hidden_Repo
@@ -101,30 +108,23 @@ func (x *ImageAddRequest) GetTag() string {
 	return ""
 }
 
-func (x *ImageAddRequest) GetDigest() string {
+func (x *ImageAddRequest) GetDateLastDistributed() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_Digest
-	}
-	return ""
-}
-
-func (x *ImageAddRequest) GetFirstSeen() *timestamppb.Timestamp {
-	if x != nil {
-		return x.xxx_hidden_FirstSeen
+		return x.xxx_hidden_DateLastDistributed
 	}
 	return nil
 }
 
-func (x *ImageAddRequest) GetLastUsed() *timestamppb.Timestamp {
+func (x *ImageAddRequest) GetDateLastUsed() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastUsed
+		return x.xxx_hidden_DateLastUsed
 	}
 	return nil
 }
 
-func (x *ImageAddRequest) GetLastDistributed() *timestamppb.Timestamp {
+func (x *ImageAddRequest) GetDateFirstSeen() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastDistributed
+		return x.xxx_hidden_DateFirstSeen
 	}
 	return nil
 }
@@ -159,6 +159,10 @@ func (x *ImageAddRequest) SetRef(v string) {
 	x.xxx_hidden_Ref = v
 }
 
+func (x *ImageAddRequest) SetDigest(v string) {
+	x.xxx_hidden_Digest = v
+}
+
 func (x *ImageAddRequest) SetRepo(v string) {
 	x.xxx_hidden_Repo = v
 }
@@ -167,20 +171,16 @@ func (x *ImageAddRequest) SetTag(v string) {
 	x.xxx_hidden_Tag = v
 }
 
-func (x *ImageAddRequest) SetDigest(v string) {
-	x.xxx_hidden_Digest = v
+func (x *ImageAddRequest) SetDateLastDistributed(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastDistributed = v
 }
 
-func (x *ImageAddRequest) SetFirstSeen(v *timestamppb.Timestamp) {
-	x.xxx_hidden_FirstSeen = v
+func (x *ImageAddRequest) SetDateLastUsed(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastUsed = v
 }
 
-func (x *ImageAddRequest) SetLastUsed(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastUsed = v
-}
-
-func (x *ImageAddRequest) SetLastDistributed(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastDistributed = v
+func (x *ImageAddRequest) SetDateFirstSeen(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateFirstSeen = v
 }
 
 func (x *ImageAddRequest) SetPinned(v bool) {
@@ -205,25 +205,25 @@ func (x *ImageAddRequest) HasStore() bool {
 	return x.xxx_hidden_Store != nil
 }
 
-func (x *ImageAddRequest) HasFirstSeen() bool {
+func (x *ImageAddRequest) HasDateLastDistributed() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_FirstSeen != nil
+	return x.xxx_hidden_DateLastDistributed != nil
 }
 
-func (x *ImageAddRequest) HasLastUsed() bool {
+func (x *ImageAddRequest) HasDateLastUsed() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastUsed != nil
+	return x.xxx_hidden_DateLastUsed != nil
 }
 
-func (x *ImageAddRequest) HasLastDistributed() bool {
+func (x *ImageAddRequest) HasDateFirstSeen() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastDistributed != nil
+	return x.xxx_hidden_DateFirstSeen != nil
 }
 
 func (x *ImageAddRequest) ClearId() {
@@ -235,32 +235,32 @@ func (x *ImageAddRequest) ClearStore() {
 	x.xxx_hidden_Store = nil
 }
 
-func (x *ImageAddRequest) ClearFirstSeen() {
-	x.xxx_hidden_FirstSeen = nil
+func (x *ImageAddRequest) ClearDateLastDistributed() {
+	x.xxx_hidden_DateLastDistributed = nil
 }
 
-func (x *ImageAddRequest) ClearLastUsed() {
-	x.xxx_hidden_LastUsed = nil
+func (x *ImageAddRequest) ClearDateLastUsed() {
+	x.xxx_hidden_DateLastUsed = nil
 }
 
-func (x *ImageAddRequest) ClearLastDistributed() {
-	x.xxx_hidden_LastDistributed = nil
+func (x *ImageAddRequest) ClearDateFirstSeen() {
+	x.xxx_hidden_DateFirstSeen = nil
 }
 
 type ImageAddRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Id              []byte
-	Store           *StoreRef
-	Ref             string
-	Repo            string
-	Tag             string
-	Digest          string
-	FirstSeen       *timestamppb.Timestamp
-	LastUsed        *timestamppb.Timestamp
-	LastDistributed *timestamppb.Timestamp
-	Pinned          bool
-	InUse           bool
+	Id                  []byte
+	Store               *StoreRef
+	Ref                 string
+	Digest              string
+	Repo                string
+	Tag                 string
+	DateLastDistributed *timestamppb.Timestamp
+	DateLastUsed        *timestamppb.Timestamp
+	DateFirstSeen       *timestamppb.Timestamp
+	Pinned              bool
+	InUse               bool
 }
 
 func (b0 ImageAddRequest_builder) Build() *ImageAddRequest {
@@ -273,12 +273,12 @@ func (b0 ImageAddRequest_builder) Build() *ImageAddRequest {
 	}
 	x.xxx_hidden_Store = b.Store
 	x.xxx_hidden_Ref = b.Ref
+	x.xxx_hidden_Digest = b.Digest
 	x.xxx_hidden_Repo = b.Repo
 	x.xxx_hidden_Tag = b.Tag
-	x.xxx_hidden_Digest = b.Digest
-	x.xxx_hidden_FirstSeen = b.FirstSeen
-	x.xxx_hidden_LastUsed = b.LastUsed
-	x.xxx_hidden_LastDistributed = b.LastDistributed
+	x.xxx_hidden_DateLastDistributed = b.DateLastDistributed
+	x.xxx_hidden_DateLastUsed = b.DateLastUsed
+	x.xxx_hidden_DateFirstSeen = b.DateFirstSeen
 	x.xxx_hidden_Pinned = b.Pinned
 	x.xxx_hidden_InUse = b.InUse
 	return m0
@@ -550,7 +550,7 @@ func (*imageRef_Locator) isImageRef_Key() {}
 type ImageRefByLocator struct {
 	state                  protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Store       *StoreRef              `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Ref         *string                `protobuf:"bytes,3,opt,name=ref"`
+	xxx_hidden_Ref         *string                `protobuf:"bytes,8,opt,name=ref"`
 	XXX_raceDetectHookData protoimpl.RaceDetectHookData
 	XXX_presence           [1]uint32
 	unknownFields          protoimpl.UnknownFields
@@ -651,22 +651,22 @@ func (b0 ImageRefByLocator_builder) Build() *ImageRefByLocator {
 }
 
 type ImageSelect struct {
-	state                      protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_All             bool                   `protobuf:"varint,1,opt,name=all"`
-	xxx_hidden_Store           *StoreSelect           `protobuf:"bytes,2,opt,name=store"`
-	xxx_hidden_Ref             bool                   `protobuf:"varint,3,opt,name=ref"`
-	xxx_hidden_Repo            bool                   `protobuf:"varint,4,opt,name=repo"`
-	xxx_hidden_Tag             bool                   `protobuf:"varint,5,opt,name=tag"`
-	xxx_hidden_Digest          bool                   `protobuf:"varint,6,opt,name=digest"`
-	xxx_hidden_FirstSeen       bool                   `protobuf:"varint,7,opt,name=first_seen,json=firstSeen"`
-	xxx_hidden_LastUsed        bool                   `protobuf:"varint,8,opt,name=last_used,json=lastUsed"`
-	xxx_hidden_LastDistributed bool                   `protobuf:"varint,9,opt,name=last_distributed,json=lastDistributed"`
-	xxx_hidden_Pinned          bool                   `protobuf:"varint,10,opt,name=pinned"`
-	xxx_hidden_InUse           bool                   `protobuf:"varint,11,opt,name=in_use,json=inUse"`
-	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
-	XXX_presence               [1]uint32
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	state                          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_All                 bool                   `protobuf:"varint,1,opt,name=all"`
+	xxx_hidden_Store               *StoreSelect           `protobuf:"bytes,2,opt,name=store"`
+	xxx_hidden_Ref                 bool                   `protobuf:"varint,8,opt,name=ref"`
+	xxx_hidden_Digest              bool                   `protobuf:"varint,9,opt,name=digest"`
+	xxx_hidden_Repo                bool                   `protobuf:"varint,10,opt,name=repo"`
+	xxx_hidden_Tag                 bool                   `protobuf:"varint,11,opt,name=tag"`
+	xxx_hidden_DateLastDistributed bool                   `protobuf:"varint,13,opt,name=date_last_distributed,json=dateLastDistributed"`
+	xxx_hidden_DateLastUsed        bool                   `protobuf:"varint,14,opt,name=date_last_used,json=dateLastUsed"`
+	xxx_hidden_DateFirstSeen       bool                   `protobuf:"varint,15,opt,name=date_first_seen,json=dateFirstSeen"`
+	xxx_hidden_Pinned              bool                   `protobuf:"varint,16,opt,name=pinned"`
+	xxx_hidden_InUse               bool                   `protobuf:"varint,17,opt,name=in_use,json=inUse"`
+	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
+	XXX_presence                   [1]uint32
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *ImageSelect) Reset() {
@@ -715,6 +715,13 @@ func (x *ImageSelect) GetRef() bool {
 	return false
 }
 
+func (x *ImageSelect) GetDigest() bool {
+	if x != nil {
+		return x.xxx_hidden_Digest
+	}
+	return false
+}
+
 func (x *ImageSelect) GetRepo() bool {
 	if x != nil {
 		return x.xxx_hidden_Repo
@@ -729,30 +736,23 @@ func (x *ImageSelect) GetTag() bool {
 	return false
 }
 
-func (x *ImageSelect) GetDigest() bool {
+func (x *ImageSelect) GetDateLastDistributed() bool {
 	if x != nil {
-		return x.xxx_hidden_Digest
+		return x.xxx_hidden_DateLastDistributed
 	}
 	return false
 }
 
-func (x *ImageSelect) GetFirstSeen() bool {
+func (x *ImageSelect) GetDateLastUsed() bool {
 	if x != nil {
-		return x.xxx_hidden_FirstSeen
+		return x.xxx_hidden_DateLastUsed
 	}
 	return false
 }
 
-func (x *ImageSelect) GetLastUsed() bool {
+func (x *ImageSelect) GetDateFirstSeen() bool {
 	if x != nil {
-		return x.xxx_hidden_LastUsed
-	}
-	return false
-}
-
-func (x *ImageSelect) GetLastDistributed() bool {
-	if x != nil {
-		return x.xxx_hidden_LastDistributed
+		return x.xxx_hidden_DateFirstSeen
 	}
 	return false
 }
@@ -785,33 +785,33 @@ func (x *ImageSelect) SetRef(v bool) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 11)
 }
 
+func (x *ImageSelect) SetDigest(v bool) {
+	x.xxx_hidden_Digest = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 11)
+}
+
 func (x *ImageSelect) SetRepo(v bool) {
 	x.xxx_hidden_Repo = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 3, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 11)
 }
 
 func (x *ImageSelect) SetTag(v bool) {
 	x.xxx_hidden_Tag = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 11)
-}
-
-func (x *ImageSelect) SetDigest(v bool) {
-	x.xxx_hidden_Digest = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 11)
 }
 
-func (x *ImageSelect) SetFirstSeen(v bool) {
-	x.xxx_hidden_FirstSeen = v
+func (x *ImageSelect) SetDateLastDistributed(v bool) {
+	x.xxx_hidden_DateLastDistributed = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 11)
 }
 
-func (x *ImageSelect) SetLastUsed(v bool) {
-	x.xxx_hidden_LastUsed = v
+func (x *ImageSelect) SetDateLastUsed(v bool) {
+	x.xxx_hidden_DateLastUsed = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 11)
 }
 
-func (x *ImageSelect) SetLastDistributed(v bool) {
-	x.xxx_hidden_LastDistributed = v
+func (x *ImageSelect) SetDateFirstSeen(v bool) {
+	x.xxx_hidden_DateFirstSeen = v
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 11)
 }
 
@@ -846,42 +846,42 @@ func (x *ImageSelect) HasRef() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
 }
 
-func (x *ImageSelect) HasRepo() bool {
+func (x *ImageSelect) HasDigest() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 3)
 }
 
-func (x *ImageSelect) HasTag() bool {
+func (x *ImageSelect) HasRepo() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
 }
 
-func (x *ImageSelect) HasDigest() bool {
+func (x *ImageSelect) HasTag() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 5)
 }
 
-func (x *ImageSelect) HasFirstSeen() bool {
+func (x *ImageSelect) HasDateLastDistributed() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 6)
 }
 
-func (x *ImageSelect) HasLastUsed() bool {
+func (x *ImageSelect) HasDateLastUsed() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 7)
 }
 
-func (x *ImageSelect) HasLastDistributed() bool {
+func (x *ImageSelect) HasDateFirstSeen() bool {
 	if x == nil {
 		return false
 	}
@@ -916,34 +916,34 @@ func (x *ImageSelect) ClearRef() {
 	x.xxx_hidden_Ref = false
 }
 
-func (x *ImageSelect) ClearRepo() {
+func (x *ImageSelect) ClearDigest() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 3)
+	x.xxx_hidden_Digest = false
+}
+
+func (x *ImageSelect) ClearRepo() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
 	x.xxx_hidden_Repo = false
 }
 
 func (x *ImageSelect) ClearTag() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
 	x.xxx_hidden_Tag = false
 }
 
-func (x *ImageSelect) ClearDigest() {
-	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 5)
-	x.xxx_hidden_Digest = false
-}
-
-func (x *ImageSelect) ClearFirstSeen() {
+func (x *ImageSelect) ClearDateLastDistributed() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 6)
-	x.xxx_hidden_FirstSeen = false
+	x.xxx_hidden_DateLastDistributed = false
 }
 
-func (x *ImageSelect) ClearLastUsed() {
+func (x *ImageSelect) ClearDateLastUsed() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 7)
-	x.xxx_hidden_LastUsed = false
+	x.xxx_hidden_DateLastUsed = false
 }
 
-func (x *ImageSelect) ClearLastDistributed() {
+func (x *ImageSelect) ClearDateFirstSeen() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 8)
-	x.xxx_hidden_LastDistributed = false
+	x.xxx_hidden_DateFirstSeen = false
 }
 
 func (x *ImageSelect) ClearPinned() {
@@ -959,17 +959,17 @@ func (x *ImageSelect) ClearInUse() {
 type ImageSelect_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	All             *bool
-	Store           *StoreSelect
-	Ref             *bool
-	Repo            *bool
-	Tag             *bool
-	Digest          *bool
-	FirstSeen       *bool
-	LastUsed        *bool
-	LastDistributed *bool
-	Pinned          *bool
-	InUse           *bool
+	All                 *bool
+	Store               *StoreSelect
+	Ref                 *bool
+	Digest              *bool
+	Repo                *bool
+	Tag                 *bool
+	DateLastDistributed *bool
+	DateLastUsed        *bool
+	DateFirstSeen       *bool
+	Pinned              *bool
+	InUse               *bool
 }
 
 func (b0 ImageSelect_builder) Build() *ImageSelect {
@@ -985,29 +985,29 @@ func (b0 ImageSelect_builder) Build() *ImageSelect {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 11)
 		x.xxx_hidden_Ref = *b.Ref
 	}
-	if b.Repo != nil {
+	if b.Digest != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 3, 11)
+		x.xxx_hidden_Digest = *b.Digest
+	}
+	if b.Repo != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 11)
 		x.xxx_hidden_Repo = *b.Repo
 	}
 	if b.Tag != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 11)
 		x.xxx_hidden_Tag = *b.Tag
 	}
-	if b.Digest != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 11)
-		x.xxx_hidden_Digest = *b.Digest
-	}
-	if b.FirstSeen != nil {
+	if b.DateLastDistributed != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 11)
-		x.xxx_hidden_FirstSeen = *b.FirstSeen
+		x.xxx_hidden_DateLastDistributed = *b.DateLastDistributed
 	}
-	if b.LastUsed != nil {
+	if b.DateLastUsed != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 11)
-		x.xxx_hidden_LastUsed = *b.LastUsed
+		x.xxx_hidden_DateLastUsed = *b.DateLastUsed
 	}
-	if b.LastDistributed != nil {
+	if b.DateFirstSeen != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 11)
-		x.xxx_hidden_LastDistributed = *b.LastDistributed
+		x.xxx_hidden_DateFirstSeen = *b.DateFirstSeen
 	}
 	if b.Pinned != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 9, 11)
@@ -1021,17 +1021,17 @@ func (b0 ImageSelect_builder) Build() *ImageSelect {
 }
 
 type ImagePatchRequest struct {
-	state                      protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Ref             *ImageRef              `protobuf:"bytes,1,opt,name=ref"`
-	xxx_hidden_Digest          *string                `protobuf:"bytes,11,opt,name=digest"`
-	xxx_hidden_LastUsed        *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=last_used,json=lastUsed"`
-	xxx_hidden_LastDistributed *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=last_distributed,json=lastDistributed"`
-	xxx_hidden_Pinned          bool                   `protobuf:"varint,19,opt,name=pinned"`
-	xxx_hidden_InUse           bool                   `protobuf:"varint,21,opt,name=in_use,json=inUse"`
-	XXX_raceDetectHookData     protoimpl.RaceDetectHookData
-	XXX_presence               [1]uint32
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	state                          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Ref                 *ImageRef              `protobuf:"bytes,1,opt,name=ref"`
+	xxx_hidden_Digest              *string                `protobuf:"bytes,17,opt,name=digest"`
+	xxx_hidden_DateLastDistributed *timestamppb.Timestamp `protobuf:"bytes,25,opt,name=date_last_distributed,json=dateLastDistributed"`
+	xxx_hidden_DateLastUsed        *timestamppb.Timestamp `protobuf:"bytes,27,opt,name=date_last_used,json=dateLastUsed"`
+	xxx_hidden_Pinned              bool                   `protobuf:"varint,31,opt,name=pinned"`
+	xxx_hidden_InUse               bool                   `protobuf:"varint,33,opt,name=in_use,json=inUse"`
+	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
+	XXX_presence                   [1]uint32
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *ImagePatchRequest) Reset() {
@@ -1076,16 +1076,16 @@ func (x *ImagePatchRequest) GetDigest() string {
 	return ""
 }
 
-func (x *ImagePatchRequest) GetLastUsed() *timestamppb.Timestamp {
+func (x *ImagePatchRequest) GetDateLastDistributed() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastUsed
+		return x.xxx_hidden_DateLastDistributed
 	}
 	return nil
 }
 
-func (x *ImagePatchRequest) GetLastDistributed() *timestamppb.Timestamp {
+func (x *ImagePatchRequest) GetDateLastUsed() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_LastDistributed
+		return x.xxx_hidden_DateLastUsed
 	}
 	return nil
 }
@@ -1113,12 +1113,12 @@ func (x *ImagePatchRequest) SetDigest(v string) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 6)
 }
 
-func (x *ImagePatchRequest) SetLastUsed(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastUsed = v
+func (x *ImagePatchRequest) SetDateLastDistributed(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastDistributed = v
 }
 
-func (x *ImagePatchRequest) SetLastDistributed(v *timestamppb.Timestamp) {
-	x.xxx_hidden_LastDistributed = v
+func (x *ImagePatchRequest) SetDateLastUsed(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateLastUsed = v
 }
 
 func (x *ImagePatchRequest) SetPinned(v bool) {
@@ -1145,18 +1145,18 @@ func (x *ImagePatchRequest) HasDigest() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
 }
 
-func (x *ImagePatchRequest) HasLastUsed() bool {
+func (x *ImagePatchRequest) HasDateLastDistributed() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastUsed != nil
+	return x.xxx_hidden_DateLastDistributed != nil
 }
 
-func (x *ImagePatchRequest) HasLastDistributed() bool {
+func (x *ImagePatchRequest) HasDateLastUsed() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_LastDistributed != nil
+	return x.xxx_hidden_DateLastUsed != nil
 }
 
 func (x *ImagePatchRequest) HasPinned() bool {
@@ -1182,12 +1182,12 @@ func (x *ImagePatchRequest) ClearDigest() {
 	x.xxx_hidden_Digest = nil
 }
 
-func (x *ImagePatchRequest) ClearLastUsed() {
-	x.xxx_hidden_LastUsed = nil
+func (x *ImagePatchRequest) ClearDateLastDistributed() {
+	x.xxx_hidden_DateLastDistributed = nil
 }
 
-func (x *ImagePatchRequest) ClearLastDistributed() {
-	x.xxx_hidden_LastDistributed = nil
+func (x *ImagePatchRequest) ClearDateLastUsed() {
+	x.xxx_hidden_DateLastUsed = nil
 }
 
 func (x *ImagePatchRequest) ClearPinned() {
@@ -1203,12 +1203,12 @@ func (x *ImagePatchRequest) ClearInUse() {
 type ImagePatchRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Ref             *ImageRef
-	Digest          *string
-	LastUsed        *timestamppb.Timestamp
-	LastDistributed *timestamppb.Timestamp
-	Pinned          *bool
-	InUse           *bool
+	Ref                 *ImageRef
+	Digest              *string
+	DateLastDistributed *timestamppb.Timestamp
+	DateLastUsed        *timestamppb.Timestamp
+	Pinned              *bool
+	InUse               *bool
 }
 
 func (b0 ImagePatchRequest_builder) Build() *ImagePatchRequest {
@@ -1220,8 +1220,8 @@ func (b0 ImagePatchRequest_builder) Build() *ImagePatchRequest {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 6)
 		x.xxx_hidden_Digest = b.Digest
 	}
-	x.xxx_hidden_LastUsed = b.LastUsed
-	x.xxx_hidden_LastDistributed = b.LastDistributed
+	x.xxx_hidden_DateLastDistributed = b.DateLastDistributed
+	x.xxx_hidden_DateLastUsed = b.DateLastUsed
 	if b.Pinned != nil {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 6)
 		x.xxx_hidden_Pinned = *b.Pinned
@@ -1451,15 +1451,20 @@ func (x *ImageListRequest) ClearPageToken() {
 type ImageListRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
+	// Store whose inventory to list.
 	Store *StoreRef
 	// Exact match on the host-qualified repository.
 	Repo *string
 	// Exact match on the full reference.
-	Ref    *string
+	Ref *string
+	// Keep only pinned (true) or unpinned (false) images.
 	Pinned *bool
 	// Filter on live container usage; replaces the REST /inuse endpoint.
-	InUse     *bool
-	PageSize  *int32
+	InUse *bool
+	// Maximum items to return; 0 = no limit.
+	PageSize *int32
+	// Continuation token from the previous response; empty starts from the
+	// beginning.
 	PageToken *string
 }
 
@@ -1587,7 +1592,9 @@ func (x *ImageListResponse) ClearNextPageToken() {
 type ImageListResponse_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Items         []*Image
+	// One page of results.
+	Items []*Image
+	// Empty when there are no further results.
 	NextPageToken *string
 	// Present only on unfiltered lists, mirroring the REST endpoint.
 	Untagged []*UntaggedImage
@@ -1608,13 +1615,13 @@ func (b0 ImageListResponse_builder) Build() *ImageListResponse {
 
 // Reap clock of an image observed with no tags (docker engines only).
 type UntaggedImage struct {
-	state                  protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Id          *string                `protobuf:"bytes,1,opt,name=id"`
-	xxx_hidden_FirstSeen   *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=first_seen,json=firstSeen"`
-	XXX_raceDetectHookData protoimpl.RaceDetectHookData
-	XXX_presence           [1]uint32
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id            *string                `protobuf:"bytes,1,opt,name=id"`
+	xxx_hidden_DateFirstSeen *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_first_seen,json=dateFirstSeen"`
+	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
+	XXX_presence             [1]uint32
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *UntaggedImage) Reset() {
@@ -1652,9 +1659,9 @@ func (x *UntaggedImage) GetId() string {
 	return ""
 }
 
-func (x *UntaggedImage) GetFirstSeen() *timestamppb.Timestamp {
+func (x *UntaggedImage) GetDateFirstSeen() *timestamppb.Timestamp {
 	if x != nil {
-		return x.xxx_hidden_FirstSeen
+		return x.xxx_hidden_DateFirstSeen
 	}
 	return nil
 }
@@ -1664,8 +1671,8 @@ func (x *UntaggedImage) SetId(v string) {
 	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 0, 2)
 }
 
-func (x *UntaggedImage) SetFirstSeen(v *timestamppb.Timestamp) {
-	x.xxx_hidden_FirstSeen = v
+func (x *UntaggedImage) SetDateFirstSeen(v *timestamppb.Timestamp) {
+	x.xxx_hidden_DateFirstSeen = v
 }
 
 func (x *UntaggedImage) HasId() bool {
@@ -1675,11 +1682,11 @@ func (x *UntaggedImage) HasId() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 0)
 }
 
-func (x *UntaggedImage) HasFirstSeen() bool {
+func (x *UntaggedImage) HasDateFirstSeen() bool {
 	if x == nil {
 		return false
 	}
-	return x.xxx_hidden_FirstSeen != nil
+	return x.xxx_hidden_DateFirstSeen != nil
 }
 
 func (x *UntaggedImage) ClearId() {
@@ -1687,15 +1694,16 @@ func (x *UntaggedImage) ClearId() {
 	x.xxx_hidden_Id = nil
 }
 
-func (x *UntaggedImage) ClearFirstSeen() {
-	x.xxx_hidden_FirstSeen = nil
+func (x *UntaggedImage) ClearDateFirstSeen() {
+	x.xxx_hidden_DateFirstSeen = nil
 }
 
 type UntaggedImage_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	Id        *string
-	FirstSeen *timestamppb.Timestamp
+	// Engine image ID.
+	Id            *string
+	DateFirstSeen *timestamppb.Timestamp
 }
 
 func (b0 UntaggedImage_builder) Build() *UntaggedImage {
@@ -1706,7 +1714,7 @@ func (b0 UntaggedImage_builder) Build() *UntaggedImage {
 		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 0, 2)
 		x.xxx_hidden_Id = b.Id
 	}
-	x.xxx_hidden_FirstSeen = b.FirstSeen
+	x.xxx_hidden_DateFirstSeen = b.DateFirstSeen
 	return m0
 }
 
@@ -1714,21 +1722,20 @@ var File_gantry_image_svc_g_proto protoreflect.FileDescriptor
 
 const file_gantry_image_svc_g_proto_rawDesc = "" +
 	"\n" +
-	"\x18gantry/image_svc.g.proto\x12\x06gantry\x1a\x12gantry/image.proto\x1a\x18gantry/store_svc.g.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xad\x03\n" +
+	"\x18gantry/image_svc.g.proto\x12\x06gantry\x1a\x12gantry/image.proto\x1a\x18gantry/store_svc.g.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc8\x03\n" +
 	"\x0fImageAddRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12&\n" +
 	"\x05store\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x17\n" +
-	"\x03ref\x18\x03 \x01(\tB\x05\xaa\x01\x02\b\x02R\x03ref\x12\x19\n" +
-	"\x04repo\x18\x04 \x01(\tB\x05\xaa\x01\x02\b\x02R\x04repo\x12\x17\n" +
-	"\x03tag\x18\x05 \x01(\tB\x05\xaa\x01\x02\b\x02R\x03tag\x12\x1d\n" +
-	"\x06digest\x18\x06 \x01(\tB\x05\xaa\x01\x02\b\x02R\x06digest\x129\n" +
-	"\n" +
-	"first_seen\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tfirstSeen\x127\n" +
-	"\tlast_used\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\blastUsed\x12E\n" +
-	"\x10last_distributed\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0flastDistributed\x12\x1d\n" +
-	"\x06pinned\x18\n" +
-	" \x01(\bB\x05\xaa\x01\x02\b\x02R\x06pinned\x12\x1c\n" +
-	"\x06in_use\x18\v \x01(\bB\x05\xaa\x01\x02\b\x02R\x05inUse\"b\n" +
+	"\x03ref\x18\b \x01(\tB\x05\xaa\x01\x02\b\x02R\x03ref\x12\x1d\n" +
+	"\x06digest\x18\t \x01(\tB\x05\xaa\x01\x02\b\x02R\x06digest\x12\x19\n" +
+	"\x04repo\x18\n" +
+	" \x01(\tB\x05\xaa\x01\x02\b\x02R\x04repo\x12\x17\n" +
+	"\x03tag\x18\v \x01(\tB\x05\xaa\x01\x02\b\x02R\x03tag\x12N\n" +
+	"\x15date_last_distributed\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\x13dateLastDistributed\x12@\n" +
+	"\x0edate_last_used\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\fdateLastUsed\x12B\n" +
+	"\x0fdate_first_seen\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\rdateFirstSeen\x12\x1d\n" +
+	"\x06pinned\x18\x10 \x01(\bB\x05\xaa\x01\x02\b\x02R\x06pinned\x12\x1c\n" +
+	"\x06in_use\x18\x11 \x01(\bB\x05\xaa\x01\x02\b\x02R\x05inUse\"b\n" +
 	"\x0fImageGetRequest\x12\"\n" +
 	"\x03ref\x18\x01 \x01(\v2\x10.gantry.ImageRefR\x03ref\x12+\n" +
 	"\x06select\x18\x02 \x01(\v2\x13.gantry.ImageSelectR\x06select\"Z\n" +
@@ -1738,28 +1745,27 @@ const file_gantry_image_svc_g_proto_rawDesc = "" +
 	"\x03key\"M\n" +
 	"\x11ImageRefByLocator\x12&\n" +
 	"\x05store\x18\x02 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x10\n" +
-	"\x03ref\x18\x03 \x01(\tR\x03ref\"\xb0\x02\n" +
+	"\x03ref\x18\b \x01(\tR\x03ref\"\xcb\x02\n" +
 	"\vImageSelect\x12\x10\n" +
 	"\x03all\x18\x01 \x01(\bR\x03all\x12)\n" +
 	"\x05store\x18\x02 \x01(\v2\x13.gantry.StoreSelectR\x05store\x12\x10\n" +
-	"\x03ref\x18\x03 \x01(\bR\x03ref\x12\x12\n" +
-	"\x04repo\x18\x04 \x01(\bR\x04repo\x12\x10\n" +
-	"\x03tag\x18\x05 \x01(\bR\x03tag\x12\x16\n" +
-	"\x06digest\x18\x06 \x01(\bR\x06digest\x12\x1d\n" +
-	"\n" +
-	"first_seen\x18\a \x01(\bR\tfirstSeen\x12\x1b\n" +
-	"\tlast_used\x18\b \x01(\bR\blastUsed\x12)\n" +
-	"\x10last_distributed\x18\t \x01(\bR\x0flastDistributed\x12\x16\n" +
-	"\x06pinned\x18\n" +
-	" \x01(\bR\x06pinned\x12\x15\n" +
-	"\x06in_use\x18\v \x01(\bR\x05inUse\"\xfe\x01\n" +
+	"\x03ref\x18\b \x01(\bR\x03ref\x12\x16\n" +
+	"\x06digest\x18\t \x01(\bR\x06digest\x12\x12\n" +
+	"\x04repo\x18\n" +
+	" \x01(\bR\x04repo\x12\x10\n" +
+	"\x03tag\x18\v \x01(\bR\x03tag\x122\n" +
+	"\x15date_last_distributed\x18\r \x01(\bR\x13dateLastDistributed\x12$\n" +
+	"\x0edate_last_used\x18\x0e \x01(\bR\fdateLastUsed\x12&\n" +
+	"\x0fdate_first_seen\x18\x0f \x01(\bR\rdateFirstSeen\x12\x16\n" +
+	"\x06pinned\x18\x10 \x01(\bR\x06pinned\x12\x15\n" +
+	"\x06in_use\x18\x11 \x01(\bR\x05inUse\"\x90\x02\n" +
 	"\x11ImagePatchRequest\x12\"\n" +
 	"\x03ref\x18\x01 \x01(\v2\x10.gantry.ImageRefR\x03ref\x12\x16\n" +
-	"\x06digest\x18\v \x01(\tR\x06digest\x127\n" +
-	"\tlast_used\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\blastUsed\x12E\n" +
-	"\x10last_distributed\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\x0flastDistributed\x12\x16\n" +
-	"\x06pinned\x18\x13 \x01(\bR\x06pinned\x12\x15\n" +
-	"\x06in_use\x18\x15 \x01(\bR\x05inUse\"\xcb\x01\n" +
+	"\x06digest\x18\x11 \x01(\tR\x06digest\x12N\n" +
+	"\x15date_last_distributed\x18\x19 \x01(\v2\x1a.google.protobuf.TimestampR\x13dateLastDistributed\x12@\n" +
+	"\x0edate_last_used\x18\x1b \x01(\v2\x1a.google.protobuf.TimestampR\fdateLastUsed\x12\x16\n" +
+	"\x06pinned\x18\x1f \x01(\bR\x06pinned\x12\x15\n" +
+	"\x06in_use\x18! \x01(\bR\x05inUse\"\xcb\x01\n" +
 	"\x10ImageListRequest\x12&\n" +
 	"\x05store\x18\x01 \x01(\v2\x10.gantry.StoreRefR\x05store\x12\x12\n" +
 	"\x04repo\x18\x02 \x01(\tR\x04repo\x12\x10\n" +
@@ -1773,11 +1779,10 @@ const file_gantry_image_svc_g_proto_rawDesc = "" +
 	"\x11ImageListResponse\x12#\n" +
 	"\x05items\x18\x01 \x03(\v2\r.gantry.ImageR\x05items\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x121\n" +
-	"\buntagged\x18\x03 \x03(\v2\x15.gantry.UntaggedImageR\buntagged\"Z\n" +
+	"\buntagged\x18\x03 \x03(\v2\x15.gantry.UntaggedImageR\buntagged\"c\n" +
 	"\rUntaggedImage\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
-	"\n" +
-	"first_seen\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tfirstSeen2\x8f\x02\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12B\n" +
+	"\x0fdate_first_seen\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\rdateFirstSeen2\x8f\x02\n" +
 	"\fImageService\x12-\n" +
 	"\x03Add\x12\x17.gantry.ImageAddRequest\x1a\r.gantry.Image\x12-\n" +
 	"\x03Get\x12\x17.gantry.ImageGetRequest\x1a\r.gantry.Image\x121\n" +
@@ -1804,21 +1809,21 @@ var file_gantry_image_svc_g_proto_goTypes = []any{
 }
 var file_gantry_image_svc_g_proto_depIdxs = []int32{
 	9,  // 0: gantry.ImageAddRequest.store:type_name -> gantry.StoreRef
-	10, // 1: gantry.ImageAddRequest.first_seen:type_name -> google.protobuf.Timestamp
-	10, // 2: gantry.ImageAddRequest.last_used:type_name -> google.protobuf.Timestamp
-	10, // 3: gantry.ImageAddRequest.last_distributed:type_name -> google.protobuf.Timestamp
+	10, // 1: gantry.ImageAddRequest.date_last_distributed:type_name -> google.protobuf.Timestamp
+	10, // 2: gantry.ImageAddRequest.date_last_used:type_name -> google.protobuf.Timestamp
+	10, // 3: gantry.ImageAddRequest.date_first_seen:type_name -> google.protobuf.Timestamp
 	2,  // 4: gantry.ImageGetRequest.ref:type_name -> gantry.ImageRef
 	4,  // 5: gantry.ImageGetRequest.select:type_name -> gantry.ImageSelect
 	3,  // 6: gantry.ImageRef.locator:type_name -> gantry.ImageRefByLocator
 	9,  // 7: gantry.ImageRefByLocator.store:type_name -> gantry.StoreRef
 	11, // 8: gantry.ImageSelect.store:type_name -> gantry.StoreSelect
 	2,  // 9: gantry.ImagePatchRequest.ref:type_name -> gantry.ImageRef
-	10, // 10: gantry.ImagePatchRequest.last_used:type_name -> google.protobuf.Timestamp
-	10, // 11: gantry.ImagePatchRequest.last_distributed:type_name -> google.protobuf.Timestamp
+	10, // 10: gantry.ImagePatchRequest.date_last_distributed:type_name -> google.protobuf.Timestamp
+	10, // 11: gantry.ImagePatchRequest.date_last_used:type_name -> google.protobuf.Timestamp
 	9,  // 12: gantry.ImageListRequest.store:type_name -> gantry.StoreRef
 	12, // 13: gantry.ImageListResponse.items:type_name -> gantry.Image
 	8,  // 14: gantry.ImageListResponse.untagged:type_name -> gantry.UntaggedImage
-	10, // 15: gantry.UntaggedImage.first_seen:type_name -> google.protobuf.Timestamp
+	10, // 15: gantry.UntaggedImage.date_first_seen:type_name -> google.protobuf.Timestamp
 	0,  // 16: gantry.ImageService.Add:input_type -> gantry.ImageAddRequest
 	1,  // 17: gantry.ImageService.Get:input_type -> gantry.ImageGetRequest
 	5,  // 18: gantry.ImageService.Patch:input_type -> gantry.ImagePatchRequest
