@@ -17,8 +17,6 @@ var DefaultConfigPaths = []string{
 type Config struct {
 	path string
 
-	Greet GreetConfig
-
 	Otel OtelConfig
 
 	Serve ServeConfig
@@ -69,8 +67,6 @@ func engineHost(addr string) string {
 }
 
 func (c *Config) Evaluate() error {
-	z.FallbackP(&c.Greet.Format, "Hello, %s!")
-
 	z.FallbackP(&c.Serve.Addr, ":8080")
 	z.FallbackP((*time.Duration)(&c.Serve.ShutdownGrace), 15*time.Second)
 	z.FallbackP(&c.Worker.MaxConcurrentJobs, 2)

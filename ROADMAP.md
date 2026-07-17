@@ -165,7 +165,8 @@
   누적 드롭 카운터(`dropped_total`)를 함께 남긴다.
 - **deps** — 기능적 문제 없음(빌드/테스트 green, go.sum 고정). 미태깅 pin은 릴리즈 태깅 이슈로
   사용자 소관(5a-6) → 조치 불요.
-- **정리** — `greet` 서브커맨드/설정/`gantry.yaml` 블록 제거.
+- **정리** — ✅ 완료. `greet` 서브커맨드/`GreetConfig`/`gantry.yaml` 블록 제거,
+  docker-compose 스모크 커맨드를 `serve`로 교체.
 
 ---
 

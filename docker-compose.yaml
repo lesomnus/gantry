@@ -1,7 +1,7 @@
 services:
   app:
     image: ghcr.io/lesomnus/gantry:${REVISION:-local}
-    command: [greet, lesomnus]
+    command: ["--config", "/gantry.yaml", "serve"]
 
     network_mode: host
     privileged: true
