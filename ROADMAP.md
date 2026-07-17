@@ -99,8 +99,8 @@
 - **하드 idle-age 삭제** — ✅ 완료. 정책에 `max_idle` knob 추가: 평가 순서 in_use/pinned
   다음(keep_n/max_n 이전)에서 idle > max_idle이면 삭제(`idle_exceeded`). disk-pressure 기반
   추가 삭제는 선택 후속(미착수).
-- **keep-N/max-N digest 단위 카운트** — 태그가 아닌 `Record.Digest` 기준으로 센다
-  (현재 태그 단위).
+- **keep-N/max-N digest 단위 카운트** — ✅ 완료. `digestGroups`로 같은 digest의 태그를 한
+  그룹으로 묶어 keep_n/max_n이 digest 기준으로 센다(digest 없는 레코드는 개별 카운트).
 - **in-use 주기 heartbeat** — 저부하 주기 스캔으로 in-use 이미지의 LastUsed=now 갱신.
 - **pattern pin 매칭 echo** — `PinService.Add` 응답에 현재 매칭되는 refs 포함(비차단).
 

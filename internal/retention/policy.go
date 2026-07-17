@@ -56,6 +56,40 @@ func sortByRecency(group []Record) {
 	})
 }
 
+// digestGroups buckets records by content so keep-N/max-N count by digest, not
+// by tag: records sharing a resolved Digest form one group (multiple tags of the
+// same image count once), and a record with no resolved digest is its own group.
+// Groups are returned most-recently-used first (by the group's most-recent
+// record, tie-broken by that record's Ref); each group is itself recency-sorted.
+func digestGroups(recs []Record) [][]Record {
+	byKey := map[string]int{} // key -> index in groups
+	var groups [][]Record
+	for _, r := range recs {
+		k := r.Digest
+		if k == "" {
+			k = "\x00ref:" + r.Ref // no digest → counted individually
+		}
+		if i, ok := byKey[k]; ok {
+			groups[i] = append(groups[i], r)
+		} else {
+			byKey[k] = len(groups)
+			groups = append(groups, []Record{r})
+		}
+	}
+	for _, g := range groups {
+		sortByRecency(g)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		ri, rj := groups[i][0], groups[j][0]
+		ti, tj := ri.effLastUsed(), rj.effLastUsed()
+		if ti.Equal(tj) {
+			return ri.Ref < rj.Ref
+		}
+		return ti.After(tj)
+	})
+	return groups
+}
+
 func pinned(pins []string, r Record) bool {
 	for _, pin := range pins {
 		if matchPin(pin, r) {
@@ -348,36 +382,49 @@ func evalGroup(now time.Time, group []Record, inUse map[string]bool, p Policy, g
 		remaining = kept
 	}
 
-	// max-N cap: keep at most MaxN tags, deleting the oldest beyond the cap
-	// regardless of age. Deferred during the grace window, since a just-restarted
-	// node has no usage history and the "oldest" ordering is unreliable.
-	if p.MaxN > 0 && len(remaining) > p.MaxN {
-		sortByRecency(remaining)
+	// keep-N / max-N count by CONTENT (digest): tags sharing a digest count once,
+	// so keeping "the 2 most recent" keeps the 2 newest images, not 2 tags that may
+	// point at the same blob. A record with no resolved digest counts individually.
+	groups := digestGroups(remaining)
+
+	// max-N cap: keep at most MaxN digest-groups, deleting every tag in the oldest
+	// groups beyond the cap regardless of age. Deferred during the grace window,
+	// since a just-restarted node has no usage history and ordering is unreliable.
+	if p.MaxN > 0 && len(groups) > p.MaxN {
 		if now.Before(graceUntil) {
 			if dec.NextAgeOut.IsZero() || graceUntil.Before(dec.NextAgeOut) {
 				dec.NextAgeOut = graceUntil
 			}
 		} else {
-			for _, r := range remaining[p.MaxN:] {
-				dec.Delete = append(dec.Delete, Candidate{
-					Ref: r.Ref, Digest: r.Digest, LastUsed: r.effLastUsed(), Reason: "max_n_exceeded",
-				})
+			for _, g := range groups[p.MaxN:] {
+				for _, r := range g {
+					dec.Delete = append(dec.Delete, Candidate{
+						Ref: r.Ref, Digest: r.Digest, LastUsed: r.effLastUsed(), Reason: "max_n_exceeded",
+					})
+				}
 			}
-			remaining = remaining[:p.MaxN]
+			groups = groups[:p.MaxN]
 		}
 	}
 
-	// keep-N most-recently-used tags.
-	if p.KeepN > 0 && len(remaining) > 0 {
-		sortByRecency(remaining)
+	// keep-N most-recently-used digest-groups.
+	if p.KeepN > 0 && len(groups) > 0 {
 		n := p.KeepN
-		if n > len(remaining) {
-			n = len(remaining)
+		if n > len(groups) {
+			n = len(groups)
 		}
-		for _, r := range remaining[:n] {
-			dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: "keep_n_recent"})
+		for _, g := range groups[:n] {
+			for _, r := range g {
+				dec.Keep = append(dec.Keep, Kept{Ref: r.Ref, Reason: "keep_n_recent"})
+			}
 		}
-		remaining = remaining[n:]
+		groups = groups[n:]
+	}
+
+	// whatever survived keep-N proceeds to age evaluation.
+	remaining = remaining[:0]
+	for _, g := range groups {
+		remaining = append(remaining, g...)
 	}
 
 	// age-based deletion (held off during the grace window).

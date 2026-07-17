@@ -191,8 +191,9 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Key blocks:
   no global policy). Each store has its own `path` (usage index), scheduler
   cadence, `grace`, and per-repo `rules`. gantry tracks last-used time from the
   engine's container events, then keeps in-use, pinned, the `keep_n` most-recent
-  tags per repo, and anything newer than `max_age`; `max_n` caps the tags kept per
-  repo (oldest beyond the cap deleted even before `max_age`). `max_idle` is a hard
+  images per repo, and anything newer than `max_age`; `max_n` caps the images kept
+  per repo (oldest beyond the cap deleted even before `max_age`). `keep_n`/`max_n`
+  count by digest, so tags sharing an image count once. `max_idle` is a hard
   cap — an image unused longer than it is deleted regardless of `keep_n`/`max_n`
   (only in-use and pins protect it), so a settled-but-ancient tag doesn't linger.
   Each rule's `repo`

@@ -145,6 +145,31 @@ func TestEvaluateMaxIdleBeatsKeepN(t *testing.T) {
 	}
 }
 
+func TestEvaluateKeepNCountsByDigest(t *testing.T) {
+	now := time.Now()
+	withDigest := func(ref, digest string, ago time.Duration) Record {
+		r := rec(ref, "r/a", now.Add(-ago))
+		r.Digest = digest
+		return r
+	}
+	// t1 and t2 point at the same image (digest d1); t3 is a distinct, older image.
+	recs := []Record{
+		withDigest("r/a:t1", "sha256:d1", 1*time.Hour),
+		withDigest("r/a:t2", "sha256:d1", 2*time.Hour),
+		withDigest("r/a:t3", "sha256:d2", 500*time.Hour),
+	}
+	// keep_n=1 counts by digest, so it keeps the newest DIGEST (both t1 and t2),
+	// not just the single newest tag; t3 (a different, old digest) ages out.
+	d := Evaluate(now, recs, nil, rules1(Policy{KeepN: 1, MaxAge: time.Hour}), time.Time{})
+	del, keep := decided(d)
+	if keep["r/a:t1"] != "keep_n_recent" || keep["r/a:t2"] != "keep_n_recent" {
+		t.Errorf("both tags of the kept digest should survive keep_n=1: keep=%v", keep)
+	}
+	if del["r/a:t3"] != "age_exceeded" {
+		t.Errorf("the older, distinct digest should age out: del=%v", del)
+	}
+}
+
 func TestDecisionSerializesNextAgeOut(t *testing.T) {
 	at := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	b, err := json.Marshal(Decision{NextAgeOut: at})

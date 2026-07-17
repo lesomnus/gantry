@@ -95,8 +95,10 @@ stores:
   #     rules:
   #       - repo: "**"                       # catch-all defaults (least specific)
   #         max_age: "168h"                  # delete if unused for 7d (keep_n protects)
-  #         keep_n: 2                        # keep the 2 most-recent tags per repo
-  #         max_n: 10                        # cap at 10 tags per repo (oldest deleted)
+  #         keep_n: 2                        # keep the 2 most-recent images per repo
+  #         max_n: 10                        # cap at 10 images per repo (oldest deleted)
+  #                                          # keep_n/max_n count by digest (shared
+  #                                          # tags count once)
   #         max_idle: "2160h"                # HARD cap: delete if unused 90d even if
   #                                          # in keep_n (only in-use/pins protect)
   #       - repo: "cache.cr.com/prod/**"     # prod: overrides only what it sets
