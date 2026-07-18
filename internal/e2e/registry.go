@@ -1,11 +1,14 @@
 package e2e
 
 import (
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -51,6 +54,20 @@ func newCountingRegistry(t *testing.T) (host string, uploads *int32, close func(
 	})
 	srv := httptest.NewServer(h)
 	return strings.TrimPrefix(srv.URL, "http://"), &n, srv.Close
+}
+
+// newTLSRegistry starts an in-memory OCI registry over HTTPS with a self-signed
+// certificate (valid for loopback) and writes that certificate to a file usable
+// as a store's ca_cert. Returns host:port and the CA file path.
+func newTLSRegistry(t *testing.T) (host, caFile string, close func()) {
+	t.Helper()
+	srv := httptest.NewTLSServer(quietRegistry())
+	caFile = filepath.Join(t.TempDir(), "ca.crt")
+	b := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(caFile, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimPrefix(srv.URL, "https://"), caFile, srv.Close
 }
 
 func insecureTag(t *testing.T, host, repo, tag string) name.Tag {

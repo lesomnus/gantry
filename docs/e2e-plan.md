@@ -70,9 +70,14 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   SIGTERM plus audit-log persistence across a process restart (while the live job
   registry is empty). Passes against the devcontainer daemon; CI job `e2e-blackbox`
   added and `build` re-gated on it.
-- **L3-infra (Ansible) + nightly CI — ☐ not started.** The remaining author-heavy
-  tier (multi-host, real DNS/TLS, non-loopback, Harbor/cloud). Needs the [open
-  decisions](#open-decisions) and real infrastructure to land/verify.
+- **L3-infra (Ansible) + nightly CI — ⏳ in progress.** Decisions locked in:
+  self-hosted only (no vault/cloud), TLS included, subprocess-run gantry,
+  `tools/e2e-seed` added to the main module (no new deps). Landed & verified:
+  `tools/e2e-seed` (pure-Go: synthetic images + notation-signed referrers +
+  CA export — smoke-tested against a real registry), and `TestTLSCache` (gantry
+  trusts a private CA via `ca_cert`, hermetic). Remaining (author-only, needs a
+  self-hosted host to run): `deploy/compose/e2e.compose.yaml`, a lean `ansible/`
+  tree, `nightly.yaml`, and Makefile targets.
 
 ## Feature × layer coverage
 
