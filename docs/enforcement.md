@@ -11,7 +11,7 @@ the implementation as PRs land.
 | PR1 | Duration `w`/`d` parsing | ✅ landed |
 | PR2 | Config structs + Evaluate | ✅ landed |
 | PR3 | bbolt verdict cache | ✅ landed |
-| PR3b | Local OCI-layout verify source | ⬜ pending |
+| PR3b | Local OCI-layout verify source | ✅ landed |
 | PR4 | Caching verifier decorator | ⬜ pending |
 | PR5 | down.Enforcer + docker methods | ⬜ pending |
 | PR6 | Enforce manager | ⬜ pending |
@@ -225,21 +225,23 @@ accessors for the sweeper. `WithNow` for deterministic tests.
 **(landed: named the constructor `OpenCache` — `verify.Open` would be ambiguous
 in this package.)**
 
-### PR3b — Local OCI-layout verify source
+### PR3b — Local OCI-layout verify source — ✅ landed
 notation-go supports this natively, **no new dependency**:
-`notationregistry.NewOCIRepository(path, opts) (Repository, error)` builds the
-same `Repository` interface `notation.Verify` already consumes, backed by an
-on-disk OCI layout (`oras.land/oras-go/v2/content/oci.Store`) instead of a remote
-registry. Extend `notaryVerifier` (`internal/verify/notation.go`): add a
-`localLayout string` field (from `cfg.LocalLayout`) and, in `Verify` (or a small
-`resolveRepo` helper feeding the existing `repo()` flow at `notation.go:81-113`),
-try the local layout FIRST for a digest — `NewOCIRepository(localLayout,...)`,
-`Resolve`, `hasSignature`, `notation.Verify` against the SAME `n.v` (trust store +
-policy). A trusted hit returns offline; `errdef.ErrNotFound` (digest absent from
-the layout) falls through to the remote `repo()`. Because verification reuses the
-built notation verifier, the local layout is honored identically by admission,
-enforcement, and the caching decorator. Bundle is thin: subject manifest +
-signature manifest + signature blob per image (no layers needed to verify).
+`notationregistry.NewOCIRepository(path, opts)` builds the same `Repository`
+`notation.Verify` consumes, backed by an on-disk OCI layout
+(`oras.land/oras-go/v2/content/oci.Store`). `notaryVerifier` gained a
+`localLayout` field; the resolve→signature-gate→`notation.Verify` core was
+extracted into `verifyAgainst(ctx, repo, mode, src)` so it runs against either a
+live registry or the layout. `Verify` now tries `verifyLocalLayout` **first**: it
+returns `(res, true)` **only** on a clean verified-trusted result — absent,
+unsigned, unverifiable, or a broken layout all return `false` and fall through to
+the registry, so the layout is strictly **additive** (it can grant trust, never
+deny it). `newNotary` fails fast when `local_layout` lacks the `oci-layout`
+marker (oras would silently create an empty layout for a wrong path).
+**Verified empirically**: a signature referrer written to a layout is found by a
+freshly-opened `NewOCIRepository`, and an offline verify succeeds with the source
+registry host set unroutable (no network touched). Bundle is thin — subject
+manifest + signature manifest + signature blob (no image layers needed).
 
 ### PR4 — Caching decorator
 `type Caching struct{ verify.Service; cache *Cache; now }` (embeds `Service`, so

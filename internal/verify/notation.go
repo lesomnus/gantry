@@ -35,6 +35,9 @@ type notaryVerifier struct {
 	v      notation.Verifier
 	certs  []*x509.Certificate   // the loaded trust anchors, for Describe
 	policy *trustpolicy.Document // the effective policy, for Describe
+	// localLayout is an on-disk OCI image layout of pre-signed bootstrap images,
+	// consulted before the live registry (offline). Empty when not configured.
+	localLayout string
 }
 
 // New builds a notation Verifier from the config. It fails fast (loads and
@@ -63,7 +66,15 @@ func newNotary(cfg config.VerifyConfig) (*notaryVerifier, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build notation verifier: %w", err)
 	}
-	return &notaryVerifier{cfg: cfg, v: nv, certs: ts.certs, policy: doc}, nil
+	if cfg.LocalLayout != "" {
+		// Fail fast on a bad local_layout: oci.New would silently create an empty
+		// layout for a wrong path, so require the OCI layout marker to be present.
+		marker := filepath.Join(cfg.LocalLayout, "oci-layout")
+		if _, err := os.Stat(marker); err != nil {
+			return nil, fmt.Errorf("%w: local_layout %q is not an OCI image layout: %v", ErrBadTrustMaterial, cfg.LocalLayout, err)
+		}
+	}
+	return &notaryVerifier{cfg: cfg, v: nv, certs: ts.certs, policy: doc, localLayout: cfg.LocalLayout}, nil
 }
 
 func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, src name.Reference) (Result, error) {
@@ -78,16 +89,43 @@ func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, sr
 		defer cancel()
 	}
 
+	// Offline local signature layout first (bootstrap / air-gapped): a digest that
+	// is present and signed there is trusted without touching the registry. The
+	// layout is purely ADDITIVE — anything short of a clean verified result (not
+	// in the layout, unsigned there, a broken layout) falls through to the live
+	// registry, so a partial layout can never turn a good image into an untrusted
+	// one.
+	if n.localLayout != "" {
+		if r, ok := n.verifyLocalLayout(ctx, mode, src); ok {
+			return r, nil
+		}
+	}
+
 	repo, err := n.repo(from, src)
 	if err != nil {
 		return res, fmt.Errorf("build repository client: %w", err)
 	}
+	r, err := n.verifyAgainst(ctx, repo, mode, src)
+	if errors.Is(err, errdef.ErrNotFound) {
+		return r, fmt.Errorf("%w: %s: %v", ErrNotFound, src.Name(), err)
+	}
+	return r, err
+}
+
+// verifyAgainst runs the resolve → signature-presence gate → notation.Verify
+// sequence against one repository (a live registry or a local OCI layout). On
+// success res.Digest is the verified digest to pin. It returns the raw
+// errdef.ErrNotFound when the reference is absent from repo, so the caller can
+// choose to fall through (local layout) or surface it (registry); every other
+// error is already a complete message.
+func (n *notaryVerifier) verifyAgainst(ctx context.Context, repo notationregistry.Repository, mode config.VerifyMode, src name.Reference) (Result, error) {
+	res := Result{Mode: mode}
 	// Resolve the tag (or digest) to its manifest descriptor: this is what gets
 	// verified and pinned.
 	desc, err := repo.Resolve(ctx, src.Identifier())
 	if err != nil {
 		if errors.Is(err, errdef.ErrNotFound) {
-			return res, fmt.Errorf("%w: %s: %v", ErrNotFound, src.Name(), err)
+			return res, err // raw not-found; caller decides
 		}
 		return res, fmt.Errorf("resolve %s: %w", src.Name(), err)
 	}
@@ -119,6 +157,22 @@ func (n *notaryVerifier) Verify(ctx context.Context, from config.StoreConfig, sr
 	}
 	res.Digest = h
 	return res, nil
+}
+
+// verifyLocalLayout attempts an offline verify against the configured OCI layout.
+// It returns (result, true) ONLY on a clean verified-trusted result; any other
+// outcome (absent, unsigned, unverifiable, or a broken layout) returns ok=false
+// so the caller defers to the live registry. This keeps the layout additive.
+func (n *notaryVerifier) verifyLocalLayout(ctx context.Context, mode config.VerifyMode, src name.Reference) (Result, bool) {
+	lr, err := notationregistry.NewOCIRepository(n.localLayout, notationregistry.RepositoryOptions{})
+	if err != nil {
+		return Result{}, false
+	}
+	res, err := n.verifyAgainst(ctx, lr, mode, src)
+	if err != nil || !res.Verified() {
+		return Result{}, false
+	}
+	return res, true
 }
 
 // repo builds a notation repository over the source registry, matching the
