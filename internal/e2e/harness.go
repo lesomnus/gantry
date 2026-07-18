@@ -211,6 +211,30 @@ func (h *harness) get(id string) *pb.Job {
 	return job
 }
 
+// imageList returns the retention inventory records for a store.
+func (h *harness) imageList(store string) []*pb.Image {
+	h.t.Helper()
+	res, err := h.client.Image().List(context.Background(), pb.ImageListRequest_builder{
+		Store: pb.StoreByName(store),
+	}.Build())
+	if err != nil {
+		h.t.Fatalf("image list %s: %v", store, err)
+	}
+	return res.GetItems()
+}
+
+// gcApply runs a GC pass on a store with the configured rules (no override).
+func (h *harness) gcApply(store string) *pb.StoreGcApplyResponse {
+	h.t.Helper()
+	res, err := h.client.Store().GcApply(context.Background(), pb.StoreGcRequest_builder{
+		Store: pb.StoreByName(store),
+	}.Build())
+	if err != nil {
+		h.t.Fatalf("gc apply %s: %v", store, err)
+	}
+	return res
+}
+
 // waitDone polls until the job reaches a terminal state or the deadline, then
 // returns the final snapshot.
 func (h *harness) waitDone(id string) *pb.Job {

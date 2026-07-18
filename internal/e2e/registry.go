@@ -13,6 +13,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
@@ -95,11 +97,53 @@ func seedIndex(t *testing.T, host, repo, tag string) v1.Hash {
 	return h
 }
 
+// seedPlatformIndex pushes an index with one child image per given platform
+// ("os/arch") and returns its digest, so platform selection can be exercised.
+func seedPlatformIndex(t *testing.T, host, repo, tag string, platforms ...string) v1.Hash {
+	t.Helper()
+	idx := v1.ImageIndex(empty.Index)
+	var adds []mutate.IndexAddendum
+	for _, p := range platforms {
+		img, err := random.Image(512, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os, arch, _ := strings.Cut(p, "/")
+		adds = append(adds, mutate.IndexAddendum{
+			Add:        img,
+			Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: os, Architecture: arch}},
+		})
+	}
+	idx = mutate.AppendManifests(idx, adds...)
+	if err := remote.WriteIndex(insecureTag(t, host, repo, tag), idx); err != nil {
+		t.Fatalf("push platform index: %v", err)
+	}
+	h, err := idx.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 // hasTag reports whether host holds repo:tag.
 func hasTag(t *testing.T, host, repo, tag string) bool {
 	t.Helper()
 	_, err := remote.Head(insecureTag(t, host, repo, tag))
 	return err == nil
+}
+
+// digestByRef resolves host/repo@digest, proving a manifest is present by digest.
+func digestByRef(t *testing.T, host, repo, digest string) (v1.Hash, error) {
+	t.Helper()
+	ref, err := name.NewDigest(fmt.Sprintf("%s/%s@%s", host, repo, digest), name.Insecure)
+	if err != nil {
+		return v1.Hash{}, err
+	}
+	d, err := remote.Head(ref)
+	if err != nil {
+		return v1.Hash{}, err
+	}
+	return d.Digest, nil
 }
 
 // digestOf returns the manifest digest of host/repo:tag.

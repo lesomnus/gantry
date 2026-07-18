@@ -47,10 +47,11 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   (`app.Build` over bufconn + ggcr in-memory registries + fake engine + injected
   clock, driven by `pb.NewClient`), with `app.WithStoreSet` added to inject the
   fake daemon. Feature tests passing: registry→registry copy + incremental blob
-  skip (1), engine pull (2, fake), Plan (7), Idempotency-Key (10), audit log (12),
-  health/readiness (13). Remaining L1: platform selection (4), `as` names (5),
-  digest pinning (6), signature verification (8), retention/GC via injected clock
-  (9), cancel/retry (11).
+  skip (1), engine pull (2, fake), platform selection (4), `as` names (5), digest
+  pinning + verbatim commit (6), Plan (7), retention/GC via the injected clock
+  (9), Idempotency-Key (10), cancel/retry (11), audit log (12), health/readiness
+  (13). Remaining L1: signature verification (8, in-process notation) and
+  proxy-mode (3, partial — the in-memory registry has no pull-through mode).
 - **L2 real daemon + registry matrix — ☐ not started.**
 - **L3 black-box — ☐ not started.**
 - **L3-infra (Ansible) + nightly CI — ☐ not started.**
