@@ -148,7 +148,19 @@ func (n *notaryVerifier) verifyAgainst(ctx context.Context, repo notationregistr
 		ArtifactReference:    artifactRef,
 		MaxSignatureAttempts: 50,
 	}); err != nil {
-		return res, fmt.Errorf("%w: %v", ErrUntrusted, err)
+		// Only a VerificationFailedError is a definitive "the signature is invalid
+		// / does not chain to the trust store" — that is ErrUntrusted. Every other
+		// notation error (signature retrieval failed, verification inconclusive,
+		// context deadline, etc.) means verification could NOT be completed and
+		// must be a non-sentinel transient error, so a registry blip is never
+		// cached as a verdict nor used to kill a container (per the Verifier
+		// contract: only a sentinel rejects; a non-sentinel means fail-closed for
+		// admission but "unavailable" for enforcement's grace path).
+		var vErr notation.VerificationFailedError
+		if errors.As(err, &vErr) {
+			return res, fmt.Errorf("%w: %v", ErrUntrusted, err)
+		}
+		return res, fmt.Errorf("verify signature for %s: %w", src.Name(), err)
 	}
 
 	h, err := v1.NewHash(desc.Digest.String())

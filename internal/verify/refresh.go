@@ -70,7 +70,10 @@ func (r *Refresher) Sweep(ctx context.Context) {
 	now := r.now()
 	var stale []Verdict
 	_ = r.cache.ForEach(func(v Verdict) error {
-		if v.Trusted && v.StaleForRefresh(now) && v.SourceRef != "" {
+		// Refresh trusted AND untrusted stale entries: a trusted verdict may have
+		// been revoked, and an untrusted (unsigned) one may have since been signed.
+		// Only definitive re-checks change a verdict; a transient error leaves it.
+		if v.StaleForRefresh(now) && v.SourceRef != "" {
 			stale = append(stale, v)
 		}
 		return nil

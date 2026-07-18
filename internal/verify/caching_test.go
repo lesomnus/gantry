@@ -201,3 +201,20 @@ func TestCachingDelegatesDescribeReload(t *testing.T) {
 		t.Errorf("Reload should delegate: reloads=%d err=%v", spy.relod, err)
 	}
 }
+
+func TestCachingReloadClearsCache(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	spy := &spyService{desc: Description{Enabled: true}}
+	c, cache := newCachingUnderTest(t, config.VerifyRequire, spy, &now)
+	_ = cache.Put(hashOf("a").String(), true, config.VerifyRequire, "")
+	if n, _ := cache.Count(); n != 1 {
+		t.Fatalf("precondition: cache should hold 1 verdict, got %d", n)
+	}
+	// a trust-material rotation must invalidate verdicts made against the old store
+	if _, err := c.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := cache.Count(); n != 0 {
+		t.Errorf("Reload should have cleared the verdict cache, %d remain", n)
+	}
+}

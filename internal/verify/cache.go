@@ -154,10 +154,21 @@ func (c *Cache) Count() (int, error) {
 	return n, err
 }
 
-// Delete removes a verdict (e.g. on trust-material rotation); a missing key is
-// not an error.
+// Delete removes a verdict; a missing key is not an error.
 func (c *Cache) Delete(digest string) error {
 	return c.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bktVerdict).Delete([]byte(digest))
+	})
+}
+
+// Clear drops every verdict. Called when the trust material rotates so verdicts
+// produced against the old trust store are never served against the new one.
+func (c *Cache) Clear() error {
+	return c.db.Update(func(tx *bolt.Tx) error {
+		if err := tx.DeleteBucket(bktVerdict); err != nil {
+			return err
+		}
+		_, err := tx.CreateBucket(bktVerdict)
+		return err
 	})
 }

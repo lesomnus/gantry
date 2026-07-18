@@ -237,10 +237,19 @@ func (c *Config) evaluateVerifyCache() error {
 	if !vc.Enabled() {
 		return nil
 	}
-	z.FallbackP((*time.Duration)(&vc.TTL), 28*24*time.Hour)     // 4w
-	z.FallbackP((*time.Duration)(&vc.Refresh), 14*24*time.Hour) // 2w
-	if vc.TTL <= 0 || vc.Refresh <= 0 {
-		return z.Err(nil, "serve.verify.cache: ttl and refresh must be positive")
+	z.FallbackP((*time.Duration)(&vc.TTL), 28*24*time.Hour) // 4w
+	if vc.TTL <= 0 {
+		return z.Err(nil, "serve.verify.cache.ttl must be positive")
+	}
+	// Default refresh to 2w, but never above ttl — otherwise a config that only
+	// shortens ttl (e.g. "ttl: 1w") would be rejected by the refresh<=ttl check
+	// for a value the operator never set.
+	if vc.Refresh <= 0 {
+		def := Duration(14 * 24 * time.Hour) // 2w
+		if vc.TTL < def {
+			def = vc.TTL
+		}
+		vc.Refresh = def
 	}
 	if vc.Refresh > vc.TTL {
 		return z.Err(nil, "serve.verify.cache.refresh (%s) must be <= ttl (%s)", time.Duration(vc.Refresh), time.Duration(vc.TTL))

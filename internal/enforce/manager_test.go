@@ -229,13 +229,26 @@ func TestTopLevelDigestPrefersRepoDigest(t *testing.T) {
 }
 
 func TestImageToRemoveUsesDigest(t *testing.T) {
-	got := imageToRemove(down.StartEvent{Image: "reg.test/app:1"}, decision{digest: testDigest("a")})
-	if got != "reg.test/app@"+testDigest("a") {
-		t.Errorf("imageToRemove = %s", got)
+	dg := testDigest("a")
+	cases := []struct {
+		image string
+		want  string
+	}{
+		{"reg.test/app:1", "reg.test/app@" + dg},                  // tag stripped
+		{"reg.test:5000/app", "reg.test:5000/app@" + dg},          // host:port, no tag
+		{"reg.test:5000/app:1", "reg.test:5000/app@" + dg},        // host:port + tag
+		{"reg.test/app@" + testDigest("b"), "reg.test/app@" + dg}, // digest-form: no double @
+		{"alpine:latest", "alpine@" + dg},                         // no host, tag
+		{"alpine", "alpine@" + dg},                                // bare name
+		{testDigest("f"), testDigest("f")},                        // bare image id: unchanged
 	}
-	// host:port ref without tag keeps the port and appends the digest
-	got = imageToRemove(down.StartEvent{Image: "reg.test:5000/app"}, decision{digest: testDigest("a")})
-	if got != "reg.test:5000/app@"+testDigest("a") {
-		t.Errorf("imageToRemove(host:port) = %s", got)
+	for _, tc := range cases {
+		if got := imageToRemove(down.StartEvent{Image: tc.image}, decision{digest: dg}); got != tc.want {
+			t.Errorf("imageToRemove(%q) = %q, want %q", tc.image, got, tc.want)
+		}
+	}
+	// no digest -> the event image verbatim
+	if got := imageToRemove(down.StartEvent{Image: "alpine:1"}, decision{}); got != "alpine:1" {
+		t.Errorf("imageToRemove(no digest) = %q", got)
 	}
 }

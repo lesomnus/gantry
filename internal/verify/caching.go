@@ -53,6 +53,20 @@ func NewCaching(inner Service, cache *Cache, cfg config.VerifyConfig, opts ...Ca
 	return c
 }
 
+// Reload rotates the underlying verifier's trust material and then clears the
+// verdict cache, so a verdict produced against the OLD trust store is never
+// served against the new one (closing the CA-rotation staleness window). The
+// cache is cleared only on a successful reload — a failed reload keeps the old
+// verifier and its still-valid verdicts.
+func (c *Caching) Reload() (Description, error) {
+	d, err := c.Service.Reload()
+	if err != nil {
+		return d, err
+	}
+	_ = c.cache.Clear()
+	return d, nil
+}
+
 func (c *Caching) Verify(ctx context.Context, from config.StoreConfig, src name.Reference) (Result, error) {
 	mode := c.cfg.EffectiveMode(from)
 	if mode == config.VerifyOff {

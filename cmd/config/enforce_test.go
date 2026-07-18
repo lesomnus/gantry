@@ -169,6 +169,18 @@ func TestEnforceOffIsNoop(t *testing.T) {
 	}
 }
 
+func TestVerifyCacheShortTTLDefaultsRefreshBelowTTL(t *testing.T) {
+	// ttl shorter than the 2w refresh default, refresh unset: must NOT self-reject.
+	src := baseStores + "\nserve:\n  verify:\n    trust_store: /ca\n    mode: require\n    cache:\n      path: /v.db\n      ttl: 1w\n"
+	c, err := evalYAML(t, src)
+	if err != nil {
+		t.Fatalf("a short ttl with unset refresh should be valid, got: %v", err)
+	}
+	if got := time.Duration(c.Serve.Verify.Cache.Refresh); got != 7*24*time.Hour {
+		t.Errorf("refresh should default down to ttl (1w), got %v", got)
+	}
+}
+
 func TestLocalLayoutEnabled(t *testing.T) {
 	src := baseStores + "\nserve:\n  verify:\n    trust_store: /ca\n    local_layout: /etc/gantry/sig\n    mode: require\n"
 	c, err := evalYAML(t, src)

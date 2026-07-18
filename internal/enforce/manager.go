@@ -14,6 +14,7 @@ package enforce
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +60,7 @@ type Manager struct {
 	self      selfGuard
 	now       func() time.Time
 	wg        sync.WaitGroup
+	cancel    context.CancelFunc
 }
 
 type unit struct {
@@ -104,6 +106,9 @@ func NewManager(stores []Store, cache *verify.Cache, verifier verify.Service, al
 // until ctx is cancelled; Stop then joins them so kills cease promptly on
 // shutdown (unlike retention's fire-and-forget watchers).
 func (m *Manager) StartWatchers(ctx context.Context) {
+	// Own a cancellable child so Stop() can terminate the watchers itself and does
+	// not deadlock if the caller invokes it before cancelling the parent context.
+	ctx, m.cancel = context.WithCancel(ctx)
 	l := log.From(ctx)
 	if m.self.id == "" {
 		l.Warn("enforcement could not identify gantry's own container; self-protection is off — sign gantry's image into the trust layout or set serve.enforce.self_container")
@@ -119,9 +124,15 @@ func (m *Manager) StartWatchers(ctx context.Context) {
 	}
 }
 
-// Stop waits for the watcher goroutines to exit. Call after cancelling the
-// context passed to StartWatchers.
-func (m *Manager) Stop() { m.wg.Wait() }
+// Stop cancels the watchers and waits for them to exit. It is self-sufficient:
+// it does not require the caller to have cancelled the context passed to
+// StartWatchers first, so it can never deadlock shutdown.
+func (m *Manager) Stop() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.wg.Wait()
+}
 
 // watch mirrors retention's reconnecting watcher: cold-reconcile the running
 // containers on (re)connect (catching starts missed during a disconnect), then
@@ -196,37 +207,62 @@ func (m *Manager) quarantine(ctx context.Context, eng Engine, ev down.StartEvent
 	}
 }
 
-// imageToRemove prefers the digest reference (exact content) and falls back to
-// the event image ref.
+// imageToRemove builds the reference to remove: the repository of the event
+// image pinned to the resolved content digest (targeting exact content), or the
+// event image verbatim when there is no digest or no repository to pin.
 func imageToRemove(ev down.StartEvent, dec decision) string {
-	if dec.digest != "" && ev.Image != "" {
-		// name@digest targets the exact content regardless of tag movement.
-		if i := indexOfTagSep(ev.Image); i >= 0 {
-			return ev.Image[:i] + "@" + dec.digest
+	if dec.digest != "" {
+		if repo := repoName(ev.Image); repo != "" {
+			return repo + "@" + dec.digest
 		}
-		return ev.Image + "@" + dec.digest
 	}
 	return ev.Image
 }
 
-// indexOfTagSep returns the index of the tag separator ':' in a ref (after the
-// last '/'), or -1 if none — so a registry host:port is not mistaken for a tag.
-func indexOfTagSep(ref string) int {
-	slash := -1
-	for i := 0; i < len(ref); i++ {
-		if ref[i] == '/' {
-			slash = i
+// repoName returns the repository portion of a docker image reference (host/path),
+// stripping any existing tag or @digest. It returns "" for a bare image id
+// ("<alg>:<hex>", which has no repository) so the caller does not build a
+// malformed double-digest reference.
+func repoName(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	if i := strings.IndexByte(ref, '@'); i >= 0 {
+		ref = ref[:i] // strip an existing digest
+	}
+	slash := strings.LastIndexByte(ref, '/')
+	if slash < 0 {
+		// No path component: either "name:tag" or a bare image id "alg:hex".
+		if looksLikeDigest(ref) {
+			return ""
+		}
+		if i := strings.IndexByte(ref, ':'); i >= 0 {
+			return ref[:i] // name:tag -> name
+		}
+		return ref // bare repository name
+	}
+	if i := strings.LastIndexByte(ref, ':'); i > slash {
+		return ref[:i] // strip a tag (a ':' after the last '/')
+	}
+	return ref
+}
+
+// looksLikeDigest reports whether s is an "<algo>:<hex>" content id (no path).
+func looksLikeDigest(s string) bool {
+	i := strings.IndexByte(s, ':')
+	if i <= 0 {
+		return false
+	}
+	hex := s[i+1:]
+	if len(hex) < 32 {
+		return false
+	}
+	for _, r := range hex {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
 		}
 	}
-	for i := len(ref) - 1; i > slash; i-- {
-		if ref[i] == ':' {
-			return i
-		}
-		if ref[i] == '@' {
-			return -1
-		}
-	}
-	return -1
+	return true
 }
 
 func short(id string) string {

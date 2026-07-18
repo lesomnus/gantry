@@ -46,12 +46,13 @@ func TestDurationUnmarshalText(t *testing.T) {
 	}
 
 	bad := []string{
-		"",       // empty
-		"4x",     // unknown unit, no w/d
-		"w",      // unit with no magnitude
-		"1w2x",   // trailing unknown unit
-		"abc",    // not a duration
-		"1.2.3w", // malformed number
+		"",                    // empty
+		"4x",                  // unknown unit, no w/d
+		"w",                   // unit with no magnitude
+		"1w2x",                // trailing unknown unit
+		"abc",                 // not a duration
+		"1.2.3w",              // malformed number
+		"100000000000000000w", // overflows int64 when scaled to hours
 	}
 	for _, in := range bad {
 		var d Duration

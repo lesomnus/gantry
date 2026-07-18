@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -98,7 +99,13 @@ func scaleToHours(num, unit string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return strconv.FormatInt(n*perUnit, 10), nil
+		hours := n * perUnit
+		if n != 0 && hours/perUnit != n {
+			// int64 overflow: without this the wrapped small value would parse as a
+			// wrong (short) duration instead of erroring.
+			return "", fmt.Errorf("duration magnitude %q%s overflows", num, unit)
+		}
+		return strconv.FormatInt(hours, 10), nil
 	}
 	f, err := strconv.ParseFloat(num, 64)
 	if err != nil {

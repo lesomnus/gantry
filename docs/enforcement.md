@@ -407,6 +407,53 @@ the verify integration tests.)**
 - **Shutdown kills**: fire-and-forget watchers would keep killing during
   shutdown. → WaitGroup + `Stop()` joins before closing the cache.
 
+## Post-review hardening
+
+An adversarial multi-agent review (6 dimensions, each finding verified by two
+skeptics) surfaced nine issues; the actionable ones were fixed:
+
+- **[fixed, high] Transient error mis-classified as untrusted.**
+  `notation.Verify` does its own network I/O, and `verifyAgainst` wrapped *every*
+  error as `ErrUntrusted` — so a registry blip mid-verification was cached as a
+  false verdict and force-removed a legitimately signed container. Now only a
+  `notation.VerificationFailedError` (the signature is genuinely invalid) is
+  `ErrUntrusted`; every other error (retrieval failed, inconclusive, deadline) is
+  a non-sentinel transient error, so it is never cached nor kills. Test:
+  `TestVerifyUnreachableIsNotUntrusted`.
+- **[fixed, high] Untrusted verdicts never self-healed.** The refresh sweeper now
+  re-verifies stale **untrusted** entries too (an unsigned image later signed
+  flips to trusted; a transiently-mis-cached one self-heals).
+- **[fixed, med] CA-rotation staleness.** `Caching.Reload()` now `Clear()`s the
+  cache after a successful trust-material reload, so verdicts made against the old
+  trust store are not served against the new one. Test:
+  `TestCachingReloadClearsCache`.
+- **[fixed, med] Short-TTL config self-rejected.** `refresh` now defaults to
+  `min(2w, ttl)`, so `ttl: 1w` with `refresh` unset no longer fails the
+  `refresh<=ttl` check. Test: `TestVerifyCacheShortTTLDefaultsRefreshBelowTTL`.
+- **[fixed, med] Shutdown deadlock.** `enforce.Manager.Stop()` now owns a
+  cancellable child context and cancels it before `wg.Wait()`, so it cannot hang
+  if the caller invokes it before cancelling the parent.
+- **[fixed, low] Duration overflow.** A weeks/days magnitude that overflows int64
+  when scaled to hours now errors instead of silently wrapping to a short value.
+- **[fixed, low] Malformed image-cleanup ref.** `imageToRemove` built a
+  double-`@` ref for a digest-form/bare-id `ev.Image`; it now uses the RepoDigest
+  form correctly (the container force-remove — the security action — was always
+  fine; only best-effort image cleanup was affected).
+
+Known limitations (documented, not code-fixed):
+
+- **No-provenance images under grace.** An image with no `RepoDigests` (locally
+  built, `docker load`, or provenance stripped) has no content digest to key on
+  and, under `on_unavailable: grace`, is allowed-and-logged. This is the
+  availability-biased default; set `on_unavailable: kill` to reject such images,
+  or sign+bundle them in `local_layout`. There is no way to distinguish "image
+  deleted out-of-band" from "provenance stripped".
+- **Admission-mode relaxation vs cached verdicts.** Enforcement treats a cached
+  untrusted verdict as kill-worthy regardless of a later relaxation of the source
+  store's admission mode to `verify-if-present`. Enforcement + `verify-if-present`
+  on the same source is a contradictory posture; a relaxed mode takes full effect
+  only after the verdict expires (or trust is reloaded, which clears the cache).
+
 ## Test plan
 
 - **Unit**: duration parsing (`4w`,`2w`,`1d`,`2w3d12h`,`1.5w`, standard strings
