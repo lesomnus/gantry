@@ -13,7 +13,7 @@ subsystem. The full annotated configuration lives in
 | [observability.md](observability.md) | The OpenTelemetry metrics/traces pipeline and instrument catalog, the durable audit log (`EventService`), and health/readiness. |
 | [api.md](api.md) | gRPC contract and behaviors: coalescing and response trailers, `Idempotency-Key`, the dedup key, dry-run `Plan`, the live-vs-durable job model, pagination, stable ids, and auth. |
 | [development.md](development.md) | Contributor onboarding: the devcontainer, repository layout, building, unit and live integration tests, the full copy→pull loop, insecure-registry constraints, and regenerating the gRPC contract. |
-| [e2e-testing.md](e2e-testing.md) | End-to-end testing: the layered automated suite (`internal/e2e` — hermetic in-process → real daemon → black-box → Ansible infra), how to run it and its CI, plus the manual `grpcurl` runbook for each user-facing feature. |
+| [e2e-testing.md](e2e-testing.md) | End-to-end testing: the layered automated suite (`internal/e2e` — hermetic in-process → real daemon → black-box binary & scratch image → Ansible infra), the build-once/test-the-artifact/promote-by-digest CI, plus the manual `grpcurl` runbook for each user-facing feature. |
 
 Project status, the pre-v1 maintainer to-dos, and the non-goals are in the
 [README](../README.md#status); the full design history lives in the git log.

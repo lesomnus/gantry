@@ -1,11 +1,11 @@
-# gantry — common developer tasks. See docs/e2e-plan.md for the E2E tiers.
+# gantry — common developer tasks. See docs/e2e-testing.md for the E2E tiers.
 
 GO ?= go
 COMPOSE ?= docker compose -f deploy/compose/e2e.compose.yaml
 REG ?= registry:2
 
 .PHONY: build test vet fmt \
-	e2e e2e-daemon e2e-registries e2e-blackbox e2e-up e2e-down e2e-seed e2e-infra
+	e2e e2e-daemon e2e-registries e2e-blackbox e2e-image e2e-up e2e-down e2e-seed e2e-infra
 
 ## build: host build of the binary
 build:
@@ -33,9 +33,15 @@ e2e-daemon:
 e2e-registries:
 	GANTRY_E2E_REGISTRY=$(REG) $(GO) test -tags e2e -race -run TestL2 ./internal/e2e/...
 
-## e2e-blackbox: L3 black-box (builds & runs the shipped binary)
+## e2e-blackbox: L3 black-box binary (builds & runs the shipped binary; set
+## GANTRY_E2E_BIN=<path> to reuse a prebuilt binary instead of recompiling)
 e2e-blackbox:
-	$(GO) test -tags e2e -run TestL3 ./internal/e2e/...
+	$(GO) test -tags e2e -run TestL3BlackBox ./internal/e2e/...
+
+## e2e-image: L3 image tier — drives the actual built container image
+## (set GANTRY_E2E_IMAGE=<ref>, e.g. one loaded from `docker buildx bake app`)
+e2e-image:
+	$(GO) test -tags e2e -run TestL3Image ./internal/e2e/...
 
 ## e2e-up: bring up the persistent multi-registry env (remote/cache/zot/proxy)
 e2e-up:

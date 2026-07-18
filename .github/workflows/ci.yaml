@@ -93,58 +93,128 @@ jobs:
           CONTAINERD_NAMESPACE: gantry
         run: go test -race ./internal/down/...
 
-  # L3 black-box: build and run the shipped `gantry serve` binary against a real
-  # registry, asserting graceful shutdown and audit-log persistence across a
-  # process restart.
-  e2e-blackbox:
+  # Compile the release binaries ONCE. The Dockerfile's `build` stage cross-builds
+  # both arches (GOARCH=amd64 and GOARCH=arm64) in a single run, so there is no
+  # reason to repeat it per architecture — bake once here and hand ./dist
+  # (amd64 + arm64 + the CA bundle) to the per-arch `verify` jobs as an artifact.
+  # It only needs the source, so it runs immediately, in parallel with the tests;
+  # `verify` (which tests the artifact and pushes) is what gates on them.
+  dist:
     runs-on: ubuntu-latest
+    env:
+      BUILD_HASH: ${{ github.sha }}
+      BUILD_ID: r${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Cross-compile the release binaries (./dist)
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          targets: build
+          set: |
+            *.cache-from=type=gha,scope=build
+            *.cache-to=type=gha,mode=max,scope=build
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # Assemble the FROM-scratch image for one architecture from the prebuilt ./dist
+  # (a COPY-only stage — no recompile, no qemu) on a native runner, then black-box
+  # the real artifact: L3 against the ./dist/<arch> binary (GANTRY_E2E_BIN) and the
+  # L3 image tier against the loaded image (GANTRY_E2E_IMAGE). Pure test — it never
+  # touches the registry; `promote` is the only pusher. Needs the whole source gate
+  # too, so promotion waits until unit/L1/L2/containerd are green; the in-Dockerfile
+  # `test` stage (no -race) is therefore not rebaked here.
+  verify:
+    needs: [dist, test, e2e-docker, e2e-containerd]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: docker/setup-buildx-action@v4
       - name: Pre-pull the registry image
         run: docker pull registry:2
-      - name: E2E (black-box binary)
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      # upload-artifact does not preserve the executable bit; restore it so both
+      # the binary L3 and the image's COPY'd entrypoint are runnable.
+      - name: Restore exec bit
+        run: chmod +x dist/${{ matrix.arch }}
+
+      - name: Assemble image and load for testing
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          targets: app
+          set: |
+            app.platform=${{ matrix.platform }}
+            app.tags=gantry-ci:${{ matrix.arch }}
+            app.output=type=docker
+
+      - name: E2E L3 (release binary + scratch image)
+        env:
+          GANTRY_E2E_BIN: ${{ github.workspace }}/dist/${{ matrix.arch }}
+          GANTRY_E2E_IMAGE: gantry-ci:${{ matrix.arch }}
         run: go test -tags e2e -run TestL3 ./internal/e2e/...
 
-  build:
-    needs: [test, e2e-docker, e2e-containerd, e2e-blackbox]
+  # Build the shippable multi-arch image from the tested ./dist and push it with
+  # every tag in one shot. `app` is a COPY-only scratch stage, so both arches build
+  # from the single ./dist context on one amd64 runner with no qemu, and the pushed
+  # binaries are byte-for-byte the ones `verify` black-boxed. Runs only after both
+  # verify legs pass, so nothing is published until the real artifact is green.
+  # `edge` tracks the latest promoted build.
+  promote:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
+      REPO: ghcr.io/lesomnus/gantry
       TAG: edge
       BUILD_HASH: ${{ github.sha }}
       BUILD_ID: r${{ github.run_id }}
     steps:
       - uses: actions/checkout@v6
-      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
-
-      - name: Build
-        uses: docker/bake-action@v7
+      - name: Download dist
+        uses: actions/download-artifact@v4
         with:
-          source: .
-          targets: test,build
-          set: |
-            *.platform=linux/amd64
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-
+          name: dist
+          path: dist
+      - name: Restore exec bit
+        run: chmod +x dist/amd64 dist/arm64
       - name: Login to GHCR
         uses: docker/login-action@v4
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push
+      - name: Build and push the multi-arch image
         uses: docker/bake-action@v7
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         with:
           source: .
           targets: app
           set: |
-            app.platform=linux/amd64
-            app.platform=linux/arm64
+            app.platform=linux/amd64,linux/arm64
             app.output=type=registry
+      - name: Inspect the pushed manifest
+        run: docker buildx imagetools inspect "${REPO}:${TAG}"

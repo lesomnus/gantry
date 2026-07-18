@@ -4,8 +4,9 @@ gantry is tested end-to-end two complementary ways, both covered here:
 
 - **The [automated suite](#the-automated-suite)** (`internal/e2e`) — a layered Go
   suite that stands the real server up and drives it over gRPC, from a fully
-  hermetic in-process tier that runs on every `go test` to a black-box tier that
-  runs the shipped binary. This is how E2E runs in CI.
+  hermetic in-process tier that runs on every `go test` to black-box tiers that
+  run the shipped binary and the shipped container image. This is how E2E runs in
+  CI.
 - **The [manual runbook](#the-manual-runbook)** — a `grpcurl` walkthrough of each
   user-facing feature on a standard remote→cache→engine environment, for hands-on
   exploration and reproducing behavior against real infrastructure.
@@ -21,7 +22,7 @@ unit/integration tests, and the loopback-insecure constraint, see
 `internal/e2e` builds the real gantry server through
 [`internal/app.Build`](../internal/app) — the same wiring `gantry serve` uses, so
 tests exercise production assembly rather than a copy — and drives it with the
-generated `pb` client. Four tiers share one harness, differing only in what backs
+generated `pb` client. Five tiers share one harness, differing only in what backs
 the stores and the engine:
 
 | Tier | Backing | Runs | Command |
@@ -29,6 +30,7 @@ the stores and the engine:
 | **L1 hermetic** | in-memory registries + a fake engine + an injected clock | **every** `go test -race ./...` (CI + local), seconds, no infra | `make e2e` |
 | **L2 real daemon** | real `registry:2`/`registry:3` containers + the real docker daemon | opt-in; self-skips without docker | `make e2e-daemon` |
 | **L3 black-box** | the shipped `gantry serve` binary + a real registry | opt-in | `make e2e-blackbox` |
+| **L3 image** | the shipped **container image** (`FROM scratch`, non-root) on a user network + real registries | CI `build` job; opt-in local via `GANTRY_E2E_IMAGE` | `make e2e-image` |
 | **L3-infra** | an Ansible-provisioned matrix (plain + TLS + zot + proxy) on a self-hosted host | manual / on-demand | `make e2e-infra` |
 
 L2/L3 are behind `//go:build e2e` and L3-infra behind `//go:build e2e_infra`, so
@@ -43,7 +45,8 @@ with no new dependencies (`go-containerregistry`, `notation-go`, `oras`,
 | `make e2e` (`go test ./internal/e2e/...`) | L1 | Go only |
 | `make e2e-daemon` (`go test -tags e2e -run TestL2 ./internal/e2e/...`) | L2 | a docker daemon |
 | `make e2e-registries REG=registry:3` | L2 | docker; selects the registry image (`GANTRY_E2E_REGISTRY`) |
-| `make e2e-blackbox` (`go test -tags e2e -run TestL3 ./internal/e2e/...`) | L3 | docker |
+| `make e2e-blackbox` (`go test -tags e2e -run TestL3BlackBox ./internal/e2e/...`) | L3 | docker (reuses a prebuilt binary when `GANTRY_E2E_BIN` is set) |
+| `make e2e-image` (`go test -tags e2e -run TestL3Image ./internal/e2e/...`) | L3 image | docker **and** a built image named in `GANTRY_E2E_IMAGE` (self-skips otherwise) |
 | `make e2e-up` / `make e2e-down` | — | docker; the persistent `deploy/compose/e2e.compose.yaml` env |
 | `make e2e-infra` | L3-infra | a self-hosted host + Ansible |
 
@@ -76,18 +79,48 @@ Which tier automates each feature (with the test that proves it):
 | 13 | Health & readiness | L1 `TestHealth` |
 | — | Private-CA TLS (`ca_cert`) | L1 `TestTLSCache`; real registry in L3-infra |
 | — | Graceful shutdown | L3 `TestL3BlackBox` |
+| — | Shipped image runs (scratch base; non-root user writes the audit db) | L3 image `TestL3Image` |
 
 ### CI
 
-`.github/workflows/ci.yaml` runs the tiers as parallel jobs; the `build` job's
-`edge` image push is gated on all of them:
+`.github/workflows/ci.yaml` runs the **source tests** and compiles the release
+binaries **once** in parallel, **tests the real artifact** per architecture once
+both are green, and only then tags anything:
 
 - **`test`** — `go test -race ./...`: unit tests **and the L1 suite** (no infra).
 - **`e2e-docker`** — the **L2** tests against the runner's docker daemon, matrixed
   over `registry:2` (referrer tag-fallback) and `registry:3` (native referrers).
 - **`e2e-containerd`** — provisions containerd and runs the `internal/down`
   integration tests (digest `as`, anchored pull).
-- **`e2e-blackbox`** — the **L3** binary tests (graceful shutdown, restart).
+- **`dist`** (needs nothing — runs immediately, in parallel with the tests) — bakes
+  the `build` stage **once**. That stage cross-compiles both `amd64` and `arm64` in
+  a single run, so `./dist` (both binaries + the CA bundle) is uploaded as an
+  artifact rather than recompiled per arch.
+- **`verify`** (matrix: `amd64` on `ubuntu-latest`, `arm64` on `ubuntu-24.04-arm`;
+  needs `dist` **and** the whole source gate) — downloads `./dist` and assembles the
+  `FROM scratch` image for its arch — a COPY-only stage, **no recompile, no qemu** —
+  then black-boxes **the real artifact** on native hardware: **L3** against the
+  `./dist/<arch>` binary (`GANTRY_E2E_BIN`) and **L3 image** against the loaded
+  image (`GANTRY_E2E_IMAGE`). It is a **pure test job** — it never touches the
+  registry; it only gates `promote`.
+- **`promote`** (needs both `verify` legs, `main` push only) — builds the shippable
+  multi-arch image from the same `./dist` and pushes it with every tag in one step.
+  Because `app` is a COPY-only scratch stage, both arches assemble on a single
+  `amd64` runner with **no qemu**, and the pushed binaries are **byte-for-byte the
+  ones `verify` black-boxed** (same `./dist`, deterministic COPY). It is the only
+  job that writes to the registry, and it runs only once both `verify` legs pass, so
+  nothing is published until the real artifact is green. `edge` always tracks the
+  latest promoted build.
+
+Compiling once in `dist` and fanning out to native runners means the Go build is
+not repeated, no qemu is involved, and the arm64 image is still exercised on real
+arm64 hardware. The source gate already runs the unit and L1 tiers, so `verify`
+does **not** rebake the Dockerfile's in-image `test` stage — that stage stays for
+anyone who builds the image directly with `docker buildx bake`.
+
+> **arm64 runner** — `ubuntu-24.04-arm` is a GitHub-hosted runner (free for public
+> repositories). A private repo needs arm runners enabled, otherwise drop the
+> `arm64` matrix leg and promote an amd64-only manifest.
 
 The **L3-infra** (Ansible) tier is not wired to CI: run it on demand with
 `make e2e-infra` on a host with docker + Ansible. Add a self-hosted scheduled
@@ -117,6 +150,13 @@ covers both branches:
 - **`internal/app.Build`** assembles the whole server from config — the same path
   `gantry serve` uses. `app.WithStoreSet` injects the fake engine (since
   `store.NewSet` dials real daemons); `app.WithNow` injects a clock.
+- **Artifact reuse** — `GANTRY_E2E_BIN` lets the binary tier skip its own `go
+  build` and drive a prebuilt binary; `GANTRY_E2E_IMAGE` points the image tier at
+  an already-built image (it self-skips without one). CI sets both to `bake`'s
+  outputs, so the shipping artifact is compiled once and is exactly what L3
+  exercises. The image tier injects config and a non-root-owned `/data` with the
+  container copy API rather than a bind mount, so it is correct against a remote
+  daemon too.
 - **Injected clock** (`retention.WithNow` / `event.WithNow`) makes time-dependent
   GC (grace, `max_age`, `max_idle`, untagged reap) deterministic — no `time.Sleep`.
 - **In-process notation** — verification is tested without the `notation` CLI:

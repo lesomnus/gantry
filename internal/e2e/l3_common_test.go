@@ -19,8 +19,19 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
+// buildGantry returns a path to a `gantry` binary to black-box. When
+// GANTRY_E2E_BIN points at a prebuilt binary it is reused verbatim — CI sets it
+// to the release binary that `bake build` drops in ./dist/<arch>, so the exact
+// stripped, trimmed artifact is exercised and nothing is compiled twice. When
+// unset (local dev) it falls back to `go build`.
 func buildGantry(t *testing.T) string {
 	t.Helper()
+	if bin := os.Getenv("GANTRY_E2E_BIN"); bin != "" {
+		if _, err := os.Stat(bin); err != nil {
+			t.Fatalf("GANTRY_E2E_BIN=%q not usable: %v", bin, err)
+		}
+		return bin
+	}
 	out := filepath.Join(t.TempDir(), "gantry")
 	cmd := exec.Command("go", "build", "-o", out, "github.com/lesomnus/gantry")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
