@@ -29,7 +29,7 @@ the stores and the engine:
 | **L1 hermetic** | in-memory registries + a fake engine + an injected clock | **every** `go test -race ./...` (CI + local), seconds, no infra | `make e2e` |
 | **L2 real daemon** | real `registry:2`/`registry:3` containers + the real docker daemon | opt-in; self-skips without docker | `make e2e-daemon` |
 | **L3 black-box** | the shipped `gantry serve` binary + a real registry | opt-in | `make e2e-blackbox` |
-| **L3-infra** | an Ansible-provisioned matrix (plain + TLS + zot + proxy) on a self-hosted host | nightly / manual | `make e2e-infra` |
+| **L3-infra** | an Ansible-provisioned matrix (plain + TLS + zot + proxy) on a self-hosted host | manual / on-demand | `make e2e-infra` |
 
 L2/L3 are behind `//go:build e2e` and L3-infra behind `//go:build e2e_infra`, so
 the default `go test ./...` compiles and runs **L1 only**. Every tier is pure Go
@@ -88,8 +88,10 @@ Which tier automates each feature (with the test that proves it):
 - **`e2e-containerd`** — provisions containerd and runs the `internal/down`
   integration tests (digest `as`, anchored pull).
 - **`e2e-blackbox`** — the **L3** binary tests (graceful shutdown, restart).
-- **`nightly.yaml`** — self-hosted, runs `make e2e-infra` (the Ansible tier);
-  never gates a push.
+
+The **L3-infra** (Ansible) tier is not wired to CI: run it on demand with
+`make e2e-infra` on a host with docker + Ansible. Add a self-hosted scheduled
+job later if a standing runner is available.
 
 On the runner the test process shares its network namespace with the docker
 daemon, so a registry on `127.0.0.1:<port>` is auto-trusted as insecure by both
@@ -108,7 +110,7 @@ covers both branches:
 | `registry:2` (Distribution v2) | tag-fallback (404s native) | per-PR CI | copy, proxy, the **fallback** referrer path |
 | `registry:3` (Distribution v3) | native | per-PR CI | native referrers in the codebase users deploy |
 | `zot` | native (OCI 1.1.1) | infra (compose) | the **native** path + signature travel, a 2nd impl |
-| Harbor, ECR/ACR/GCR | native (edges vary) | nightly / opt-in | robot-auth / cloud auth, production-grade |
+| Harbor, ECR/ACR/GCR | native (edges vary) | future / opt-in | robot-auth / cloud auth, production-grade |
 
 ### How it works
 
