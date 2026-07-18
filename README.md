@@ -150,6 +150,15 @@ A few behaviors worth knowing:
   reachable only by `Get`.
 - **Stable ids** — `Image` and `Pin` ids are deterministic UUIDs derived from
   `(store, ref)` / `(store, value)`, so they survive restarts.
+- **Job records vs. history** — `JobService.Get` / `List` read the **live,
+  in-memory** job registry (real-time per-layer byte progress and cancel
+  handles), so they hold only jobs since the process started and empty on
+  restart. A job's **durable** lifecycle — `job_admitted` → `job_done`,
+  correlated by job **id** and carrying source/target, final state, error, and
+  bytes moved — lives in the audit log; query it after a restart through
+  `EventService` (`serve.events`). gantry does not resurrect or resume
+  interrupted jobs on restart: re-submit to continue, and because copies are
+  content-addressed, blobs already at the target are skipped.
 - **Plan** — `JobService.Plan` returns the resolved plan: the rewritten target ref,
   chosen platforms, `as` names, the `copy_referrers` default, the verification
   outcome, and which in-flight job an identical `Add` would coalesce onto.

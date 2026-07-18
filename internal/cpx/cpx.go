@@ -150,7 +150,7 @@ func (w *Copier) SetVerifier(v verify.Verifier) { w.verifier = v }
 // Recorder receives audit events for admitted and finished jobs. Its methods
 // must not fail the operation they record.
 type Recorder interface {
-	JobAdmitted(ref, source, target, digest string)
+	JobAdmitted(id, ref, source, target, digest string)
 	JobFinished(id, ref, state, errMsg string, bytes int64)
 }
 
@@ -289,7 +289,7 @@ func (w *Copier) Submit(req Request) (snap JobSnapshot, created bool, err error)
 			if ex.verification != nil {
 				digest = ex.verification.Digest
 			}
-			w.rec.JobAdmitted(req.Ref, ex.source.Name, ex.dst.Name(), digest)
+			w.rec.JobAdmitted(id, req.Ref, ex.source.Name, ex.dst.Name(), digest)
 		}
 		return snap, true, nil
 	default:

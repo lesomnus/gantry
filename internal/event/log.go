@@ -203,6 +203,18 @@ func kvi(id string, bytes int64) json.RawMessage {
 	return b
 }
 
+// admittedDetail carries the job id alongside the source so an admitted event
+// can be traced to its job_done by id — the log alone reconstructs a job's
+// lifecycle without the in-memory registry.
+func admittedDetail(id, source string) json.RawMessage {
+	m := map[string]string{"job": id}
+	if source != "" {
+		m["source"] = source
+	}
+	b, _ := json.Marshal(m)
+	return b
+}
+
 func gcDetail(deleted, untagged, reaped, errs int) json.RawMessage {
 	b, _ := json.Marshal(map[string]int{"deleted": deleted, "untagged": untagged, "reaped": reaped, "errors": errs})
 	return b

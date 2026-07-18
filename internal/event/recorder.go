@@ -41,8 +41,8 @@ func (r *Recorder) emit(e Event) {
 
 // --- cpx.Recorder ---
 
-func (r *Recorder) JobAdmitted(ref, source, target, digest string) {
-	r.emit(Event{Type: JobAdmitted, Ref: ref, Store: target, Digest: digest, Detail: kv("source", source)})
+func (r *Recorder) JobAdmitted(id, ref, source, target, digest string) {
+	r.emit(Event{Type: JobAdmitted, Ref: ref, Store: target, Digest: digest, Detail: admittedDetail(id, source)})
 }
 
 func (r *Recorder) JobFinished(id, ref, state, errMsg string, bytes int64) {

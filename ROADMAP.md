@@ -63,10 +63,10 @@
   불요)로 등록한다. classic graph store는 위조가 원천 불가하므로 경고 로그 + skip
   (태그는 정상). hop1 digest-ref 잡은 index를 재조립하지 않고 **verbatim 커밋**해
   소스 digest를 보존한다.
-- **job store는 in-memory** — job record는 `JobTTL` 후 evict되는 휘발성. 캐시 채우기
-  용도에선 재시작 시 job history 소실이 수용 가능하고, `Store` interface seam으로
-  두어 향후 bbolt/sqlite drop-in이 가능하다. 재시작 내구 이력이 필요한 감사 용도는
-  별개의 bbolt 이벤트 로그(`serve.events`)가 담당한다.
+- **job store는 in-memory** — job record는 `JobTTL` 후 evict되는 휘발성 라이브
+  레지스트리(실시간 per-layer progress·cancel). 재시작 내구 이력은 별개의 bbolt 이벤트
+  로그(`serve.events`)가 담당하며 `EventService`로 조회한다. 한때 검토한 job store 영속화는
+  미채택으로 종결(6절) — 이력은 감사 로그로 충분하고 자동 재개는 비도입.
 - **관측: OTLP push (Prometheus scrape 미채택)** — fleet 관측 파이프라인이 이미 노드
   로컬 OTel collector → ClickHouse/Grafana이므로 scrape 엔드포인트는 이중 파이프라인이
   된다. 메트릭/트레이스/로그는 mkot OTLP push로 통일한다(exporter 미설정 = no-op이
@@ -109,15 +109,17 @@
   refs는 50개 cap, count는 전체). proto 재생성 불요라 트레일러 방식 채택.
 
 ### 제품 기능
-- **영속 job store** — ⏸ **설계 결정 필요(미착수)**. 드라이버는 `ncruces/go-sqlite3`(WASM,
-  순수 Go/CGO-free — scratch 빌드 유지 OK)로 확정. **블로커**: 현재 `cpx.Store`는 실행 중
-  엔진이 직접 변형하는 라이브 `*Job`(atomic 바이트 카운터·cancel 함수)을 반환하는 in-memory
-  레지스트리라 sqlite로 drop-in이 안 됨 — 라이브 실행 상태와 영속 스냅샷을 분리해야 한다.
-  참고: job 히스토리(admitted/finished)는 이미 이벤트 로그가 영속화하므로, 남는 실질은
-  `JobService.Get/List`가 재시작 후에도 잡을 반환하는 것. 선택지: **(a)** memStore는 라이브용
-  유지 + 별도 sqlite 스냅샷 스토어로 터미널 잡 영속(추가형, 단일 Job 엔티티라 ORM 코드젠 불요),
-  **(b)** Store 인터페이스 재설계로 라이브 레지스트리/영속 분리. (`protoc-gen-orm-ent` 소스는
-  로컬에 있으나 `protoc` 미설치.) → 방향 확정 후 착수.
+- **영속 job store** — ❌ **미채택으로 종결**(2026-07-18). 근거: (1) 재시작 후 미완료 job의
+  **자동 재개는 도입 가치 없음**(gantry는 fire-and-forget 워커가 아니라 명령형 copy 도구 —
+  옛 job이 재부팅 후 알아서 다시 도는 건 놀라움. 이어하기가 필요하면 `JobService.Retry`로 명시적
+  재제출, content-addressed라 이미 있는 blob은 스킵). (2) job **이력**은 감사 로그가 이미
+  bbolt에 durable하게 남기고 `EventService.Get/List`로 재시작 후에도 조회 가능(Type/Store/Ref/
+  State/Since 필터+페이지네이션). `JobService.Get/List`가 재시작 후 비는 건 버그가 아니라 역할
+  분담 — 그건 라이브 레지스트리(실시간 per-layer progress·cancel)용이고, 세밀 progress는 실행
+  중에만 의미. → 별도 sqlite/ORM store 불필요. 남은 작은 갭만 마무리: **✅ `job_admitted`
+  이벤트에 job `id` 추가**(admit↔done를 id로 상관, 로그만으로 lifecycle 재구성; `JobDone`엔 이미
+  있었음), **✅ "Get/List=라이브 전용, 이력=EventService, 자동 재개 없음" 계약 문서화**(README
+  behaviors + `JobService` proto 주석). 6절로 이동.
 - **registry-store digest resolve** (낮은 우선순위) — registry의 태그→digest 라이브 조회.
   인벤토리 질의 API가 맞고, 있어서 나쁠 것 없는 nice-to-have.
 
@@ -191,3 +193,4 @@
 | `git_rev` otel resource attribute | 노드 dirty/rebuild 구분용이었으나 불필요 판단 (2026-07-18) |
 | pattern-pin 강제/차단 dry-run | 비차단 매칭-echo(2·3절)로 충분 — confirm 흐름은 과함 |
 | copy↔downstream insecure 실환경 검증 | 코드가 아니라 수동 E2E 태스크였고 split-brain 한계는 이미 `docs/test-environment.md`에 문서화됨 |
+| 영속 job store (sqlite/ORM) | 이력은 감사 로그(bbolt)+`EventService`가 이미 durable·queryable하게 제공, 자동 재개는 비도입(명령형 copy 도구라 `Retry`로 명시 재제출). `Get/List`는 라이브 레지스트리 전용. `job_admitted`에 id 추가로 로그만으로 lifecycle 상관 가능 (2026-07-18) |

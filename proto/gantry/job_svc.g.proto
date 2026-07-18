@@ -11,13 +11,18 @@ option go_package = "github.com/lesomnus/gantry/pb";
 service JobService {
   // Add creates a new Job
   rpc Add(JobAddRequest) returns (Job);
-  // Get retrieves a Job
+  // Get retrieves a Job from the live, in-memory registry: only jobs seen since
+  // the process started, emptied on restart. A job's durable lifecycle
+  // (job_admitted -> job_done, correlated by job id) lives in the audit log,
+  // queried after a restart through EventService. gantry does not resume
+  // interrupted jobs on restart; re-submit to continue.
   rpc Get(JobGetRequest) returns (Job);
   // Patch updates an existing Job
   rpc Patch(JobPatchRequest) returns (Job);
   // Erase deletes a Job
   rpc Erase(JobRef) returns (google.protobuf.Empty);
-  // List returns jobs newest-first.
+  // List returns jobs newest-first from the same live registry as Get, so it too
+  // holds only jobs since process start; use EventService for job history.
   rpc List(JobListRequest) returns (JobListResponse);
   // Watch streams snapshots of the job as its transfers progress and ends
   // after the snapshot that carries a terminal state. The gRPC counterpart

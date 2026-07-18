@@ -2,6 +2,7 @@ package event
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,7 +112,7 @@ func TestSinceFilter(t *testing.T) {
 
 func TestRecorderNilSafe(t *testing.T) {
 	var r *Recorder
-	r.JobAdmitted("a", "b", "c", "d") // must not panic
+	r.JobAdmitted("id", "a", "b", "c", "d") // must not panic
 	r = NewRecorder(nil, nil)
 	r.GCApplied("eng", 1, 2, 3, 0) // nil log, no panic
 }
@@ -119,7 +120,7 @@ func TestRecorderNilSafe(t *testing.T) {
 func TestRecorderEmits(t *testing.T) {
 	l := openTemp(t, 100)
 	r := NewRecorder(l, nil)
-	r.JobAdmitted("a:1", "up", "cache", "sha256:x")
+	r.JobAdmitted("job-1", "a:1", "up", "cache", "sha256:x")
 	r.GCApplied("eng", 2, 1, 1, 0)
 	r.Pinned("eng", "*:stable", false)
 	r.ImagePulled("eng", "b:1")
@@ -134,6 +135,11 @@ func TestRecorderEmits(t *testing.T) {
 	}
 	if e := byType[JobAdmitted]; e.Ref != "a:1" || e.Store != "cache" || e.Digest != "sha256:x" {
 		t.Errorf("admitted = %+v", e)
+	}
+	// The admitted event must carry the job id so it can be correlated with the
+	// job_done event by id from the durable log alone.
+	if e := byType[JobAdmitted]; !strings.Contains(string(e.Detail), `"job":"job-1"`) {
+		t.Errorf("admitted detail missing job id: %s", e.Detail)
 	}
 	if _, ok := byType[GCApplied]; !ok {
 		t.Error("gc_applied not recorded")
