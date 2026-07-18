@@ -177,7 +177,10 @@ self-skip — then builds the image via bake and, on a push to `main`, publishes
 ## End-to-end manual verification (the full loop)
 
 This exercises the whole path in one go: gantry copies an image into a cache
-registry, then both daemons pull it back out of that cache.
+registry, then both daemons pull it back out of that cache. For a feature-by-feature
+end-to-end test plan on a standard remote→cache→engine environment — copy, pull,
+proxy, `as` names, digest pinning, verification, GC, dedup, and more — see
+[e2e-testing.md](e2e-testing.md).
 
 ### 1. Cache registry + loopback forward
 
