@@ -43,15 +43,16 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   closure, so `serve` and the test harness build identical production wiring;
   `app.WithNow` threads a clock. `retention.WithNow` / `event.WithNow` add the
   clock seam. Behavior-preserving (all existing tests green).
-- **L1 hermetic suite — ⏳ in progress.** `internal/e2e` harness landed
-  (`app.Build` over bufconn + ggcr in-memory registries + fake engine + injected
-  clock, driven by `pb.NewClient`), with `app.WithStoreSet` added to inject the
-  fake daemon. Feature tests passing: registry→registry copy + incremental blob
-  skip (1), engine pull (2, fake), platform selection (4), `as` names (5), digest
-  pinning + verbatim commit (6), Plan (7), retention/GC via the injected clock
-  (9), Idempotency-Key (10), cancel/retry (11), audit log (12), health/readiness
-  (13). Remaining L1: signature verification (8, in-process notation) and
-  proxy-mode (3, partial — the in-memory registry has no pull-through mode).
+- **L1 hermetic suite — ✅ done.** `internal/e2e` harness (`app.Build` over
+  bufconn + ggcr in-memory registries + fake engine + injected clock, driven by
+  `pb.NewClient`; `app.WithStoreSet` injects the fake daemon). Feature tests, all
+  under plain `go test -race`: registry→registry copy + incremental blob skip (1),
+  engine pull (2, fake), platform selection (4), `as` names (5), digest pinning +
+  verbatim commit (6), Plan (7), signature verification incl. copy_referrers
+  travel (8, in-process notation), retention/GC via the injected clock (9),
+  Idempotency-Key (10), cancel/retry (11), audit log (12), health/readiness (13).
+  Proxy-mode (3) is deferred to L2 — the in-memory registry has no pull-through
+  mode.
 - **L2 real daemon + registry matrix — ☐ not started.**
 - **L3 black-box — ☐ not started.**
 - **L3-infra (Ansible) + nightly CI — ☐ not started.**
