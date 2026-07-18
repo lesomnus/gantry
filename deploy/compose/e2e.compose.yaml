@@ -1,0 +1,47 @@
+# Multi-registry environment for the L2/L3 E2E tiers on a single host (a
+# developer's machine or a self-hosted CI runner). Registries publish on the
+# host's 127.0.0.1 so both gantry and the host docker daemon reach them at the
+# same reference, and docker auto-trusts 127.0.0.0/8 as insecure (no daemon.json).
+#
+#   docker compose -f deploy/compose/e2e.compose.yaml up -d
+#   go run ./tools/e2e-seed --to 127.0.0.1:5001 --repo lib/app --tag 1 --insecure
+#
+# TLS and the containerd engine are added by the Ansible tier (ansible/), which
+# also configures the daemons' trust — compose alone cannot do host trust config.
+
+name: gantry-e2e
+
+services:
+  # Upstream registry (gantry pulls from it). Seed it with tools/e2e-seed.
+  remote:
+    image: registry:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+
+  # Cache registry (gantry copies into it; the daemon pulls from it).
+  cache:
+    image: registry:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"
+
+  # zot — a second implementation with the native OCI referrers API, for the
+  # signature-travel path. Anonymous, plain HTTP.
+  cache-zot:
+    image: ghcr.io/project-zot/zot-linux-amd64:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5003:5000"
+
+  # Pull-through proxy of `remote`, for the proxy-mode feature (gantry store
+  # mode: proxy). Reached at 127.0.0.1:5002.
+  cache-proxy:
+    image: registry:2
+    restart: unless-stopped
+    environment:
+      REGISTRY_PROXY_REMOTEURL: "http://remote:5000"
+    ports:
+      - "127.0.0.1:5002:5000"
+    depends_on:
+      - remote

@@ -1,0 +1,17 @@
+# Emit the machine-readable environment description the Go L3-infra tests read,
+# and the gantry config they run.
+- name: Render the gantry config
+  ansible.builtin.template:
+    src: gantry.yaml.j2
+    dest: "{{ e2e_dir }}/gantry.yaml"
+    mode: "0644"
+
+- name: Emit the discovery file
+  ansible.builtin.template:
+    src: gantry-e2e.json.j2
+    dest: "{{ e2e_dir }}/gantry-e2e.json"
+    mode: "0644"
+
+- name: Report the discovery path
+  ansible.builtin.debug:
+    msg: "GANTRY_E2E_CONFIG={{ e2e_dir }}/gantry-e2e.json"

@@ -75,9 +75,15 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   `tools/e2e-seed` added to the main module (no new deps). Landed & verified:
   `tools/e2e-seed` (pure-Go: synthetic images + notation-signed referrers +
   CA export — smoke-tested against a real registry), and `TestTLSCache` (gantry
-  trusts a private CA via `ca_cert`, hermetic). Remaining (author-only, needs a
-  self-hosted host to run): `deploy/compose/e2e.compose.yaml`, a lean `ansible/`
-  tree, `nightly.yaml`, and Makefile targets.
+  trusts a private CA via `ca_cert`, hermetic). Authored (runtime verification
+  needs a self-hosted host): `deploy/compose/e2e.compose.yaml` (remote/cache/zot/
+  proxy matrix), a lean `ansible/` tree (roles ca → registries → seed → discovery;
+  no vault; TLS CA the daemon trusts; emits a `gantry-e2e.json` discovery file),
+  the `e2e_infra`-tagged `TestL3Infra` (reads the discovery file, self-skips
+  without it, drives the shipped binary against the plain + TLS caches),
+  `nightly.yaml` (self-hosted schedule), and `Makefile` targets (`e2e`,
+  `e2e-daemon`, `e2e-blackbox`, `e2e-up/down`, `e2e-seed`, `e2e-infra`). All build
+  tags compile; the default `go test` is unchanged.
 
 ## Feature × layer coverage
 

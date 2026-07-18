@@ -1,0 +1,64 @@
+# A private CA plus a TLS server certificate for the TLS cache registry, trusted
+# by the docker daemon so it can pull from that registry over HTTPS. (The
+# notation *signing* CA is separate and comes from the seeder in role:seed.)
+- name: Ensure output directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ tls_dir }}"
+    - "{{ trust_dir }}"
+
+- name: Generate the CA private key
+  community.crypto.openssl_privatekey:
+    path: "{{ tls_dir }}/ca.key"
+
+- name: Generate the CA CSR
+  community.crypto.openssl_csr:
+    path: "{{ tls_dir }}/ca.csr"
+    privatekey_path: "{{ tls_dir }}/ca.key"
+    common_name: gantry-e2e-ca
+    basic_constraints:
+      - "CA:TRUE"
+    basic_constraints_critical: true
+
+- name: Self-sign the CA certificate
+  community.crypto.x509_certificate:
+    path: "{{ tls_dir }}/ca.crt"
+    csr_path: "{{ tls_dir }}/ca.csr"
+    privatekey_path: "{{ tls_dir }}/ca.key"
+    provider: selfsigned
+
+- name: Generate the registry server key
+  community.crypto.openssl_privatekey:
+    path: "{{ tls_dir }}/registry.key"
+
+- name: Generate the registry server CSR (SAN = TLS host + loopback)
+  community.crypto.openssl_csr:
+    path: "{{ tls_dir }}/registry.csr"
+    privatekey_path: "{{ tls_dir }}/registry.key"
+    common_name: "{{ tls_host }}"
+    subject_alt_name:
+      - "DNS:{{ tls_host }}"
+      - "IP:127.0.0.1"
+
+- name: Sign the registry certificate with the CA
+  community.crypto.x509_certificate:
+    path: "{{ tls_dir }}/registry.crt"
+    csr_path: "{{ tls_dir }}/registry.csr"
+    ownca_path: "{{ tls_dir }}/ca.crt"
+    ownca_privatekey_path: "{{ tls_dir }}/ca.key"
+    provider: ownca
+
+# Let the docker daemon trust the TLS registry (both the loopback address gantry
+# tells it to pull and the routable host name).
+- name: Trust the CA in the docker daemon (certs.d)
+  become: true
+  ansible.builtin.copy:
+    src: "{{ tls_dir }}/ca.crt"
+    dest: "/etc/docker/certs.d/{{ item }}/ca.crt"
+    mode: "0644"
+  loop:
+    - "127.0.0.1:5004"
+    - "{{ tls_host }}"

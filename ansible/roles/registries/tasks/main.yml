@@ -1,0 +1,38 @@
+# Bring up the plain-HTTP registry matrix from the shipped compose file, plus a
+# TLS cache registry using the cert from role:ca.
+- name: Bring up the registry matrix (remote / cache / zot / proxy)
+  community.docker.docker_compose_v2:
+    project_src: "{{ repo_dir }}/deploy/compose"
+    files:
+      - e2e.compose.yaml
+    state: present
+
+- name: Run the TLS cache registry
+  community.docker.docker_container:
+    name: gantry-e2e-cache-tls
+    image: registry:2
+    restart_policy: unless-stopped
+    published_ports:
+      - "127.0.0.1:5004:5000"
+    env:
+      REGISTRY_HTTP_TLS_CERTIFICATE: /certs/registry.crt
+      REGISTRY_HTTP_TLS_KEY: /certs/registry.key
+    mounts:
+      - source: "{{ tls_dir }}"
+        target: /certs
+        type: bind
+        read_only: true
+
+- name: Wait for the registries to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ item }}/v2/"
+    status_code: [200, 401]
+  register: probe
+  retries: 20
+  delay: 1
+  until: probe is succeeded
+  loop:
+    - 5000 # cache
+    - 5001 # remote
+    - 5002 # proxy
+    - 5003 # zot

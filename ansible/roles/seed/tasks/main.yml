@@ -1,0 +1,11 @@
+# Seed `remote` with a notation-signed synthetic image using the pure-Go seeder
+# (no Docker Hub egress). The seeder also writes the notation signing CA into the
+# trust store the rendered gantry config points at.
+- name: Seed a signed image into the remote registry
+  ansible.builtin.command:
+    cmd: >-
+      go run ./tools/e2e-seed
+      --to 127.0.0.1:5001 --repo lib/app --tag 1 --insecure
+      --sign --ca-out {{ trust_dir }}/notation-root.crt
+    chdir: "{{ repo_dir }}"
+  changed_when: true

@@ -1,0 +1,21 @@
+# Provision the gantry E2E environment on a single self-hosted host: a registry
+# matrix (plain-HTTP + TLS + zot + a pull-through proxy), a private TLS CA the
+# docker daemon trusts, a notation-signed seed image, and a discovery file the Go
+# L3-infra tests read. Simple by design — no vault, no multi-host, no cloud.
+#
+#   ansible-galaxy collection install -r ansible/requirements.yml
+#   ansible-playbook -i ansible/inventory.ini ansible/site.yml
+- name: Provision the gantry E2E environment (self-hosted)
+  hosts: e2e
+  gather_facts: false
+  vars:
+    repo_dir: "{{ playbook_dir }}/.."
+    e2e_dir: "{{ playbook_dir }}/.out"
+    tls_dir: "{{ playbook_dir }}/.out/tls" # registry TLS material
+    trust_dir: "{{ playbook_dir }}/.out/notation-ca" # notation signing trust store
+    tls_host: "cache-tls.gantry.local"
+  roles:
+    - ca # TLS CA + registry cert, trusted by the docker daemon
+    - registries # the registry matrix (compose) + a TLS registry
+    - seed # a notation-signed image in `remote`, egress-free
+    - discovery # emit gantry-e2e.json + gantry.yaml for the Go tests

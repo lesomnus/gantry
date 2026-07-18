@@ -1,0 +1,28 @@
+serve:
+  addr: "127.0.0.1:18080"
+  events:
+    path: "{{ e2e_dir }}/events.db"
+  verify:
+    mode: "verify-if-present"
+    provider: "notation"
+    trust_store: "{{ trust_dir }}"
+    level: "permissive"
+stores:
+  remote:
+    kind: "oci"
+    host: "127.0.0.1:5001"
+    insecure: true
+  cache:
+    kind: "oci"
+    host: "127.0.0.1:5000"
+    insecure: true
+    mode: "copy"
+  cache-tls:
+    kind: "oci"
+    host: "127.0.0.1:5004"
+    ca_cert: "{{ tls_dir }}/ca.crt"
+  cache-proxy:
+    kind: "oci"
+    host: "127.0.0.1:5002"
+    insecure: true
+    mode: "proxy"

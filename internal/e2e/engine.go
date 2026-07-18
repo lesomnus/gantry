@@ -138,8 +138,23 @@ func (e *fakeEngine) ReapUntagged(_ context.Context, id string, owned func(strin
 
 // --- test controls (hold the lock) ---
 
-func (e *fakeEngine) setReady(err error)      { e.mu.Lock(); e.ready = err; e.mu.Unlock() }
-func (e *fakeEngine) setInUse(refs ...string) { e.mu.Lock(); for _, r := range refs { e.inUse[r] = true }; e.mu.Unlock() }
-func (e *fakeEngine) pullCount() int          { e.mu.Lock(); defer e.mu.Unlock(); return len(e.pulls) }
-func (e *fakeEngine) lastPull() pullRecord    { e.mu.Lock(); defer e.mu.Unlock(); return e.pulls[len(e.pulls)-1] }
-func (e *fakeEngine) has(ref string) bool     { e.mu.Lock(); defer e.mu.Unlock(); _, ok := e.held[ref]; return ok }
+func (e *fakeEngine) setReady(err error) { e.mu.Lock(); e.ready = err; e.mu.Unlock() }
+func (e *fakeEngine) setInUse(refs ...string) {
+	e.mu.Lock()
+	for _, r := range refs {
+		e.inUse[r] = true
+	}
+	e.mu.Unlock()
+}
+func (e *fakeEngine) pullCount() int { e.mu.Lock(); defer e.mu.Unlock(); return len(e.pulls) }
+func (e *fakeEngine) lastPull() pullRecord {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.pulls[len(e.pulls)-1]
+}
+func (e *fakeEngine) has(ref string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.held[ref]
+	return ok
+}
