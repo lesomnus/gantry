@@ -110,35 +110,39 @@ $ grpcurl -plaintext -d '{"id": "<id>"}' localhost:8080 gantry.JobService/Watch
 
 ## gRPC API
 
-The contract lives in [proto/gantry](proto/gantry) (entities plus the merged
-service definitions) with generated Go stubs, ergonomic request constructors,
-and client/server wiring in the [pb](pb) package
-(`github.com/lesomnus/gantry/pb`). Entity services follow a resource-oriented
-CRUD shape — `Add` / `Get` / `Patch` return the entity and `Erase` returns
-`Empty`, `Ref` messages addressing it by key or unique index — with `List` and
-the custom actions merged on top. Write RPCs without a domain operation answer
-`UNIMPLEMENTED`.
+The whole surface is gRPC; the contract lives in [proto/gantry](proto/gantry)
+with generated Go stubs and client/server wiring in the [pb](pb) package
+(`github.com/lesomnus/gantry/pb`). Server reflection is on, so `grpcurl` and
+similar tools work without proto files.
 
-| Service | RPCs | Notes |
-|---|---|---|
-| `JobService` | `Add` · `Get` · `List` · `Erase` · `Watch` · `Plan` · `Cancel` · `Retry` | `Add` coalesces onto an identical in-flight move and honors an `Idempotency-Key`; `Watch` streams job snapshots until terminal; `Plan` is dry-run admission; `Erase` evicts (cancels first when running). Jobs carry a free-form `labels` map (filterable on `List`). |
-| `StoreService` | `Get` · `List` · `Pull` · `Remove` · `Health` · `GcStatus` · `GcPlan` · `GcApply` | Stores are declared in config. `Pull`/`Remove` drive one engine daemon. The GC RPCs need the store's `retention` ([docs/retention.md](docs/retention.md)); `GcPlan` dry-runs, `GcApply` executes. |
-| `ImageService` | `Get` · `List` · `Erase` | The retention inventory. `List` filters by `repo`/`ref`/`pinned`/`in_use`; `Erase` purges an orphan record without touching the engine. |
-| `PinService` | `Add` · `Get` · `List` · `Erase` | GC exemptions: an exact ref or a doublestar `pattern`. `Add` echoes the pin's current blast radius as response trailers; `Erase` is idempotent. |
-| `EventService` | `Get` · `List` | The audit log (requires `serve.events`); newest-first with `type`/`store`/`ref`/`state`/`since` filters. |
-| `VerifyService` | `Describe` · `Check` · `Reload` | Trust introspection (never key material), preflight, and truststore hot-reload for CA rotation. |
-| `grpc.health.v1.Health` | `Check` · `Watch` | Liveness and readiness: the overall status follows aggregate health over the gated stores. Public. |
+Day to day you drive **`JobService`**. `Add {ref, source, target}` submits a
+move — optionally narrowing `platforms` or recording the pulled image under
+caller-chosen `as` names — and returns the job right away; an identical in-flight
+move is coalesced onto rather than run twice. `Watch` streams snapshots with
+per-layer byte progress until the job reaches a terminal state, and `Get` fetches
+one snapshot. `Plan` runs the same admission **without submitting** — a preflight
+that reports the resolved source digest, the chosen platforms, and whether an
+identical move is already running — while `Cancel` and `Retry` stop a job or
+re-submit a finished one's request as a fresh job.
+
+Everything else is operational and mostly out of the hot path: **`StoreService`**
+lists stores and their health and drives ad-hoc engine `Pull`/`Remove` and
+per-store GC ([docs/retention.md](docs/retention.md)); **`PinService`** exempts
+images from GC; **`ImageService`** is the retention inventory; **`EventService`**
+is the durable audit log ([docs/observability.md](docs/observability.md));
+**`VerifyService`** introspects the trust configuration
+([docs/verification.md](docs/verification.md)); and liveness/readiness is served
+over the standard `grpc.health.v1.Health`.
 
 Every RPC is guarded by a bearer token (`authorization: Bearer <token>` request
 metadata) when `serve.auth.tokens` is set; with none set, auth is disabled
-(intended to sit behind a trusted network). The standard health and reflection
-services are always exempt — they expose liveness and the schema, not the data.
-Serve TLS with `serve.auth.tls_cert`/`tls_key`, or terminate TLS/mTLS at a
-reverse proxy.
+(intended to sit behind a trusted network). Health and reflection are always
+exempt. Serve TLS with `serve.auth.tls_cert`/`tls_key`, or terminate TLS/mTLS at
+a reverse proxy.
 
-Per-service behaviors — coalescing and its dedup key, the `Idempotency-Key`, the
-response trailers, dry-run `Plan`, the live-vs-durable job model, pagination, and
-stable resource ids — are documented in [docs/api.md](docs/api.md).
+The complete service and RPC catalog — every method, the status-code mapping,
+response trailers, the `Idempotency-Key`, the live-vs-durable job model, and
+pagination — is in **[docs/api.md](docs/api.md)**.
 
 ## Configuration
 
