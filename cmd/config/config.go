@@ -237,7 +237,7 @@ func (c *Config) evaluateVerifyCache() error {
 	if !vc.Enabled() {
 		return nil
 	}
-	z.FallbackP((*time.Duration)(&vc.TTL), 28*24*time.Hour)    // 4w
+	z.FallbackP((*time.Duration)(&vc.TTL), 28*24*time.Hour)     // 4w
 	z.FallbackP((*time.Duration)(&vc.Refresh), 14*24*time.Hour) // 2w
 	if vc.TTL <= 0 || vc.Refresh <= 0 {
 		return z.Err(nil, "serve.verify.cache: ttl and refresh must be positive")

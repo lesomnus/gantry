@@ -12,7 +12,7 @@ the implementation as PRs land.
 | PR2 | Config structs + Evaluate | ✅ landed |
 | PR3 | bbolt verdict cache | ✅ landed |
 | PR3b | Local OCI-layout verify source | ✅ landed |
-| PR4 | Caching verifier decorator | ⬜ pending |
+| PR4 | Caching verifier decorator | ✅ landed |
 | PR5 | down.Enforcer + docker methods | ⬜ pending |
 | PR6 | Enforce manager | ⬜ pending |
 | PR7 | App wiring + refresh sweeper + docker E2E | ⬜ pending |
@@ -243,23 +243,31 @@ freshly-opened `NewOCIRepository`, and an offline verify succeeds with the sourc
 registry host set unroutable (no network touched). Bundle is thin — subject
 manifest + signature manifest + signature blob (no image layers needed).
 
-### PR4 — Caching decorator
-`type Caching struct{ verify.Service; cache *Cache; now }` (embeds `Service`, so
-`Describe`/`Reload` delegate). Override `Verify(ctx, from, src)`:
-- `src` is a `name.Digest` and a **hit within hard TTL** → return a reconstructed
-  `Result{Mode: EffectiveMode(from), Digest: key}` **without** touching the
-  registry (offline path).
-- else call the embedded `Service.Verify` and **classify**:
-  - `err==nil && res.Verified()` → `Put(res.Digest, Trusted=true, SourceRef=src)`.
-  - `errors.Is(err, ErrUnsigned|ErrUntrusted)` **and** `src` is a digest →
-    `Put(digest, Trusted=false)`.
-  - anything else (`ErrNotFound`, unreachable, timeout, tag-src) → **pass through,
-    do not cache** (the "never cache unreachable" rule — the `verify.Verifier`
-    contract guarantees unreachable is a non-sentinel error).
+### PR4 — Caching decorator — ✅ landed
+`Caching{ verify.Service; cfg; cache; now }` embeds `Service` (so
+`Describe`/`Reload` delegate) and is built with `NewCaching(inner, cache, cfg)`.
+`Verify(ctx, from, src)`:
+- resolves `mode = cfg.EffectiveMode(from)`; **mode off** → returns
+  `Result{Mode: off}` and touches neither the cache nor the registry (matching the
+  wrapped verifier).
+- **offline fast path**: `src` is a `name.Digest` with a fresh (`!Expired`)
+  **trusted** verdict → returns `Result{Mode, Digest}` with no registry call. Tag
+  refs are never served from the cache (a tag can be repointed).
+- otherwise calls the embedded `Service.Verify` and `record`s the outcome:
+  `err==nil && res.Verified()` → `Put(res.Digest, trusted, …)` (keyed by the
+  **verified** digest, so a *tag* verify still populates a digest verdict);
+  `ErrUnsigned|ErrUntrusted` **with a digest src** → `Put(digest, untrusted)`;
+  anything else (`ErrNotFound`, unreachable, timeout, unsigned-allowed, tag-src
+  reject) → **not cached** (the "never cache unreachable" rule — the
+  `verify.Verifier` contract makes unreachable a non-sentinel error).
 
-The decorator's `Verify` stays **fail-closed** (preserving the copy-path and RPC
-semantics). `grace` lives only in the enforce read path (PR6), which reads the
-cache directly.
+The decorator's `Verify` stays **fail-closed** (it does not serve cached-untrusted
+offline — it re-verifies for the precise error; enforcement reads the cache
+directly for the offline untrusted case). `grace` lives only in the enforce read
+path (PR6).
+**(landed: `NewCaching` takes `cfg` so the decorator resolves the effective mode
+itself — needed to honor `mode: off` and to reconstruct `Result.Mode` on a hit
+without a registry round-trip.)**
 
 ### PR5 — down.Enforcer
 Add to `down.go` (next to the other capabilities): `StartEvent{ContainerID,
