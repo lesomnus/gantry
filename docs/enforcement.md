@@ -15,7 +15,7 @@ the implementation as PRs land.
 | PR4 | Caching verifier decorator | ✅ landed |
 | PR5 | down.Enforcer + docker methods | ✅ landed |
 | PR6 | Enforce manager | ✅ landed |
-| PR7 | App wiring + refresh sweeper + docker E2E | ⬜ pending |
+| PR7 | App wiring + refresh sweeper + docker E2E | ✅ landed |
 
 Deviations from the original plan are noted inline in each PR section as
 **(landed: …)** annotations.
@@ -339,22 +339,37 @@ soft-refresh→re-quarantine tick are deferred to a follow-up; verdict flips are
 picked up by the reconnect reconcile and the next start event.)**
 
 ### PR7 — App wiring + sweeper
-In `app.go Build`: (1) change the verifier gate (`app.go:186`) from
-`VerifyEnabled()` to `NeedVerifier()`. (2) if `verify.cache` enabled: `Open` the
-cache next to `retention.Open` (`app.go:116`), append `Close` to closers
-(`app.go:120`), wrap `v` with `verify.NewCaching(v, cache)` and pass the wrapper
-to `wmr.SetVerifier` (`app.go:192`) so writer and reader **share one file**. (3)
-if `enforce` enabled: iterate `Serve.Enforce.Stores`, resolve `stores.Engine`,
-type-assert `down.Enforcer` (fail-fast if absent), build `enforce.Manager`,
-append `Stop` to closers, `StartWatchers(ctx)` next to `gc.StartWatchers`
-(`app.go:204-207`). (4) start the single refresh sweeper. Shutdown: enforce
-`Stop` **joins its WaitGroup before** the cache bbolt file closes.
+### PR7 — App wiring + refresh sweeper + docker E2E — ✅ landed
+In `app.go Build`: the verifier gate is `c.NeedVerifier()` (so enforcement gets
+the verifier even with admission `mode: off`); the block keeps both the
+cache-wrapped `vf` (copy path + RPC) and the raw `vraw` (refresher). When
+`verify.cache` is enabled it `OpenCache`s next to `retention.Open`, appends
+`Close` to closers, and wraps the verifier with `verify.NewCaching(v, cache,
+cfg)` so writer and reader **share one bbolt file**. When `enforce` is on it
+resolves each `Serve.Enforce.Stores` engine, type-asserts `enforce.Engine`
+(fail-fast if the kind can't enforce), builds `enforce.NewManager(...)`, appends
+`Stop` to closers, and `StartWatchers(ctx)` next to `gc.StartWatchers`. The
+refresh sweeper runs as a goroutine using the **raw** verifier (so a re-check
+reaches the registry/layout, not the cache it is refreshing) with a resolver that
+maps a verdict's `SourceRef` host → configured OCI store.
 
-`refresh.go` (single goroutine — one shared cache, mirrors retention
-`runScheduler`/`nextWake`/`poke` `manager.go:735-826`): periodically `ForEach`
-the bucket, re-verify **only trusted** entries past `RefreshAfter` through the
-caching `Service`; on a definitive answer `Put` a fresh verdict; on unreachable,
-leave it untouched (grace). Next-wake = soonest `RefreshAfter`.
+`refresh.go`: `Refresher` ticks at the soft-refresh interval (capped at 1h);
+`Sweep` `ForEach`es the bucket and re-verifies **only trusted, digest-sourced,
+stale** entries — renewing on a definitive trusted answer, flipping to untrusted
+on `ErrUnsigned`/`ErrUntrusted`, and leaving the entry untouched on an
+unreachable registry (grace). Tag-sourced verdicts are skipped (a tag can drift).
+
+**Verified end-to-end against the real docker daemon (docker 29.5, containerd
+image store)** via `docker_e2e_test.go`: with a seeded verdict cache, a container
+whose image digest is **trusted** is left running, one that is **untrusted** is
+force-removed by a direct decision, and another is force-removed by the **live
+event watcher** — all against real `alpine` containers (real `ContainerInspect` →
+`RepoDigests` → `ContainerRemove`). Live notation verification (registry and
+offline local-layout) is covered end-to-end by the `internal/verify` integration
+tests. **(landed: the docker E2E is cache-seeded because this dev daemon runs in a
+separate network namespace and cannot reach a test-local registry; the live
+verify + kill path is covered by the enforce unit tests over a fake engine plus
+the verify integration tests.)**
 
 ## Risks & mitigations
 
@@ -419,10 +434,13 @@ leave it untouched (grace). Next-wake = soonest `RefreshAfter`.
 
 ## Open decisions (surface before/while implementing)
 
-1. **Which digest does notation sign** in this deployment (index vs platform),
-   and does `RepoDigests` on the lab's containerd-store docker v28 return that
-   same top-level digest a `docker run` reports? The whole cache key rests on
-   this — validate against a real signed multi-arch image.
+1. ~~**Which digest does notation sign**~~ — **RESOLVED (empirically).** Against
+   docker 29.5 with the containerd image store, `alpine`'s `RepoDigests` reported
+   the top-level `sha256:28bd…` while `ImageManifestDescriptor.Digest` reported a
+   *different*, platform-specific `sha256:79ff…`. `topLevelDigest` therefore keys
+   on `RepoDigests` only. Still worth a final check against a **signed multi-arch**
+   image in the lab L3 tier before production (the E2E here uses single-arch
+   `alpine`).
 2. **Cache miss with no provenance** (image gantry never moved / locally built /
    `as`-warmed): allow-through under grace, live-probe every oci store, or require
    the daemon ref to name a configured store? Recommended: derive the oci store
