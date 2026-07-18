@@ -8,7 +8,7 @@ the implementation as PRs land.
 
 | PR | Workstream | Status |
 |----|-----------|--------|
-| PR1 | Duration `w`/`d` parsing | ⬜ pending |
+| PR1 | Duration `w`/`d` parsing | ✅ landed |
 | PR2 | Config structs + Evaluate | ⬜ pending |
 | PR3 | bbolt verdict cache | ⬜ pending |
 | PR3b | Local OCI-layout verify source | ⬜ pending |
@@ -176,12 +176,17 @@ not collide with any retention/events bbolt path (extend the guard at
 | PR6 | **Enforce manager** (`manager`/`decision`/`selfguard`) | PR4, PR3b, PR5 | `internal/enforce/*` (+test) |
 | PR7 | **App wiring + refresh sweeper** | PR2,3,3b,4,6 | `internal/app/app.go`, `internal/verify/refresh.go` |
 
-### PR1 — Duration `w`/`d`
-Extend `duration.go` `UnmarshalText` (`13-20`): a pre-pass tokenizer walks
-number+unit pairs, rewriting `w`→168h and `d`→24h before delegating to
-`time.ParseDuration` for standard units. Support compounds (`2w3d12h`) and
-decimals (`1.5w`); preserve `time.ParseDuration` error semantics; leave
-`MarshalText` (re-serializes as hours) unchanged.
+### PR1 — Duration `w`/`d` — ✅ landed
+`duration.go` `UnmarshalText` runs `expandWeeksDays` before delegating to
+`time.ParseDuration`: a byte-scanner walks number+unit tokens, rewriting `w`→168h
+and `d`→24h (whole numbers scale as integers to stay exact; fractions via float),
+and leaves every other token — standard units and a single leading sign —
+verbatim. `time.ParseDuration` then sums the (possibly repeated) `h` tokens
+(verified: `336h72h12h` → 420h). A string with no `w`/`d` is passed through
+untouched so standard-input errors are unchanged; an unrecognized token defers to
+`time.ParseDuration`'s error. `MarshalText` re-serializes as hours (unchanged).
+Covers compounds (`2w3d12h`), decimals (`1.5w`), sign (`-2w`).
+**(landed: added `EnforceConfig`/cache fields will use `4w`/`2w` defaults in PR2.)**
 
 ### PR2 — Config
 `EnforceConfig{Mode, Stores []string, OnUnavailable string}` + `Enabled()`, added
