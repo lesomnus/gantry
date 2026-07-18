@@ -182,18 +182,18 @@ See [gantry.yaml](gantry.yaml) for the full annotated example. Top-level blocks:
 
 ## Development
 
-The devcontainer runs gantry against a Docker-in-Docker daemon and a dedicated
-containerd sidecar. Test layout, the live integration tests, the full job loop, and
-the insecure-registry constraints are documented in
-[docs/test-environment.md](docs/test-environment.md).
+The repository ships a devcontainer that wires gantry to a Docker-in-Docker
+daemon and a dedicated containerd sidecar, so the unit tests, the live
+integration tests, and the full copy→pull loop all run out of the box.
 
 ```sh
 go test -race ./...     # unit tests always; live docker/containerd tests self-skip without a daemon
-scripts/gen-proto.sh    # regenerate the gRPC contract: protoc-gen-orm-service emits the CRUD
-                        # services from the orm-annotated entities, protobuf-merge overlays the
-                        # hand-written RPCs (proto.svc/), then protoc-gen-go(-grpc) and
-                        # protoc-gen-orm-go compile everything into pb/
 ```
+
+**[docs/development.md](docs/development.md)** is the contributor guide: the
+devcontainer topology, repository layout, building, the test environment, the
+end-to-end loop, the insecure-registry constraints, and regenerating the gRPC
+contract.
 
 ## Status
 

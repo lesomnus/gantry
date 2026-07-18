@@ -12,7 +12,7 @@ subsystem. The full annotated configuration lives in
 | [verification.md](verification.md) | Source-image signature verification (Notary Project / notation): enforcement modes, the trust store and policy, digest pinning, `copy_referrers`, and the `VerifyService` surface. |
 | [observability.md](observability.md) | The OpenTelemetry metrics/traces pipeline and instrument catalog, the durable audit log (`EventService`), and health/readiness. |
 | [api.md](api.md) | gRPC contract and behaviors: coalescing and response trailers, `Idempotency-Key`, the dedup key, dry-run `Plan`, the live-vs-durable job model, pagination, stable ids, and auth. |
-| [test-environment.md](test-environment.md) | The devcontainer, the live docker/containerd integration tests, the full job loop, and the insecure-registry constraints. |
+| [development.md](development.md) | Contributor onboarding: the devcontainer, repository layout, building, unit and live integration tests, the full copy→pull loop, insecure-registry constraints, and regenerating the gRPC contract. |
 
 Project status, the pre-v1 maintainer to-dos, and the non-goals are in the
 [README](../README.md#status); the full design history lives in the git log.
