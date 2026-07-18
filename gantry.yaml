@@ -198,7 +198,7 @@ serve:
   #   # off | verify-if-present (verify when signed, allow unsigned) | require
   #   # (signature mandatory — reject unsigned AND invalid). Global default.
   #   mode: "require"
-  #   # Directory of trusted CA certificate files (PEM: *.crt/*.pem/*.cert). Required.
+  #   # Directory of trusted CA certificate files (PEM: *.crt/*.pem/*.cert/*.cer). Required.
   #   trust_store: "/etc/gantry/verify/ca"
   #   # Optional notation trust policy JSON. When omitted, gantry synthesizes one
   #   # (registryScopes ["*"], trustedIdentities ["*"], the level below) referencing

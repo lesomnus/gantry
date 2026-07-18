@@ -69,8 +69,9 @@ type VerifyConfig struct {
 	// synthesizes a policy that trusts any signature chaining to TrustStore
 	// (registryScopes ["*"], trustedIdentities ["*"], the configured Level).
 	TrustPolicy string `yaml:"trust_policy"`
-	// Level is the synthesized policy's verification level: strict (default) |
-	// permissive | audit. Ignored when TrustPolicy is set.
+	// Level is the synthesized policy's verification level: strict (default) or
+	// permissive. "audit" is rejected — it disables trust-anchor enforcement,
+	// defeating the gate. Ignored when TrustPolicy is set.
 	Level string `yaml:"level"`
 	// Timeout bounds a single verification (registry resolve + signature fetch +
 	// verify). Default 15s.
@@ -325,7 +326,8 @@ type StoreConfig struct {
 
 	// --- engine (docker / containerd) ---
 	Address string `yaml:"address"`
-	// Namespace is the containerd namespace (e.g. "k8s.io" for k3s, "moby" for docker's).
+	// Namespace is the containerd namespace (e.g. "k8s.io" for k3s); defaults to
+	// "default" when empty. containerd stores only — the docker engine ignores it.
 	Namespace string `yaml:"namespace"`
 	// PullHost overrides the registry host this engine is told to pull from,
 	// taking precedence over the source registry's downstream_host.

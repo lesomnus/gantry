@@ -120,8 +120,6 @@
   이벤트에 job `id` 추가**(admit↔done를 id로 상관, 로그만으로 lifecycle 재구성; `JobDone`엔 이미
   있었음), **✅ "Get/List=라이브 전용, 이력=EventService, 자동 재개 없음" 계약 문서화**(README
   behaviors + `JobService` proto 주석). 6절로 이동.
-- **registry-store digest resolve** (낮은 우선순위) — registry의 태그→digest 라이브 조회.
-  인벤토리 질의 API가 맞고, 있어서 나쁠 것 없는 nice-to-have.
 
 ### 관측성
 - **watcher-connected OTel gauge** — ✅ 완료. `gantry.retention.watcher.connected`(1/0)
