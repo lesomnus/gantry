@@ -53,7 +53,13 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   Idempotency-Key (10), cancel/retry (11), audit log (12), health/readiness (13).
   Proxy-mode (3) is deferred to L2 — the in-memory registry has no pull-through
   mode.
-- **L2 real daemon + registry matrix — ☐ not started.**
+- **L2 real daemon + registry matrix — ⏳ in progress.** Build-tagged (`e2e`)
+  `internal/e2e/l2_*_test.go`: real `registry:2` containers (via the docker
+  client) + the real docker daemon, self-skipping when no daemon is reachable.
+  Handles the loopback-insecure model and the devcontainer's separate-netns case
+  with a same-address forwarder. `TestL2CopyAndEnginePull` (feature 2, engine
+  pull) passes against a real docker daemon. Remaining: the registry-impl matrix
+  (`zot`/`registry:3`), proxy mode (3), containerd sub-tier, and the CI jobs.
 - **L3 black-box — ☐ not started.**
 - **L3-infra (Ansible) + nightly CI — ☐ not started.**
 
