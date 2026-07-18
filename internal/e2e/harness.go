@@ -1,4 +1,4 @@
-// Package e2e is the hermetic end-to-end suite (docs/e2e-plan.md, L1): it stands
+// Package e2e is the hermetic end-to-end suite (docs/e2e-testing.md, L1): it stands
 // up the real gantry gRPC server in-process (internal/app.Build over bufconn),
 // backs the source and cache stores with in-memory OCI registries, uses a fake
 // engine daemon, and injects a clock so time-dependent GC is deterministic — all

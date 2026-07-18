@@ -1,22 +1,142 @@
 # End-to-end testing
 
-A full-stack, feature-oriented test plan. It stands up a realistic
-**remote → cache → engine** pipeline — the shape of a real gantry deployment — and
-exercises each feature a user actually drives, giving the exact request and how to
-confirm the result.
+gantry is tested end-to-end two complementary ways, both covered here:
 
-This complements [development.md](development.md), which covers the Go unit and
-package-level integration tests. Those verify the mechanics in isolation; the
-tests here drive a **running gantry** against **real registries and a real
-daemon**, so they validate the whole system and double as reproductions of
-user-facing behavior. Every scenario is manual and observable — submit a job over
-gRPC, then inspect the registries and the daemon.
+- **The [automated suite](#the-automated-suite)** (`internal/e2e`) — a layered Go
+  suite that stands the real server up and drives it over gRPC, from a fully
+  hermetic in-process tier that runs on every `go test` to a black-box tier that
+  runs the shipped binary. This is how E2E runs in CI.
+- **The [manual runbook](#the-manual-runbook)** — a `grpcurl` walkthrough of each
+  user-facing feature on a standard remote→cache→engine environment, for hands-on
+  exploration and reproducing behavior against real infrastructure.
 
-For the design behind each feature, follow the topic links: [stores.md](stores.md),
+For each feature's design see the topic guides — [stores.md](stores.md),
 [retention.md](retention.md), [verification.md](verification.md),
-[observability.md](observability.md), [api.md](api.md).
+[observability.md](observability.md), [api.md](api.md). For the devcontainer, the
+unit/integration tests, and the loopback-insecure constraint, see
+[development.md](development.md).
 
-## The standard environment
+## The automated suite
+
+`internal/e2e` builds the real gantry server through
+[`internal/app.Build`](../internal/app) — the same wiring `gantry serve` uses, so
+tests exercise production assembly rather than a copy — and drives it with the
+generated `pb` client. Four tiers share one harness, differing only in what backs
+the stores and the engine:
+
+| Tier | Backing | Runs | Command |
+|---|---|---|---|
+| **L1 hermetic** | in-memory registries + a fake engine + an injected clock | **every** `go test -race ./...` (CI + local), seconds, no infra | `make e2e` |
+| **L2 real daemon** | real `registry:2`/`registry:3` containers + the real docker daemon | opt-in; self-skips without docker | `make e2e-daemon` |
+| **L3 black-box** | the shipped `gantry serve` binary + a real registry | opt-in | `make e2e-blackbox` |
+| **L3-infra** | an Ansible-provisioned matrix (plain + TLS + zot + proxy) on a self-hosted host | nightly / manual | `make e2e-infra` |
+
+L2/L3 are behind `//go:build e2e` and L3-infra behind `//go:build e2e_infra`, so
+the default `go test ./...` compiles and runs **L1 only**. Every tier is pure Go
+with no new dependencies (`go-containerregistry`, `notation-go`, `oras`,
+`docker/docker`, `bbolt`, `grpc`); CGO stays disabled.
+
+### Running it
+
+| Command | Tier | Needs |
+|---|---|---|
+| `make e2e` (`go test ./internal/e2e/...`) | L1 | Go only |
+| `make e2e-daemon` (`go test -tags e2e -run TestL2 ./internal/e2e/...`) | L2 | a docker daemon |
+| `make e2e-registries REG=registry:3` | L2 | docker; selects the registry image (`GANTRY_E2E_REGISTRY`) |
+| `make e2e-blackbox` (`go test -tags e2e -run TestL3 ./internal/e2e/...`) | L3 | docker |
+| `make e2e-up` / `make e2e-down` | — | docker; the persistent `deploy/compose/e2e.compose.yaml` env |
+| `make e2e-infra` | L3-infra | a self-hosted host + Ansible |
+
+A single test: `go test -tags e2e -run TestL2CopyAndEnginePull ./internal/e2e/...`.
+
+In the **devcontainer** the test process and the docker daemon sit in separate
+network namespaces, so the L2/L3 harness starts a same-address forwarder
+(`127.0.0.1:<port>` → `docker:<port>`) automatically when `DOCKER_HOST` is a
+remote tcp endpoint. On a single-netns host (CI, or a laptop with a local daemon)
+no forwarder is needed.
+
+### Feature coverage
+
+Which tier automates each feature (with the test that proves it):
+
+| # | Feature | Where |
+|---|---|---|
+| 1 | Registry→registry copy + incremental blob skip | L1 `TestCopyRemoteToCache`, L2 `TestL2CopyAndEnginePull` |
+| 2 | Engine pull (cache→daemon) | L1 `TestEnginePull` (fake), **L2 `TestL2CopyAndEnginePull` (real daemon)** |
+| 3 | Proxy-mode pull-through | L3-infra (compose `cache-proxy`) |
+| 4 | Platform selection | L1 `TestPlatformSelection` |
+| 5 | Caller-chosen `as` names | L1 `TestAsNames` |
+| 6 | Digest pin + verbatim commit | L1 `TestDigestPin` |
+| 7 | Rewrite / `downstream_host` | L1 `TestPlanResolves`; real DNS in L3-infra |
+| 8 | Signature verification (notation, in-process) | L1 `TestVerification` |
+| 9 | Retention / GC (injected clock) | L1 `TestRetentionGC` |
+| 10 | Dedup & `Idempotency-Key` | L1 `TestIdempotencyKey` |
+| 11 | Cancel & Retry | L1 `TestCancelRetry` |
+| 12 | Audit log | L1 `TestAuditLog`; **real restart in L3 `TestL3BlackBox`** |
+| 13 | Health & readiness | L1 `TestHealth` |
+| — | Private-CA TLS (`ca_cert`) | L1 `TestTLSCache`; real registry in L3-infra |
+| — | Graceful shutdown | L3 `TestL3BlackBox` |
+
+### CI
+
+`.github/workflows/ci.yaml` runs the tiers as parallel jobs; the `build` job's
+`edge` image push is gated on all of them:
+
+- **`test`** — `go test -race ./...`: unit tests **and the L1 suite** (no infra).
+- **`e2e-docker`** — the **L2** tests against the runner's docker daemon, matrixed
+  over `registry:2` (referrer tag-fallback) and `registry:3` (native referrers).
+- **`e2e-containerd`** — provisions containerd and runs the `internal/down`
+  integration tests (digest `as`, anchored pull).
+- **`e2e-blackbox`** — the **L3** binary tests (graceful shutdown, restart).
+- **`nightly.yaml`** — self-hosted, runs `make e2e-infra` (the Ansible tier);
+  never gates a push.
+
+On the runner the test process shares its network namespace with the docker
+daemon, so a registry on `127.0.0.1:<port>` is auto-trusted as insecure by both
+gantry and the daemon — no `daemon.json`, no forwarder. Payload images are
+synthesized in-process, so a run makes **no Docker Hub pulls**; only the registry
+daemon image is fetched.
+
+### Registry implementations
+
+gantry (via `oras`) handles **both** OCI signature-referrer schemes — the native
+`/v2/.../referrers/` API and the tag-schema fallback — so the matrix deliberately
+covers both branches:
+
+| Registry | Referrers API | Tier | Exercises |
+|---|---|---|---|
+| `registry:2` (Distribution v2) | tag-fallback (404s native) | per-PR CI | copy, proxy, the **fallback** referrer path |
+| `registry:3` (Distribution v3) | native | per-PR CI | native referrers in the codebase users deploy |
+| `zot` | native (OCI 1.1.1) | infra (compose) | the **native** path + signature travel, a 2nd impl |
+| Harbor, ECR/ACR/GCR | native (edges vary) | nightly / opt-in | robot-auth / cloud auth, production-grade |
+
+### How it works
+
+- **`internal/app.Build`** assembles the whole server from config — the same path
+  `gantry serve` uses. `app.WithStoreSet` injects the fake engine (since
+  `store.NewSet` dials real daemons); `app.WithNow` injects a clock.
+- **Injected clock** (`retention.WithNow` / `event.WithNow`) makes time-dependent
+  GC (grace, `max_age`, `max_idle`, untagged reap) deterministic — no `time.Sleep`.
+- **In-process notation** — verification is tested without the `notation` CLI:
+  `notation-go` signs an image (pushed as a referrer) and gantry verifies against a
+  temp CA trust store, exactly as `internal/verify/notation_integration_test.go`.
+- **`tools/e2e-seed`** — a pure-Go seeder that pushes synthetic single- or
+  multi-platform images egress-free, optionally notation-signing them and exporting
+  the CA, for the L2/L3/infra tiers and the manual runbook.
+- **`ansible/`** (self-hosted, no vault) provisions the L3-infra environment: a
+  private TLS CA the docker daemon trusts, the registry matrix from
+  `deploy/compose/e2e.compose.yaml`, a signed seed image, and a `gantry-e2e.json`
+  discovery file the `e2e_infra` tests read (`GANTRY_E2E_CONFIG`; self-skips
+  without it).
+
+## The manual runbook
+
+A hands-on walkthrough: stand up a realistic remote→cache→engine pipeline and
+exercise each feature with the exact request and how to confirm it. Every scenario
+goes through a running gantry — submit over gRPC, then inspect the registries and
+the daemon.
+
+### The standard environment
 
 ```
 ┌───────────┐   gantry pulls     ┌───────────────┐   gantry pushes    ┌───────────┐
@@ -34,39 +154,31 @@ For the design behind each feature, follow the topic links: [stores.md](stores.m
 
 | Store    | Kind      | Role |
 |----------|-----------|------|
-| `remote` | `oci`     | Upstream registry holding the source images. gantry reads (pulls) from it — stands in for docker.io or a private registry. |
+| `remote` | `oci`     | Upstream registry holding the source images (stands in for docker.io / a private registry). |
 | `cache`  | `oci`     | The cache registry gantry copies into and the engine pulls from (`mode: copy`). |
 | `edge`   | `docker`  | A downstream engine (a fleet node). gantry tells it to pull from `cache`. |
 
-Adding a `containerd` engine is the same shape; a few features (digest `as` names)
-are containerd-image-store specific and are called out where they apply. The
-[development.md](development.md) devcontainer already provides the docker daemon
-and a containerd sidecar.
-
-### Bring-up (in the devcontainer)
+#### Bring-up (in the devcontainer)
 
 Both registries run on the DinD daemon; the docker engine is that same daemon.
 Because a daemon only pulls an insecure (plain-HTTP) registry from its **own
-loopback** without extra config (see [Insecure
-constraint](development.md#insecure-registry-constraint-loopback-only)), publish
-the registries on the dind host and forward the same `127.0.0.1` ports inside
-`dev` so gantry uses the identical references.
+loopback** without extra config (see [development.md](development.md#insecure-registry-constraint-loopback-only)),
+publish the registries on the dind host and forward the same `127.0.0.1` ports
+inside `dev` so gantry uses the identical references.
 
 ```sh
 # Two registries on the dind daemon: remote (upstream) and cache.
 docker run -d -p 5001:5000 --name remote registry:2
 docker run -d -p 5000:5000 --name cache  registry:2
 
-# Forward both ports into dev so gantry reaches them at the same 127.0.0.1 the
-# daemon uses. Run the tiny forwarder from development.md once per port,
+# Forward both ports into dev (see the forwarder in development.md), one per port:
 # 127.0.0.1:5000→docker:5000 and 127.0.0.1:5001→docker:5001.
 curl -s -o /dev/null -w "cache %{http_code}\n"  http://127.0.0.1:5000/v2/   # 200
 curl -s -o /dev/null -w "remote %{http_code}\n" http://127.0.0.1:5001/v2/   # 200
 
-# Seed the remote with an upstream image (the daemon pushes to its own loopback).
-docker pull busybox:1.36
-docker tag  busybox:1.36 127.0.0.1:5001/library/busybox:1.36
-docker push 127.0.0.1:5001/library/busybox:1.36
+# Seed the remote with an image, egress-free, using the in-repo seeder.
+mkdir -p /tmp/gantry-e2e
+go run ./tools/e2e-seed --to 127.0.0.1:5001 --repo library/busybox --tag 1.36 --insecure
 ```
 
 `gantry-e2e.yaml`:
@@ -89,20 +201,19 @@ stores:
 ```
 
 > Retention is configured **per engine store**, so the `retention` block sits on
-> `edge` (the daemon) — a `retention` block on an `oci` store like `cache` is
-> rejected at startup. See [retention.md](retention.md).
+> `edge` — a `retention` block on an `oci` store like `cache` is rejected at
+> startup. See [retention.md](retention.md).
 
 Start gantry and smoke-test the surface:
 
 ```sh
-mkdir -p /tmp/gantry-e2e
 go run . --config gantry-e2e.yaml serve &
 
 grpcurl -plaintext 127.0.0.1:18080 gantry.StoreService/List
 # expect: remote / cache / edge, with capabilities and ready=true
 ```
 
-### Test helpers
+#### Test helpers
 
 ```sh
 G="grpcurl -plaintext 127.0.0.1:18080"
@@ -120,7 +231,7 @@ edge_images() { docker images; }                                    # the dind d
 Store references are always `{"name": "<store>"}`. A `Get`/`Watch` shows the job's
 `state` and each `transfers[]` entry's `state` and `bytes_done`/`bytes_total`.
 
-## Feature test matrix
+### Feature test matrix
 
 | # | Feature | Doc |
 |---|---------|-----|
@@ -257,23 +368,26 @@ substituted pull host while gantry still pushes to the store's real `host`. See
 
 **What** — with `serve.verify` enabled, gantry verifies the source signature at
 admission and fails closed; the verified digest is pinned; `copy_referrers` carries
-the signature into the cache. Requires the [notation](https://notaryproject.dev)
-CLI and a signing CA.
+the signature into the cache.
 
-**Setup** — sign an image into `remote` and trust its CA:
+**Setup** — seed a signed image into `remote` and trust its CA, using the pure-Go
+seeder (no `notation` CLI needed):
 ```sh
-notation cert generate-test "gantry-e2e"                         # a test CA + key
-notation sign --insecure-registry 127.0.0.1:5001/library/busybox:1.36
-# point serve.verify at the CA dir (notation's local trust store), e.g.:
-#   serve: { verify: { mode: "require", trust_store: "/home/hypnos/.config/notation/truststore/x509/ca/gantry-e2e" } }
+mkdir -p /tmp/gantry-e2e/trust
+go run ./tools/e2e-seed \
+  --to 127.0.0.1:5001 --repo library/signed --tag 1 --insecure \
+  --sign --ca-out /tmp/gantry-e2e/trust/ca.crt
+# point serve.verify at that trust store, e.g.:
+#   serve:
+#     verify: { mode: "require", provider: "notation", trust_store: "/tmp/gantry-e2e/trust", level: "permissive" }
 ```
 
 **Run**
 ```sh
 # preflight without creating a job
-$G -d '{"ref":"library/busybox:1.36","source":{"name":"remote"}}' gantry.VerifyService/Check
+$G -d '{"ref":"library/signed:1","source":{"name":"remote"}}' gantry.VerifyService/Check
 # a real move, carrying the signature into the cache
-add '{"ref":"library/busybox:1.36","source":{"name":"remote"},"target":{"name":"cache"},"copy_referrers":true}'
+add '{"ref":"library/signed:1","source":{"name":"remote"},"target":{"name":"cache"},"copy_referrers":true}'
 ```
 
 **Expect** — under `require`: the signed image is admitted (`Check` reports the

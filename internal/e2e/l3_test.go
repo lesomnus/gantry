@@ -1,6 +1,6 @@
 //go:build e2e
 
-// The L3 black-box tier (docs/e2e-plan.md): build and run the shipped `gantry
+// The L3 black-box tier (docs/e2e-testing.md): build and run the shipped `gantry
 // serve` binary against a real registry, driving it over real gRPC. It proves
 // the two things no in-process tier can — graceful shutdown on SIGTERM, and the
 // audit log surviving a real process restart. Shared helpers are in

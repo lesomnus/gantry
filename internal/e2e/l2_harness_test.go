@@ -1,6 +1,6 @@
 //go:build e2e
 
-// The L2 real-daemon tier (docs/e2e-plan.md): the same in-process gantry, but
+// The L2 real-daemon tier (docs/e2e-testing.md): the same in-process gantry, but
 // backed by real registry:2 containers and the real docker daemon. Build-tagged
 // `e2e` so it stays out of the default `go test`; self-skips when no docker
 // daemon is reachable.

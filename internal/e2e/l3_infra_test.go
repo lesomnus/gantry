@@ -1,6 +1,6 @@
 //go:build e2e_infra
 
-// The L3-infra tier (docs/e2e-plan.md): run the shipped binary against the
+// The L3-infra tier (docs/e2e-testing.md): run the shipped binary against the
 // Ansible-provisioned registry matrix (ansible/), exercising the transport paths
 // the hermetic tiers cannot — a real TLS registry (ca_cert) and the pull-through
 // proxy. Self-skips unless GANTRY_E2E_CONFIG points at the discovery file the
