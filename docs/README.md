@@ -14,5 +14,5 @@ subsystem. The full annotated configuration lives in
 | [api.md](api.md) | gRPC contract and behaviors: coalescing and response trailers, `Idempotency-Key`, the dedup key, dry-run `Plan`, the live-vs-durable job model, pagination, stable ids, and auth. |
 | [test-environment.md](test-environment.md) | The devcontainer, the live docker/containerd integration tests, the full job loop, and the insecure-registry constraints. |
 
-Design decisions, remaining work, and the release checklist are tracked in
-[../ROADMAP.md](../ROADMAP.md).
+Project status, the pre-v1 maintainer to-dos, and the non-goals are in the
+[README](../README.md#status); the full design history lives in the git log.

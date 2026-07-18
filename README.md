@@ -148,8 +148,11 @@ pagination — is in **[docs/api.md](docs/api.md)**.
 
 gantry reads `--config <file>` (a root flag, so it precedes the subcommand),
 defaulting to `./gantry.yaml` then `./gantry.yml`, and falling back to built-in
-defaults when none exists. `gantry config` prints the effective configuration with
-defaults applied. Example deployments: [gantry.nomad.hcl](gantry.nomad.hcl) (Nomad)
+defaults when none exists. Unknown keys are **rejected**, so a typo in a
+security-sensitive block fails loudly instead of silently disabling a control.
+`gantry config` prints the effective configuration with defaults applied and
+secrets (`serve.auth.tokens`, store passwords) redacted. Example deployments:
+[gantry.nomad.hcl](gantry.nomad.hcl) (Nomad)
 and [gantry.hday.yaml](gantry.hday.yaml) (a lab config); [docker-compose.yaml](docker-compose.yaml)
 is a smoke test.
 
@@ -194,13 +197,44 @@ scripts/gen-proto.sh    # regenerate the gRPC contract: protoc-gen-orm-service e
 
 ## Status
 
-Feature-complete and tested — `go build`, `go vet`, and `go test -race ./...` all
-pass, with the live docker/containerd integration tests exercised against real
-daemons (they self-skip when no daemon is present). The store/transfer model,
-caller-chosen `as` names, per-store retention/GC, signature verification, the
-resource-oriented gRPC contract, and OTLP/audit-log observability are all
-implemented; each is covered in [docs/](docs/).
+Feature-complete for v1 and tested — `go build`, `go vet`, and `go test -race
+./...` all pass, with the live docker/containerd integration tests exercised
+against real daemons (they self-skip when no daemon is present). The
+store/transfer model, caller-chosen `as` names, per-store retention/GC, signature
+verification, the resource-oriented gRPC contract, and OTLP/audit-log
+observability are all implemented; each is covered under [docs/](docs/).
 
-Remaining work and the v1-release checklist are tracked in [ROADMAP.md](ROADMAP.md),
-which consolidates the former design docs (their full rationale remains in git
-history).
+A few things are left to the maintainer before tagging v1, none of them baked
+into the code as blockers:
+
+- **License** — to be added by the maintainer; until then no license file ships.
+- **Release tagging / versioning** — the maintainer cuts version tags; CI already
+  publishes the `edge` image on every push to `main`.
+- **No compatibility guarantees yet** — pre-v1, the on-disk bbolt formats (the
+  retention index and the audit log) and the proto contract may change without a
+  migration path. A future incompatible API would ship under a new proto package
+  rather than mutating the current one.
+
+## Not planned
+
+Proposals weighed and intentionally left out, recorded so they are not
+re-litigated:
+
+- **`GET /metrics` (Prometheus scrape)** — metrics push over OTLP instead; a
+  scrape endpoint would duplicate an OTel→collector pipeline that already exists.
+- **Declarative store reconcile** (a desired-image-set endpoint) — the inventory
+  plus ordinary jobs/removes let a client diff for itself; putting desired state
+  on the server muddies ownership.
+- **Job-completion webhooks** — the `Watch` stream covers it; outbound callbacks
+  from the edge only add reachability failure modes.
+- **A token-management API** — the static-token allowlist (plus mTLS at a proxy)
+  is the trust model; minting tokens over the API doesn't fit it.
+- **A retry `force` flag that bypasses dedup** — it would put two writers on one
+  destination tag; cancel-then-retry is the supported path.
+- **A persistent job store** — job history is already durable in the audit log
+  (`EventService`); `JobService.Get`/`List` are the live registry by design and
+  gantry does not auto-resume interrupted jobs (`Retry` re-submits). See
+  [docs/api.md](docs/api.md).
+
+The full design history — the rationale behind each decision here and the former
+consolidated plan / GC / API / digest-`as` design docs — lives in the git log.
