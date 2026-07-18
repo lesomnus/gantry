@@ -36,18 +36,18 @@ The three services from
 [`.devcontainer/docker-compose.yaml`](../.devcontainer/docker-compose.yaml):
 
 ```
-┌─────────────────────────────────────┐        ┌─────────────────────────────────────┐
-│ dev (uid 1000)                      │        │ docker  (image: docker:dind)        │
-│  - runs gantry / go test            │        │  - dockerd  (tcp://0.0.0.0:2375)    │
-│  - DOCKER_HOST=tcp://docker:2375 ───┼──────▶ │  [manual e2e] registry:2 → :5000    │
-│  - CONTAINERD_ADDRESS=              │        │  127.0.0.1:5000 (dind loopback)     │
-│      /run/containerd/…sock  ◀━━┐    │        └─────────────────────────────────────┘
-│  - CONTAINERD_NAMESPACE=gantry │    │        ┌─────────────────────────────────────┐
-│  127.0.0.1:5000 ─(local fwd)───┼────┼──────▶ │ containerd  (image: docker:dind,    │
-│                          shared│    │        │   command: containerd)              │
-│                          volume└────┼━━━━━━━━┥  - dedicated containerd             │
-└─────────────────────────────────────┘        │      /run/containerd/…sock          │
-                                                └─────────────────────────────────────┘
+┌───────────────────────────────────────┐         ┌─────────────────────────────────────┐
+│ dev (uid 1000)                        │         │ docker  (image: docker:dind)        │
+│  - runs gantry / go test              │         │  - dockerd  (tcp://0.0.0.0:2375)    │
+│  - DOCKER_HOST=tcp://docker:2375 ─────┼──────▶ │  [manual e2e] registry:2 → :5000   │
+│  - CONTAINERD_ADDRESS=                │         │  127.0.0.1:5000 (dind loopback)     │
+│      /run/containerd/…sock  ◀━━┐    │         └─────────────────────────────────────┘
+│  - CONTAINERD_NAMESPACE=gantry   │    │         ┌─────────────────────────────────────┐
+│  127.0.0.1:5000 ─(local fwd)─────┼────┼──────▶ │ containerd  (image: docker:dind,    │
+│                          shared  │    │         │   command: containerd)              │
+│                          volume  └────┼━━━━━━━━━┥  - dedicated containerd             │
+└───────────────────────────────────────┘         │      /run/containerd/…sock         │
+                                                  └─────────────────────────────────────┘
 ```
 
 The `docker:dind` image already bundles a standalone `containerd` binary (plus
