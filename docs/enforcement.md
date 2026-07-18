@@ -14,7 +14,7 @@ the implementation as PRs land.
 | PR3b | Local OCI-layout verify source | ✅ landed |
 | PR4 | Caching verifier decorator | ✅ landed |
 | PR5 | down.Enforcer + docker methods | ✅ landed |
-| PR6 | Enforce manager | ⬜ pending |
+| PR6 | Enforce manager | ✅ landed |
 | PR7 | App wiring + refresh sweeper + docker E2E | ⬜ pending |
 
 Deviations from the original plan are noted inline in each PR section as
@@ -298,40 +298,45 @@ container → `ListRunning` sees it → `ResolveImage` yields a digest →
 `WatchStarts` observes the start → `RemoveContainer(force)` removes it (and is
 idempotent on an already-gone container).
 
-### PR6 — Enforce manager
+### PR6 — Enforce manager — ✅ landed
 New package `internal/enforce`. `manager.go`: `Manager` holds `[]unit`, the
-`*verify.Cache`, the caching `verify.Service` (for on-miss live verify — which
-also consults the local layout via PR3b), the `on_unavailable` policy, the
-self-identity guard, `now`, and a **`sync.WaitGroup`**. `StartWatchers(ctx)`
-launches one **joined** goroutine per store mirroring `retention unit.watch`
-(`manager.go:431-479`): cold-reconcile via `ListRunning` on connect,
-`WatchStarts`, fixed-2s backoff + re-seed on stream end. The WaitGroup lets
-`Stop()` **join before shutdown** so kills cease promptly on ctx-cancel (unlike
-retention's fire-and-forget). Optional periodic reconcile tick (like retention
-heartbeat `manager.go:360-385`) re-lists running containers so a soft-refresh
-flip (trusted→untrusted) is acted on.
-`decision.go`: self-guard → `ResolveImage` → pick content digest → verdict in
-precedence (cache → local layout → live verify) → allow / kill+remove /
-`applyOnUnavailable`. `selfguard.go`: identify gantry's OWN container so it is
-never killed — resolve gantry's container id at startup by **self-inspection,
-never image name**, and short-circuit any event whose container id matches.
-Identity resolution, in priority order:
-1. **Explicit** — `serve.enforce.self_container` (or a `GANTRY_SELF_ID` env the
-   deployment injects); `ContainerInspect` confirms it. Most robust, no heuristics.
-2. **Hostname → confirm** — `os.Hostname()` is the 12-char short id by default
-   under docker; `ContainerInspect(hostname)` confirms. Works on any cgroup
-   version, no mounts. Fails under `--hostname`/`--network=host` → fall back.
-3. **`/proc/self/cgroup`** — best-effort only. No mount needed (docker mounts
-   `/proc` in every container; `/proc/self` is the process reading itself), but on
-   **cgroup v2 + cgroupns=private** (docker's default on modern hosts, i.e. the
-   lab's v28+containerd runtime) the file is just `0::/` and carries no id. Useful
-   only on cgroup v1 / cgroupns=host.
+`*verify.Cache`, the caching `verify.Service` (on-miss live verify — which also
+consults the local layout via PR3b), an `ociByHost` index (RepoDigest host →
+source store), the `on_unavailable` policy, the `selfGuard`, `now`, and a
+**`sync.WaitGroup`**. `StartWatchers(ctx)` launches one **joined** goroutine per
+store mirroring `retention unit.watch`: cold-`reconcile` via `ListRunning` on
+connect, `WatchStarts`, fixed-2s backoff + re-reconcile on stream end. `Stop()`
+joins the WaitGroup so kills cease promptly on ctx-cancel (unlike retention's
+fire-and-forget). `decision.go` (`decide`): `ResolveImage` → `topLevelDigest`
+(from RepoDigests only — never the platform `ManifestDigest`) → verdict in
+precedence: (1) fresh cached verdict (trusted→allow, untrusted→kill), (2) live
+`verifier.Verify` against the source store matched by RepoDigest host
+(trusted→allow, `ErrUnsigned`/`ErrUntrusted`→kill), (3) `onUnavailable` (grace
+honors an expired-but-trusted verdict, else allow-and-log; kill=fail closed;
+allow). `quarantine` = `RemoveContainer(force)` then best-effort `Engine.Remove`
+of the image (a shared-image conflict is a benign skip). An inspect failure or a
+no-provenance image is never killed on its own (routes to the policy).
+`selfguard.go`: `selfGuard.isSelf` short-circuits any event for gantry's own
+container id; resolution priority:
+1. **Explicit** — `serve.enforce.self_container` or `GANTRY_SELF_ID` env.
+2. **Hostname** — `os.Hostname()` is the 12-char short id by default under
+   docker; used only when it *looks like* a container id (a custom `--hostname` is
+   ignored). Works on any cgroup version, no mounts. Matched by id prefix.
+3. **`/proc/self/cgroup`** — best-effort. No mount needed (docker mounts `/proc`
+   in every container; `/proc/self` is the process reading itself), but on
+   **cgroup v2 + cgroupns=private** (docker's default, the lab's v29+containerd
+   runtime) the file is just `0::/` and carries no id — so hostname carries it
+   there.
 
 This is a **safety interlock, not a security boundary** — gantry's own image
-should be signed and present in `local_layout`, so it passes verification anyway;
-the guard only covers the misconfig case. If identity cannot be resolved, log
-loudly and degrade conservatively (e.g. do not enforce on the store gantry runs
-on) rather than risk self-termination. There is no image-name matcher.
+should be signed and in `local_layout`, so it passes verification anyway; the
+guard only covers the misconfig case. When identity cannot be resolved the
+manager logs a warning and continues (gantry relies on its image being trusted).
+There is **no image-name matcher**.
+**(landed: self-guard matches by id prefix — no `ContainerInspect`-confirm step in
+v1; hostname is used only when it is hex-shaped. otel counters and the
+soft-refresh→re-quarantine tick are deferred to a follow-up; verdict flips are
+picked up by the reconnect reconcile and the next start event.)**
 
 ### PR7 — App wiring + sweeper
 In `app.go Build`: (1) change the verifier gate (`app.go:186`) from
