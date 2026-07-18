@@ -13,7 +13,7 @@ the implementation as PRs land.
 | PR3 | bbolt verdict cache | ✅ landed |
 | PR3b | Local OCI-layout verify source | ✅ landed |
 | PR4 | Caching verifier decorator | ✅ landed |
-| PR5 | down.Enforcer + docker methods | ⬜ pending |
+| PR5 | down.Enforcer + docker methods | ✅ landed |
 | PR6 | Enforce manager | ⬜ pending |
 | PR7 | App wiring + refresh sweeper + docker E2E | ⬜ pending |
 
@@ -269,26 +269,34 @@ path (PR6).
 itself — needed to honor `mode: off` and to reconstruct `Result.Mode` on a hit
 without a registry round-trip.)**
 
-### PR5 — down.Enforcer
-Add to `down.go` (next to the other capabilities): `StartEvent{ContainerID,
-Image string; At time.Time}`, `ContainerImage{ConfigImage, ImageID,
-ManifestDigest string; RepoDigests []string}`, and
-```go
-type Enforcer interface {
-    WatchStarts(ctx, sink func(StartEvent)) error
-    ListRunning(ctx) ([]StartEvent, error)
-    ResolveImage(ctx, containerID string) (ContainerImage, error)
-    RemoveContainer(ctx, containerID string, force bool) error
-}
-```
-Add `Caps.Enforce` + `_, enforce := e.(Enforcer)`. Implement on `*dockerEngine`:
-`WatchStarts` clones `WatchUsage` but reads `m.Actor.ID` (filter start+restart,
-drop unpause); `ListRunning` = `ContainerList(All:false)` keeping `c.ID`;
-`ResolveImage` = `ContainerInspect` (net-new client call) + `ImageInspect`
-`RepoDigests` fallback; `RemoveContainer` = `ContainerRemove{Force:true}`,
-`IsErrNotFound`→converged. Image removal reuses `Engine.Remove`
-(`docker.go:368-396`) **without image force** (a shared image → `IsConflict`,
-benign skip). containerd: unimplemented in v1 (documented follow-up).
+### PR5 — down.Enforcer — ✅ landed
+`down.go` gained `StartEvent{ContainerID, Image string; At time.Time}`,
+`ContainerImage{ConfigImage, ImageID, ManifestDigest string; RepoDigests
+[]string}`, the `Enforcer` interface (`WatchStarts`, `ListRunning`,
+`ResolveImage`, `RemoveContainer`), `Caps.Enforce`, and the
+`_, enforce := e.(Enforcer)` discovery. `*dockerEngine` (with
+`var _ Enforcer = (*dockerEngine)(nil)`): `WatchStarts` mirrors `WatchUsage` but
+reads `m.Actor.ID` (filter start+restart, drop unpause); `ListRunning` =
+`ContainerList(All:false)` keeping `c.ID`; `ResolveImage` = `ContainerInspect`
+(`.Image`, `.Config.Image`, `.ImageManifestDescriptor.Digest`) + `ImageInspect`
+`RepoDigests`; `RemoveContainer` = `ContainerRemove{Force:force}`,
+`IsErrNotFound`→converged. Image removal reuses `Engine.Remove` without image
+force. containerd: unimplemented in v1 (Reconciler-style docker-only precedent).
+
+**Empirically confirmed against docker 29.5 (containerd image store) — the
+digest-keying risk is real:** for `alpine:latest`, `RepoDigests` reported
+`alpine@sha256:28bd…` (the top-level digest a signature is over) while
+`ImageManifestDescriptor.Digest` reported `sha256:79ff…` (a *platform-specific*
+manifest, unsigned). PR6 **must** key the verdict on `RepoDigests`, with
+`ManifestDigest` only as a cross-check/last-resort — keying on the platform
+manifest would make every image look unsigned. PR7's E2E confirms the signed
+digest matches `RepoDigests` end-to-end.
+
+The Enforcer methods are covered by a live integration test
+(`docker_enforce_integration_test.go`, skips without a daemon): start a
+container → `ListRunning` sees it → `ResolveImage` yields a digest →
+`WatchStarts` observes the start → `RemoveContainer(force)` removes it (and is
+idempotent on an already-gone container).
 
 ### PR6 — Enforce manager
 New package `internal/enforce`. `manager.go`: `Manager` holds `[]unit`, the

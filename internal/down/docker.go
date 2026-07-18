@@ -395,6 +395,89 @@ func (e *dockerEngine) remove(ctx context.Context, ref string, rr *RemoveResult)
 	return nil
 }
 
+// --- Enforcer capability (runtime signature enforcement) ---
+
+var _ Enforcer = (*dockerEngine)(nil)
+
+// WatchStarts streams container start/restart events, carrying the container ID
+// (which WatchUsage's UsageSink drops). unpause is intentionally excluded: an
+// unpaused container was already checked when it started.
+func (e *dockerEngine) WatchStarts(ctx context.Context, sink func(StartEvent)) error {
+	f := filters.NewArgs()
+	f.Add("type", string(events.ContainerEventType))
+	f.Add("event", string(events.ActionStart))
+	f.Add("event", string(events.ActionRestart))
+	msgs, errc := e.cli.Events(ctx, events.ListOptions{Filters: f})
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errc:
+			return err
+		case m := <-msgs:
+			sink(StartEvent{
+				ContainerID: m.Actor.ID,
+				Image:       m.Actor.Attributes["image"],
+				At:          time.Unix(0, m.TimeNano),
+			})
+		}
+	}
+}
+
+// ListRunning returns the running containers with their IDs, for the cold
+// reconcile that covers starts missed during a watch disconnect.
+func (e *dockerEngine) ListRunning(ctx context.Context) ([]StartEvent, error) {
+	cs, err := e.cli.ContainerList(ctx, container.ListOptions{All: false}) // running only
+	if err != nil {
+		return nil, z.Err(err, "container list")
+	}
+	out := make([]StartEvent, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, StartEvent{ContainerID: c.ID, Image: c.Image})
+	}
+	return out, nil
+}
+
+// ResolveImage resolves a container's image to the identifiers a verdict is keyed
+// by: the top-level repo@digests (from ImageInspect — the preferred key) plus the
+// platform-specific manifest digest (from the container's ImageManifestDescriptor,
+// a cross-check). A vanished image is not an error — the caller treats a
+// digest-less result as unresolved.
+func (e *dockerEngine) ResolveImage(ctx context.Context, containerID string) (ContainerImage, error) {
+	ins, err := e.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return ContainerImage{}, z.Err(err, "container inspect")
+	}
+	ci := ContainerImage{ImageID: ins.Image}
+	if ins.Config != nil {
+		ci.ConfigImage = ins.Config.Image
+	}
+	if ins.ImageManifestDescriptor != nil {
+		ci.ManifestDigest = ins.ImageManifestDescriptor.Digest.String()
+	}
+	img, err := e.cli.ImageInspect(ctx, ins.Image)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return ci, nil // image gone out-of-band; return what we have
+		}
+		return ci, z.Err(err, "image inspect")
+	}
+	ci.RepoDigests = realRefs(img.RepoDigests)
+	return ci, nil
+}
+
+// RemoveContainer removes a container. force stops-and-removes a running one
+// (docker rm -f). A container already gone is success (converged).
+func (e *dockerEngine) RemoveContainer(ctx context.Context, containerID string, force bool) error {
+	if err := e.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: force}); err != nil {
+		if client.IsErrNotFound(err) {
+			return nil
+		}
+		return z.Err(err, "container remove")
+	}
+	return nil
+}
+
 // canonRef normalizes a reference to one canonical spelling, so gantry-side
 // refs ("index.docker.io/library/nginx@sha256:x") and the daemon's familiar
 // forms ("nginx@sha256:x") compare equal. An unparseable ref (e.g. a bare
