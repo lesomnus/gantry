@@ -142,17 +142,34 @@ func (c *Config) Evaluate() error {
 		c.Stores[name] = s
 	}
 
-	// Two stores must not share a retention index file: bbolt takes an exclusive
-	// lock, so the second Open would fail with an opaque timeout at startup.
-	retentionPaths := map[string]string{}
+	// bbolt files take an exclusive lock, so two components sharing one path make
+	// the second Open fail with an opaque timeout at startup. Every bbolt file —
+	// per-store retention indexes, the audit log, and the verify cache — must have
+	// its own path.
+	bboltPaths := map[string]string{}
+	claimBbolt := func(path, owner string) error {
+		if path == "" {
+			return nil
+		}
+		if other, dup := bboltPaths[path]; dup {
+			return z.Err(nil, "%s and %s share bbolt path %q; each needs its own file", other, owner, path)
+		}
+		bboltPaths[path] = owner
+		return nil
+	}
 	for name, s := range c.Stores {
 		if !s.Retention.Enabled() {
 			continue
 		}
-		if other, dup := retentionPaths[s.Retention.Path]; dup {
-			return z.Err(nil, "stores %q and %q share retention.path %q; each store needs its own index file", other, name, s.Retention.Path)
+		if err := claimBbolt(s.Retention.Path, "stores."+name+".retention.path"); err != nil {
+			return err
 		}
-		retentionPaths[s.Retention.Path] = name
+	}
+	if err := claimBbolt(c.Serve.Events.Path, "serve.events.path"); err != nil {
+		return err
+	}
+	if err := claimBbolt(c.Serve.Verify.Cache.Path, "serve.verify.cache.path"); err != nil {
+		return err
 	}
 
 	// Two docker stores must not reap untagged images on the same daemon: each
@@ -185,7 +202,10 @@ func (c *Config) Evaluate() error {
 	if !c.Serve.Verify.Mode.Valid() {
 		return z.Err(nil, "serve.verify.mode %q is not one of off/verify-if-present/require", c.Serve.Verify.Mode)
 	}
-	if c.VerifyEnabled() {
+	// Build/validate the verifier config when verification runs anywhere OR
+	// enforcement is on: enforcement needs the verifier + trust store even when
+	// the admission verify mode is off.
+	if c.NeedVerifier() {
 		z.FallbackP(&c.Serve.Verify.Provider, "notation")
 		z.FallbackP(&c.Serve.Verify.Level, "strict")
 		z.FallbackP((*time.Duration)(&c.Serve.Verify.Timeout), 15*time.Second)
@@ -201,6 +221,72 @@ func (c *Config) Evaluate() error {
 			return z.Err(nil, "serve.verify.level %q is not one of strict/permissive", c.Serve.Verify.Level)
 		}
 	}
+	if err := c.evaluateVerifyCache(); err != nil {
+		return err
+	}
+	if err := c.evaluateEnforce(); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+// evaluateVerifyCache applies defaults and validates the verdict cache config.
+func (c *Config) evaluateVerifyCache() error {
+	vc := &c.Serve.Verify.Cache
+	if !vc.Enabled() {
+		return nil
+	}
+	z.FallbackP((*time.Duration)(&vc.TTL), 28*24*time.Hour)    // 4w
+	z.FallbackP((*time.Duration)(&vc.Refresh), 14*24*time.Hour) // 2w
+	if vc.TTL <= 0 || vc.Refresh <= 0 {
+		return z.Err(nil, "serve.verify.cache: ttl and refresh must be positive")
+	}
+	if vc.Refresh > vc.TTL {
+		return z.Err(nil, "serve.verify.cache.refresh (%s) must be <= ttl (%s)", time.Duration(vc.Refresh), time.Duration(vc.TTL))
+	}
+	return nil
+}
+
+// evaluateEnforce applies defaults and validates runtime enforcement config.
+func (c *Config) evaluateEnforce() error {
+	e := &c.Serve.Enforce
+	// Validate the mode always so a typo (e.g. "quarintine") fails loudly rather
+	// than silently disabling a security control.
+	switch e.Mode {
+	case "", "off", "quarantine":
+	default:
+		return z.Err(nil, "serve.enforce.mode %q is not one of off/quarantine", e.Mode)
+	}
+	if !e.Enabled() {
+		return nil
+	}
+	z.FallbackP(&e.OnUnavailable, "grace")
+	switch e.OnUnavailable {
+	case "grace", "kill", "allow":
+	default:
+		return z.Err(nil, "serve.enforce.on_unavailable %q is not one of grace/kill/allow", e.OnUnavailable)
+	}
+	if len(e.Stores) == 0 {
+		return z.Err(nil, "serve.enforce.stores must name at least one engine store when mode is quarantine")
+	}
+	for _, n := range e.Stores {
+		s, ok := c.Stores[n]
+		if !ok {
+			return z.Err(nil, "serve.enforce.stores: unknown store %q", n)
+		}
+		if !s.IsEngine() {
+			return z.Err(nil, "serve.enforce.stores: store %q is kind %q; enforcement needs an engine store (docker/containerd)", n, s.Kind)
+		}
+	}
+	// Offline verdicts are the whole point of enforcement surviving a registry
+	// outage; grace has nothing to honor without a cache.
+	if !c.Serve.Verify.Cache.Enabled() {
+		return z.Err(nil, "serve.enforce requires serve.verify.cache.path (offline verdicts)")
+	}
+	// A trust store is required to verify anything at all.
+	if c.Serve.Verify.TrustStore == "" {
+		return z.Err(nil, "serve.enforce requires serve.verify.trust_store (the Root CA(s) to trust)")
+	}
 	return nil
 }

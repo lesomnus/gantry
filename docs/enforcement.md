@@ -9,7 +9,7 @@ the implementation as PRs land.
 | PR | Workstream | Status |
 |----|-----------|--------|
 | PR1 | Duration `w`/`d` parsing | ✅ landed |
-| PR2 | Config structs + Evaluate | ⬜ pending |
+| PR2 | Config structs + Evaluate | ✅ landed |
 | PR3 | bbolt verdict cache | ⬜ pending |
 | PR3b | Local OCI-layout verify source | ⬜ pending |
 | PR4 | Caching verifier decorator | ⬜ pending |
@@ -188,21 +188,27 @@ untouched so standard-input errors are unchanged; an unrecognized token defers t
 Covers compounds (`2w3d12h`), decimals (`1.5w`), sign (`-2w`).
 **(landed: added `EnforceConfig`/cache fields will use `4w`/`2w` defaults in PR2.)**
 
-### PR2 — Config
-`EnforceConfig{Mode, Stores []string, OnUnavailable string}` + `Enabled()`, added
-to `ServeConfig` (`serve.go:23`). **No `Exempt` field** — a name allowlist is not
-a security boundary (spoofable by `docker tag`); bootstrap/offline images use
-`verify.local_layout` and gantry self-protects by identity.
-`VerifyConfig` gains `LocalLayout string` (`yaml:"local_layout"`) + a
-`LocalLayoutEnabled()` helper. `VerifyCacheConfig{Path, TTL, Refresh Duration}` +
-`Enabled()`, nested in `VerifyConfig` (`serve.go:79`). Defaults/validation in
-`Evaluate` after the verify block (`config.go:203`), mirroring `evaluateRetention`
-(validate `OnUnavailable` ∈ {grace,kill,allow}, each `Stores` entry exists +
-`IsEngine()`; if `local_layout` set, the dir must exist and read as an OCI layout,
-lazily or at startup). Add `NeedVerifier() = VerifyEnabled() ||
-Serve.Enforce.Enabled()` because `VerifyEnabled()` (`serve.go:89-99`) only
-considers admission modes, but enforce needs the verifier + trust store even when
-admission `mode: off`.
+### PR2 — Config — ✅ landed
+`EnforceConfig{Mode, Stores []string, OnUnavailable, SelfContainer string}` +
+`Enabled()` (== `mode == "quarantine"`), added to `ServeConfig`. **No `Exempt`
+field** — a name allowlist is not a security boundary (spoofable by `docker tag`);
+bootstrap/offline images use `verify.local_layout` and gantry self-protects by
+identity (`self_container`). `VerifyConfig` gains `LocalLayout string`
+(`yaml:"local_layout"`) + `LocalLayoutEnabled()`, and `Cache VerifyCacheConfig`.
+`VerifyCacheConfig{Path, TTL, Refresh Duration}` + `Enabled()`. `Config`
+`NeedVerifier() = VerifyEnabled() || Serve.Enforce.Enabled()` gates the verifier
+defaults/build (the `if c.VerifyEnabled()` block in `Evaluate` now keys off
+`NeedVerifier`), so enforcement gets the verifier + trust store even when
+admission `mode: off`. Validation is in `evaluateVerifyCache` (defaults 4w/2w;
+`refresh <= ttl`; positive) and `evaluateEnforce` (mode ∈ off/quarantine always
+validated; when on: `on_unavailable` ∈ grace/kill/allow default grace; ≥1 store,
+each declared + `IsEngine()`; requires `verify.cache.path` and
+`verify.trust_store`). The retention path-collision guard was generalized to a
+**`claimBbolt` helper** covering every bbolt file (per-store retention indexes,
+`serve.events.path`, `serve.verify.cache.path`) — error text is now `"… share
+bbolt path …"`.
+**(landed: `local_layout` existence/OCI-layout validation deferred to PR3b, where
+the layout is actually opened; keeping fail-fast at the layer that reads it.)**
 
 ### PR3 — Cache
 `type Verdict{Trusted bool; VerifiedAt,RefreshAfter,ExpiresAt time.Time;

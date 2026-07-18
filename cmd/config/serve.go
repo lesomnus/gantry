@@ -17,11 +17,38 @@ type ServeConfig struct {
 	// AllowUnknownStores permits a job to reference a registry by a bare host
 	// that is not a declared store. Engine stores (docker/containerd) must always
 	// be declared. Default false: only declared stores may be used.
-	AllowUnknownStores bool         `yaml:"allow_unknown_stores"`
-	Health             HealthConfig `yaml:"health"`
-	Verify             VerifyConfig `yaml:"verify"`
-	Events             EventsConfig `yaml:"events"`
+	AllowUnknownStores bool          `yaml:"allow_unknown_stores"`
+	Health             HealthConfig  `yaml:"health"`
+	Verify             VerifyConfig  `yaml:"verify"`
+	Events             EventsConfig  `yaml:"events"`
+	Enforce            EnforceConfig `yaml:"enforce"`
 }
+
+// EnforceConfig governs runtime signature enforcement ("quarantine"): gantry
+// watches engine container-start events and force-removes a container — and its
+// image — whose image is not signed by a trusted Root CA. This is post-hoc
+// quarantine (the container is already running when the start event fires), not
+// admission control. Disabled unless Mode is "quarantine". Enforcement reuses the
+// same trust store as serve.verify and consults, in order: the verdict cache,
+// the local signature layout (serve.verify.local_layout), then a live registry.
+type EnforceConfig struct {
+	// Mode is the enforcement level: off (default) or quarantine.
+	Mode string `yaml:"mode"`
+	// Stores names the engine stores (kind docker/containerd) to police. Empty
+	// with mode quarantine is a config error.
+	Stores []string `yaml:"stores"`
+	// OnUnavailable is the fallback when no verdict can be obtained live and no
+	// usable cached verdict exists: grace (default — honor an expired-but-known
+	// trusted verdict, else allow-and-log), kill (fail closed), or allow.
+	OnUnavailable string `yaml:"on_unavailable"`
+	// SelfContainer is gantry's own container id or name so enforcement never
+	// removes the container gantry runs in. Empty falls back to the hostname and
+	// then /proc/self/cgroup. May also be provided via the GANTRY_SELF_ID env.
+	SelfContainer string `yaml:"self_container"`
+}
+
+// Enabled reports whether runtime enforcement is turned on.
+func (c EnforceConfig) Enabled() bool { return c.Mode == "quarantine" }
 
 // EventsConfig governs the audit log (EventService). An empty Path disables it.
 // It is independent of retention so the log works even when GC is off.
@@ -76,7 +103,41 @@ type VerifyConfig struct {
 	// Timeout bounds a single verification (registry resolve + signature fetch +
 	// verify). Default 15s.
 	Timeout Duration `yaml:"timeout"`
+	// LocalLayout is a directory holding a local OCI image layout of pre-signed
+	// bootstrap images (subject manifests + signature referrers). It is consulted
+	// as an offline signature source before the live registry and verified
+	// against the same trust store, so it is unspoofable by naming. Empty
+	// disables it. See LocalLayoutEnabled.
+	LocalLayout string `yaml:"local_layout"`
+	// Cache configures the durable verdict cache (see VerifyCacheConfig). An empty
+	// cache.path disables it. Required when serve.enforce is on.
+	Cache VerifyCacheConfig `yaml:"cache"`
 }
+
+// LocalLayoutEnabled reports whether an offline local-layout signature source is
+// configured.
+func (c VerifyConfig) LocalLayoutEnabled() bool { return c.LocalLayout != "" }
+
+// VerifyCacheConfig configures the durable verification-result cache: a bbolt
+// store keyed by content digest so a verified image's trust decision survives a
+// registry outage. It is shared by admission verification (which writes verdicts
+// as a side effect) and runtime enforcement (which reads them offline). An empty
+// Path disables it.
+type VerifyCacheConfig struct {
+	// Path is the bbolt file. Empty disables the cache. Must be distinct from
+	// every retention.path and the events.path (bbolt takes an exclusive lock).
+	Path string `yaml:"path"`
+	// TTL is the hard max-age of a cached verdict: past it the verdict is unusable
+	// and the image must be re-verified. Default 4w.
+	TTL Duration `yaml:"ttl"`
+	// Refresh is the soft revalidation age: past it a background sweeper
+	// re-verifies the entry against its source, but the verdict stays usable until
+	// TTL. Must be <= TTL. Default 2w.
+	Refresh Duration `yaml:"refresh"`
+}
+
+// Enabled reports whether the verdict cache is configured.
+func (c VerifyCacheConfig) Enabled() bool { return c.Path != "" }
 
 // Enabled reports whether the global default turns verification on.
 func (c VerifyConfig) Enabled() bool {
@@ -96,6 +157,14 @@ func (c Config) VerifyEnabled() bool {
 		}
 	}
 	return false
+}
+
+// NeedVerifier reports whether the signature verifier must be built at all:
+// admission verification is enabled anywhere, or runtime enforcement is on.
+// Enforcement needs the verifier (and its trust store) to classify images even
+// when the admission verify mode is off, so it cannot key off VerifyEnabled.
+func (c Config) NeedVerifier() bool {
+	return c.VerifyEnabled() || c.Serve.Enforce.Enabled()
 }
 
 // EffectiveMode resolves the enforcement mode for a source store: a non-empty
