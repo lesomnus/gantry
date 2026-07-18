@@ -64,8 +64,15 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   `internal/down` integration tests, and `build`'s `edge` push is re-gated on both
   plus `test`. Remaining: `zot` in the matrix (needs a config file), proxy mode
   (3), more L2 feature tests (as-names/digest against a real daemon).
-- **L3 black-box — ☐ not started.**
-- **L3-infra (Ansible) + nightly CI — ☐ not started.**
+- **L3 black-box — ✅ done.** `internal/e2e/l3_test.go` (`e2e`) builds the shipped
+  binary (`CGO_ENABLED=0 go build`), runs `gantry serve` as a subprocess against a
+  real registry, drives it over real gRPC, and asserts graceful shutdown on
+  SIGTERM plus audit-log persistence across a process restart (while the live job
+  registry is empty). Passes against the devcontainer daemon; CI job `e2e-blackbox`
+  added and `build` re-gated on it.
+- **L3-infra (Ansible) + nightly CI — ☐ not started.** The remaining author-heavy
+  tier (multi-host, real DNS/TLS, non-loopback, Harbor/cloud). Needs the [open
+  decisions](#open-decisions) and real infrastructure to land/verify.
 
 ## Feature × layer coverage
 

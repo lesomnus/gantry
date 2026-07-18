@@ -93,8 +93,23 @@ jobs:
           CONTAINERD_NAMESPACE: gantry
         run: go test -race ./internal/down/...
 
+  # L3 black-box: build and run the shipped `gantry serve` binary against a real
+  # registry, asserting graceful shutdown and audit-log persistence across a
+  # process restart.
+  e2e-blackbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Pre-pull the registry image
+        run: docker pull registry:2
+      - name: E2E (black-box binary)
+        run: go test -tags e2e -run TestL3 ./internal/e2e/...
+
   build:
-    needs: [test, e2e-docker, e2e-containerd]
+    needs: [test, e2e-docker, e2e-containerd, e2e-blackbox]
     runs-on: ubuntu-latest
     env:
       TAG: edge

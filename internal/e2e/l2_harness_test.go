@@ -63,17 +63,7 @@ type l2harness struct {
 
 func newL2Harness(t *testing.T) *l2harness {
 	t.Helper()
-	cli, err := client.NewClientWithOpts(client.WithHost(dockerAddr()), client.WithAPIVersionNegotiation())
-	if err != nil {
-		t.Skipf("no docker client: %v", err)
-	}
-	pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer pcancel()
-	if _, err := cli.Ping(pctx); err != nil {
-		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
-	}
-	t.Cleanup(func() { cli.Close() })
-
+	cli := dockerClientOrSkip(t)
 	daemonHost, needFwd := remoteDaemon()
 
 	h := &l2harness{t: t, cli: cli}
@@ -116,43 +106,64 @@ func newL2Harness(t *testing.T) *l2harness {
 	return h
 }
 
-// startRegistry runs a registry:2 container, publishes it on the daemon host's
-// 127.0.0.1:<ephemeral>, and (in the separate-netns case) forwards the same port
-// from the test process. Returns 127.0.0.1:<port>.
 func (h *l2harness) startRegistry(daemonHost string, needFwd bool) string {
-	h.t.Helper()
+	return startRegistryContainer(h.t, h.cli, daemonHost, needFwd)
+}
+
+// startRegistryContainer runs a registry container (GANTRY_E2E_REGISTRY, default
+// registry:2), publishes it on the daemon host's 127.0.0.1:<ephemeral>, and (in
+// the separate-netns case) forwards the same port from the test process. Returns
+// 127.0.0.1:<port>.
+func startRegistryContainer(t *testing.T, cli *client.Client, daemonHost string, needFwd bool) string {
+	t.Helper()
 	ctx := context.Background()
 	regImage := os.Getenv("GANTRY_E2E_REGISTRY")
 	if regImage == "" {
 		regImage = "registry:2"
 	}
-	resp, err := h.cli.ContainerCreate(ctx,
+	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{Image: regImage, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
 		&container.HostConfig{
 			AutoRemove:   true,
 			PortBindings: nat.PortMap{"5000/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "0"}}},
 		}, nil, nil, "")
 	if err != nil {
-		h.t.Skipf("create registry %q (is the image present?): %v", regImage, err)
+		t.Skipf("create registry %q (is the image present?): %v", regImage, err)
 	}
-	if err := h.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		h.t.Fatalf("start registry: %v", err)
+	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		t.Fatalf("start registry: %v", err)
 	}
-	h.t.Cleanup(func() {
-		_ = h.cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
+	t.Cleanup(func() {
+		_ = cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
 	})
-	info, err := h.cli.ContainerInspect(ctx, resp.ID)
+	info, err := cli.ContainerInspect(ctx, resp.ID)
 	if err != nil {
-		h.t.Fatalf("inspect registry: %v", err)
+		t.Fatalf("inspect registry: %v", err)
 	}
 	port := info.NetworkSettings.Ports["5000/tcp"][0].HostPort
 	addr := "127.0.0.1:" + port
 	if needFwd {
-		startForward(h.t, port, daemonHost+":"+port)
+		startForward(t, port, daemonHost+":"+port)
 	}
-	// Wait for /v2/ to answer through whatever path gantry will use.
-	waitRegistry(h.t, addr)
+	waitRegistry(t, addr)
 	return addr
+}
+
+// dockerClientOrSkip returns a docker client, skipping the test when no daemon
+// is reachable.
+func dockerClientOrSkip(t *testing.T) *client.Client {
+	t.Helper()
+	cli, err := client.NewClientWithOpts(client.WithHost(dockerAddr()), client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Skipf("no docker client: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := cli.Ping(ctx); err != nil {
+		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
+	}
+	t.Cleanup(func() { cli.Close() })
+	return cli
 }
 
 // startForward proxies 127.0.0.1:<port> (test process) to target (the daemon
