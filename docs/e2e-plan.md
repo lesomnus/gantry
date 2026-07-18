@@ -58,8 +58,12 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   client) + the real docker daemon, self-skipping when no daemon is reachable.
   Handles the loopback-insecure model and the devcontainer's separate-netns case
   with a same-address forwarder. `TestL2CopyAndEnginePull` (feature 2, engine
-  pull) passes against a real docker daemon. Remaining: the registry-impl matrix
-  (`zot`/`registry:3`), proxy mode (3), containerd sub-tier, and the CI jobs.
+  pull) passes against a real docker daemon. **CI wired**: `e2e-docker` runs the
+  L2 tests across a `registry:2`/`registry:3` matrix (image via
+  `GANTRY_E2E_REGISTRY`), `e2e-containerd` provisions containerd and runs the
+  `internal/down` integration tests, and `build`'s `edge` push is re-gated on both
+  plus `test`. Remaining: `zot` in the matrix (needs a config file), proxy mode
+  (3), more L2 feature tests (as-names/digest against a real daemon).
 - **L3 black-box — ☐ not started.**
 - **L3-infra (Ansible) + nightly CI — ☐ not started.**
 

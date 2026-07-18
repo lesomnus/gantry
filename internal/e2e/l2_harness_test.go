@@ -122,14 +122,18 @@ func newL2Harness(t *testing.T) *l2harness {
 func (h *l2harness) startRegistry(daemonHost string, needFwd bool) string {
 	h.t.Helper()
 	ctx := context.Background()
+	regImage := os.Getenv("GANTRY_E2E_REGISTRY")
+	if regImage == "" {
+		regImage = "registry:2"
+	}
 	resp, err := h.cli.ContainerCreate(ctx,
-		&container.Config{Image: "registry:2", ExposedPorts: nat.PortSet{"5000/tcp": {}}},
+		&container.Config{Image: regImage, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
 		&container.HostConfig{
 			AutoRemove:   true,
 			PortBindings: nat.PortMap{"5000/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "0"}}},
 		}, nil, nil, "")
 	if err != nil {
-		h.t.Skipf("create registry (is the registry:2 image present?): %v", err)
+		h.t.Skipf("create registry %q (is the image present?): %v", regImage, err)
 	}
 	if err := h.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		h.t.Fatalf("start registry: %v", err)

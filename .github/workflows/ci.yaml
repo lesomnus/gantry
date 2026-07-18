@@ -30,6 +30,10 @@ on:
 permissions:
   packages: write
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -38,13 +42,59 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # The docker daemon on the runner drives the docker integration tests;
-      # containerd-only tests self-skip when no containerd socket is present.
+      # Runs unit tests plus the hermetic L1 E2E suite (internal/e2e, no build
+      # tag). The docker daemon on the runner drives the docker integration
+      # tests; containerd-only tests self-skip when no containerd socket is
+      # present. No external infra.
       - name: Test (race)
         run: go test -race ./...
 
+  # L2 real-daemon E2E: the runner's host docker daemon (shared netns → the
+  # published loopback registry needs no daemon.json) across registry
+  # implementations. Payload images are synthesized in-process (no Docker Hub
+  # egress); only the registry daemon image is pulled.
+  e2e-docker:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        registry:
+          - "registry:2" # OCI referrers tag-fallback path
+          - "registry:3" # native referrers API (Distribution v3)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Pre-pull the registry image
+        run: docker pull ${{ matrix.registry }}
+      - name: E2E (real daemon, ${{ matrix.registry }})
+        env:
+          GANTRY_E2E_REGISTRY: ${{ matrix.registry }}
+        run: go test -tags e2e -race -run TestL2 ./internal/e2e/...
+
+  # containerd image-store features (digest `as`, anchored pull) that otherwise
+  # only run in the devcontainer: provision containerd on the runner and let the
+  # existing internal/down containerd integration tests stop self-skipping.
+  e2e-containerd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Start containerd
+        run: |
+          sudo systemctl start containerd || (sudo apt-get update && sudo apt-get install -y containerd && sudo systemctl start containerd)
+          sudo chmod 666 /run/containerd/containerd.sock
+      - name: E2E (containerd)
+        env:
+          CONTAINERD_ADDRESS: /run/containerd/containerd.sock
+          CONTAINERD_NAMESPACE: gantry
+        run: go test -race ./internal/down/...
+
   build:
-    needs: test
+    needs: [test, e2e-docker, e2e-containerd]
     runs-on: ubuntu-latest
     env:
       TAG: edge
