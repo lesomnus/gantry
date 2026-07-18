@@ -10,7 +10,7 @@ the implementation as PRs land.
 |----|-----------|--------|
 | PR1 | Duration `w`/`d` parsing | ✅ landed |
 | PR2 | Config structs + Evaluate | ✅ landed |
-| PR3 | bbolt verdict cache | ⬜ pending |
+| PR3 | bbolt verdict cache | ✅ landed |
 | PR3b | Local OCI-layout verify source | ⬜ pending |
 | PR4 | Caching verifier decorator | ⬜ pending |
 | PR5 | down.Enforcer + docker methods | ⬜ pending |
@@ -210,16 +210,20 @@ bbolt path …"`.
 **(landed: `local_layout` existence/OCI-layout validation deferred to PR3b, where
 the layout is actually opened; keeping fail-fast at the layer that reads it.)**
 
-### PR3 — Cache
-`type Verdict{Trusted bool; VerifiedAt,RefreshAfter,ExpiresAt time.Time;
-SourceRef string; Mode config.VerifyMode}` (json tags, mirror
-`retention/record.go:10-19`). `type Cache{db *bolt.DB; ttl,refresh; now}`.
-`Open` copies `retention.Open` (`index.go:39-57`): `bolt.Open(path,0o600,
-{Timeout:3s})`, one flat bucket `verdict` (a content digest is globally unique —
-no per-engine nesting). `Get`/`Put` (upsert read-modify-write, `index.go:65-86`),
-`ForEach` for the sweeper, `Count` via `b.Stats().KeyN`, `Close`. `Put` computes
-`RefreshAfter = VerifiedAt+refresh`, `ExpiresAt = VerifiedAt+ttl`. `WithNow` for
-deterministic tests.
+### PR3 — Cache — ✅ landed
+`internal/verify/cache.go`: `Verdict{Digest, Trusted, Mode, SourceRef,
+VerifiedAt, RefreshAfter, ExpiresAt}` (json tags) with `Expired(now)` /
+`StaleForRefresh(now)` helpers. `Cache{db, ttl, refresh, now}` opened with
+`OpenCache(path, ttl, refresh, ...CacheOption)` mirroring `retention.Open`
+(`bolt.Open(path,0o600,{Timeout:3s})`, one flat bucket `verdict`). `Get` returns
+`(Verdict, found, err)` and does **not** filter by expiry — callers apply policy
+(grace honors an expired trusted verdict). `Put(digest, trusted, mode,
+sourceRef)` stamps `VerifiedAt=now`, `RefreshAfter=now+refresh`,
+`ExpiresAt=now+ttl` (overwrite renews — the refresh path). `ForEach`, `Count`
+(`Stats().KeyN`), `Delete` (missing ok), `Close`, plus `TTL()`/`Refresh()`
+accessors for the sweeper. `WithNow` for deterministic tests.
+**(landed: named the constructor `OpenCache` — `verify.Open` would be ambiguous
+in this package.)**
 
 ### PR3b — Local OCI-layout verify source
 notation-go supports this natively, **no new dependency**:
