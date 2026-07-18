@@ -60,8 +60,15 @@ type Log struct {
 	now func() time.Time
 }
 
+// Option configures a Log.
+type Option func(*Log)
+
+// WithNow overrides the clock used to stamp event timestamps, so tests can make
+// the audit log deterministic.
+func WithNow(now func() time.Time) Option { return func(l *Log) { l.now = now } }
+
 // Open creates or opens the log at path, keeping at most capEntries records.
-func Open(path string, capEntries int) (*Log, error) {
+func Open(path string, capEntries int, opts ...Option) (*Log, error) {
 	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
 		return nil, err
@@ -76,7 +83,11 @@ func Open(path string, capEntries int) (*Log, error) {
 	if capEntries <= 0 {
 		capEntries = 10000
 	}
-	return &Log{db: db, cap: capEntries, now: time.Now}, nil
+	l := &Log{db: db, cap: capEntries, now: time.Now}
+	for _, o := range opts {
+		o(l)
+	}
+	return l, nil
 }
 
 func (l *Log) Close() error { return l.db.Close() }

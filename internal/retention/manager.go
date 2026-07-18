@@ -88,8 +88,19 @@ type unit struct {
 	watcher WatcherStatus
 }
 
-func NewManager(stores []Store) *Manager {
+// Option configures a Manager.
+type Option func(*Manager)
+
+// WithNow overrides the clock the GC decision path (grace window, age/idle
+// comparisons, on-demand GcPlan/GcApply) reads, so time-dependent GC is
+// deterministic in tests without wall-clock sleeps.
+func WithNow(now func() time.Time) Option { return func(m *Manager) { m.now = now } }
+
+func NewManager(stores []Store, opts ...Option) *Manager {
 	m := &Manager{units: make(map[string]*unit, len(stores)), now: time.Now}
+	for _, o := range opts {
+		o(m)
+	}
 	for _, s := range stores {
 		recon, _ := s.Engine.(down.Reconciler)
 		m.units[s.Name] = &unit{

@@ -34,6 +34,20 @@ L1→L2→L3 **share one harness** — they differ only in what backs the source
 (in-memory vs real registry) and the engine (fake vs real daemon vs the real
 binary). L3-infra provisions the world Go tests then target.
 
+## Implementation status
+
+Tracks what has landed against the [sequencing](#sequencing) below.
+
+- **L0 refactors — ✅ done.** `internal/app.Build(ctx, *config.Config, …app.Option)`
+  extracts the whole server-construction path out of `cmd/serve.go`'s command
+  closure, so `serve` and the test harness build identical production wiring;
+  `app.WithNow` threads a clock. `retention.WithNow` / `event.WithNow` add the
+  clock seam. Behavior-preserving (all existing tests green).
+- **L1 hermetic suite — ⏳ in progress.**
+- **L2 real daemon + registry matrix — ☐ not started.**
+- **L3 black-box — ☐ not started.**
+- **L3-infra (Ansible) + nightly CI — ☐ not started.**
+
 ## Feature × layer coverage
 
 The 13 features from [e2e-testing.md](e2e-testing.md), mapped to where each is
