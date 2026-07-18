@@ -43,7 +43,14 @@ Tracks what has landed against the [sequencing](#sequencing) below.
   closure, so `serve` and the test harness build identical production wiring;
   `app.WithNow` threads a clock. `retention.WithNow` / `event.WithNow` add the
   clock seam. Behavior-preserving (all existing tests green).
-- **L1 hermetic suite — ⏳ in progress.**
+- **L1 hermetic suite — ⏳ in progress.** `internal/e2e` harness landed
+  (`app.Build` over bufconn + ggcr in-memory registries + fake engine + injected
+  clock, driven by `pb.NewClient`), with `app.WithStoreSet` added to inject the
+  fake daemon. Feature tests passing: registry→registry copy + incremental blob
+  skip (1), engine pull (2, fake), Plan (7), Idempotency-Key (10), audit log (12),
+  health/readiness (13). Remaining L1: platform selection (4), `as` names (5),
+  digest pinning (6), signature verification (8), retention/GC via injected clock
+  (9), cancel/retry (11).
 - **L2 real daemon + registry matrix — ☐ not started.**
 - **L3 black-box — ☐ not started.**
 - **L3-infra (Ansible) + nightly CI — ☐ not started.**

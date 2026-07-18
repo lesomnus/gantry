@@ -1,0 +1,230 @@
+// Package e2e is the hermetic end-to-end suite (docs/e2e-plan.md, L1): it stands
+// up the real gantry gRPC server in-process (internal/app.Build over bufconn),
+// backs the source and cache stores with in-memory OCI registries, uses a fake
+// engine daemon, and injects a clock so time-dependent GC is deterministic — all
+// in plain `go test`, no external infrastructure.
+package e2e
+
+import (
+	"context"
+	"net"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/app"
+	"github.com/lesomnus/gantry/internal/store"
+	"github.com/lesomnus/gantry/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+)
+
+// clock is a manually-advanced fake clock for deterministic time-based GC.
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func newClock() *clock { return &clock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)} }
+
+func (c *clock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *clock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+type harness struct {
+	t      *testing.T
+	client pb.Client
+	conn   *grpc.ClientConn
+
+	engine *fakeEngine
+	clock  *clock
+
+	remote, cache string // registry host:port
+	cacheUploads  *int32
+}
+
+type harnessOpt func(*harnessCfg)
+
+type harnessCfg struct {
+	cacheMode string // "copy" (default) | "proxy"
+	rules     []config.RetentionRule
+	rewrite   []config.RewriteRule
+	verify    *config.VerifyConfig
+	storeVerify map[string]*config.StoreVerify
+}
+
+func withCacheMode(m string) harnessOpt { return func(c *harnessCfg) { c.cacheMode = m } }
+func withRules(r ...config.RetentionRule) harnessOpt {
+	return func(c *harnessCfg) { c.rules = r }
+}
+func withRewrite(r ...config.RewriteRule) harnessOpt { return func(c *harnessCfg) { c.rewrite = r } }
+func withVerify(v config.VerifyConfig) harnessOpt    { return func(c *harnessCfg) { c.verify = &v } }
+func withStoreVerify(store string, v config.StoreVerify) harnessOpt {
+	return func(c *harnessCfg) {
+		if c.storeVerify == nil {
+			c.storeVerify = map[string]*config.StoreVerify{}
+		}
+		c.storeVerify[store] = &v
+	}
+}
+
+// newHarness brings up remote + cache in-memory registries, a fake engine, and a
+// real gantry server over bufconn, and returns a connected client. Everything is
+// torn down via t.Cleanup.
+func newHarness(t *testing.T, opts ...harnessOpt) *harness {
+	t.Helper()
+	var hc harnessCfg
+	hc.cacheMode = "copy"
+	for _, o := range opts {
+		o(&hc)
+	}
+
+	dir := t.TempDir()
+	remoteHost, closeRemote := newRegistry(t)
+	cacheHost, uploads, closeCache := newCountingRegistry(t)
+
+	cacheStore := config.StoreConfig{Kind: "oci", Host: cacheHost, Insecure: true, Mode: hc.cacheMode, Rewrite: hc.rewrite}
+	remoteStore := config.StoreConfig{Kind: "oci", Host: remoteHost, Insecure: true}
+	if hc.storeVerify != nil {
+		if v := hc.storeVerify["remote"]; v != nil {
+			remoteStore.Verify = v
+		}
+		if v := hc.storeVerify["cache"]; v != nil {
+			cacheStore.Verify = v
+		}
+	}
+	rules := hc.rules
+	if rules == nil {
+		rules = []config.RetentionRule{{Repo: "**"}}
+	}
+	edgeStore := config.StoreConfig{
+		Kind:    "docker",
+		Address: "unix:///nowhere",
+		Retention: &config.StoreRetention{
+			Path:  filepath.Join(dir, "edge.db"),
+			Rules: rules,
+		},
+	}
+
+	cfg := &config.Config{
+		Serve: config.ServeConfig{
+			Addr:   "127.0.0.1:0",
+			Events: config.EventsConfig{Path: filepath.Join(dir, "events.db"), Cap: 1000},
+		},
+		Stores: map[string]config.StoreConfig{
+			"remote": remoteStore,
+			"cache":  cacheStore,
+			"edge":   edgeStore,
+		},
+	}
+	if hc.verify != nil {
+		cfg.Serve.Verify = *hc.verify
+	}
+	if err := cfg.Evaluate(); err != nil {
+		t.Fatalf("evaluate config: %v", err)
+	}
+
+	// Build the store set with only the registries dialed; inject the fake engine.
+	set, err := store.NewSet(map[string]config.StoreConfig{
+		"remote": cfg.Stores["remote"],
+		"cache":  cfg.Stores["cache"],
+	}, false)
+	if err != nil {
+		t.Fatalf("store set: %v", err)
+	}
+	eng := newFakeEngine("edge")
+	edgeCfg := cfg.Stores["edge"]
+	edgeCfg.Name = "edge"
+	set.PutEngine(edgeCfg, eng)
+
+	clk := newClock()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	srv, err := app.Build(ctx, cfg, app.WithStoreSet(set), app.WithNow(clk.Now))
+	if err != nil {
+		cancel()
+		t.Fatalf("build server: %v", err)
+	}
+
+	lis := bufconn.Listen(1 << 20)
+	go func() { _ = srv.GRPC.Serve(lis) }()
+
+	conn, err := grpc.NewClient(
+		"passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		cancel()
+		t.Fatalf("dial: %v", err)
+	}
+
+	t.Cleanup(func() {
+		conn.Close()
+		srv.GRPC.Stop()
+		cancel()
+		srv.Stop()
+		_ = lis.Close()
+		closeCache()
+		closeRemote()
+	})
+
+	return &harness{
+		t:            t,
+		client:       pb.NewClient(conn),
+		conn:         conn,
+		engine:       eng,
+		clock:        clk,
+		remote:       remoteHost,
+		cache:        cacheHost,
+		cacheUploads: uploads,
+	}
+}
+
+// --- job helpers ---
+
+// add submits a job and returns its id. trailers, if non-nil, receives the
+// response trailer metadata.
+func (h *harness) add(req *pb.JobAddRequest, callOpts ...grpc.CallOption) *pb.Job {
+	h.t.Helper()
+	job, err := h.client.Job().Add(context.Background(), req, callOpts...)
+	if err != nil {
+		h.t.Fatalf("job add: %v", err)
+	}
+	return job
+}
+
+func (h *harness) get(id string) *pb.Job {
+	h.t.Helper()
+	job, err := h.client.Job().Get(context.Background(), pb.JobGetById(id))
+	if err != nil {
+		h.t.Fatalf("job get %s: %v", id, err)
+	}
+	return job
+}
+
+// waitDone polls until the job reaches a terminal state or the deadline, then
+// returns the final snapshot.
+func (h *harness) waitDone(id string) *pb.Job {
+	h.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		job := h.get(id)
+		switch job.GetState() {
+		case pb.JobState_JOB_STATE_DONE, pb.JobState_JOB_STATE_FAILED, pb.JobState_JOB_STATE_CANCELED:
+			return job
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("job %s did not terminate; last state %v", id, job.GetState())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

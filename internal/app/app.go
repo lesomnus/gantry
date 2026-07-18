@@ -45,7 +45,8 @@ func (s *Server) Stop() {
 }
 
 type options struct {
-	now func() time.Time
+	now    func() time.Time
+	stores *store.Set
 }
 
 // Option configures Build.
@@ -55,6 +56,12 @@ type Option func(*options)
 // time-dependent behavior (GC grace/age, event timestamps) is deterministic in
 // tests. Production leaves it unset (time.Now).
 func WithNow(now func() time.Time) Option { return func(o *options) { o.now = now } }
+
+// WithStoreSet supplies a pre-built store set instead of dialing one from
+// config, so tests can inject fake engine daemons via Set.PutEngine. Build still
+// reads c.Stores for the per-store retention configuration and owns closing the
+// set. Production leaves it unset (Build calls store.NewSet).
+func WithStoreSet(s *store.Set) Option { return func(o *options) { o.stores = s } }
 
 // Build assembles the whole server from c and starts its background workers on
 // ctx. It does not listen or serve — the caller supplies the listener (a real
@@ -83,9 +90,12 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 		}
 	}()
 
-	stores, err := store.NewSet(c.Stores, c.Serve.AllowUnknownStores)
-	if err != nil {
-		return nil, z.Err(err, "build stores")
+	stores := o.stores
+	if stores == nil {
+		stores, err = store.NewSet(c.Stores, c.Serve.AllowUnknownStores)
+		if err != nil {
+			return nil, z.Err(err, "build stores")
+		}
 	}
 	closers = append(closers, stores.Close)
 
