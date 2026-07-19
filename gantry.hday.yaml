@@ -55,9 +55,7 @@ stores:
     host: "192.168.10.33:5000"
     insecure: true          # plain-HTTP registry on :5000
     mode: copy              # push blobs into the cache
-    # source ref -> ref in this registry (first match wins).
-    rewrite:
-      - { "**": "{{.CacheHost}}/{{.Repo}}" }
+    # In-store ref = source repo/tag under this store's host.
 
   # Docker daemons gantry triggers to pull the cached image.
   # Load a cached image onto one of these by adding a job whose `target` names

@@ -405,7 +405,7 @@ func (w *Copier) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		}
 		ex.cacheRef, err = d.dstRef(ex.srcRef)
 		if err != nil {
-			return nil, nil, nil, z.Err(err, "rewrite into %q", d.Name())
+			return nil, nil, nil, z.Err(err, "destination ref for %q", d.Name())
 		}
 		// A digest-named cache ref keeps the source digest, so a copy-mode
 		// commit must preserve the source manifest/index byte-for-byte — a

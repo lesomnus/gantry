@@ -151,8 +151,8 @@ from `./dist`).
 go test -race ./...
 ```
 
-- **Unit tests** need no daemon: config round-trip, `rewrite` rules, `Store`
-  concurrency, the copy/proxy `Source` against an in-memory registry, the
+- **Unit tests** need no daemon: config round-trip, cache-side ref derivation,
+  `Store` concurrency, the copy/proxy `Source` against an in-memory registry, the
   `Copier`, the engine destination against a fake target, the retention policy
   evaluator, and so on.
 - **Live integration tests** self-skip when their daemon is absent, so the suite

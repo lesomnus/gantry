@@ -79,7 +79,7 @@ func TestJobAddErrors(t *testing.T) {
 	_, err = e.client.Job().Add(ctx, req)
 	wantCode(t, err, codes.FailedPrecondition)
 
-	e.copier.err = errors.New("no rewrite rule matched")
+	e.copier.err = errors.New(`unknown store "x"`)
 	_, err = e.client.Job().Add(ctx, req)
 	wantCode(t, err, codes.InvalidArgument)
 }

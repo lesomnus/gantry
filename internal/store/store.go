@@ -75,11 +75,10 @@ func (s *Set) Registry(ref string) (config.StoreConfig, error) {
 		return config.StoreConfig{}, fmt.Errorf("unknown store %q (enable allow_unknown_stores to use a bare host)", ref)
 	}
 	return config.StoreConfig{
-		Name:    ref,
-		Kind:    "oci",
-		Host:    ref,
-		Mode:    "copy",
-		Rewrite: config.DefaultRewrite(),
+		Name: ref,
+		Kind: "oci",
+		Host: ref,
+		Mode: "copy",
 	}, nil
 }
 

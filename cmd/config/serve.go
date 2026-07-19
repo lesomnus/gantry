@@ -355,7 +355,8 @@ type StoreConfig struct {
 	Kind string `yaml:"kind"` // oci | docker | containerd
 
 	// --- oci registry ---
-	// Host is the registry host, exposed to rewrite templates as {{.CacheHost}}.
+	// Host is the registry host. When this store is a copy destination, the
+	// in-store reference is the source repo/tag under this host.
 	Host string `yaml:"host"`
 	// Insecure allows plain-HTTP or self-signed registries.
 	Insecure bool   `yaml:"insecure"`
@@ -364,9 +365,6 @@ type StoreConfig struct {
 	// Mode selects how gantry fills this registry when it is a copy destination:
 	// "copy" (default) pushes blobs, "proxy" reads through to self-fill.
 	Mode string `yaml:"mode"`
-	// Rewrite maps a source reference to its reference in this registry (used when
-	// this store is a copy destination). Ordered; first match wins.
-	Rewrite []RewriteRule `yaml:"rewrite"`
 	// DownstreamHost overrides the host engine stores are told to pull from when
 	// pulling out of this registry (e.g. push to an IP, have daemons pull a name).
 	DownstreamHost string `yaml:"downstream_host"`

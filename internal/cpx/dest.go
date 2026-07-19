@@ -26,7 +26,8 @@ type pusher interface {
 	// newSource builds the copy pipeline from the given source store into this
 	// destination (copy or proxy mode).
 	newSource(source config.StoreConfig) (Source, error)
-	// dstRef derives the in-store reference for src via the store's rewrite rules.
+	// dstRef derives the in-store reference for src: this store's own host with
+	// the source repository path and tag/digest preserved.
 	dstRef(src name.Reference) (name.Reference, error)
 }
 
@@ -83,7 +84,14 @@ func (d *registryDest) newSource(source config.StoreConfig) (Source, error) {
 }
 
 func (d *registryDest) dstRef(src name.Reference) (name.Reference, error) {
-	return Rewrite(d.cfg.Rewrite, d.cfg.Host, src, d.cfg.Insecure)
+	out, err := rewriteHost(src, d.cfg.Host)
+	if err != nil {
+		return nil, err
+	}
+	if d.cfg.Insecure {
+		return name.ParseReference(out, name.Insecure)
+	}
+	return name.ParseReference(out)
 }
 
 // engineDest is a docker/containerd daemon destination: it pulls the image

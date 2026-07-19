@@ -56,14 +56,8 @@ stores:
     # registry by a different (trusted) name. e.g. push to an IP but have
     # daemons pull a name. Per-store pull_host wins.
     # downstream_host: "cache.cr.com"
-    # source ref -> ref in this registry (ordered, first match wins; quote both).
-    # Template variables: .Ref .Full .CacheHost .Registry .Repo .Tag .Digest
-    # .Identifier. If the rendered ref omits a tag/digest, the source identifier is
-    # appended (so "{{.CacheHost}}/{{.Repo}}" keeps the original ":7"). ggcr
-    # normalizes Docker Hub to index.docker.io, so .Registry is "index.docker.io"
-    # (match with "index.docker.io/**" or just "**").
-    rewrite:
-      - { "**": "{{.CacheHost}}/{{.Repo}}" }
+    # The in-store reference is the source repo/tag under this store's host:
+    # docker.io/library/redis:7 -> <host>/library/redis:7.
 
   # Engine stores (daemons triggered to pull). Optional pull_host overrides the
   # cache host in the reference this engine pulls.

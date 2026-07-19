@@ -111,15 +111,6 @@ func (c *Config) Evaluate() error {
 			if s.Mode != "copy" && s.Mode != "proxy" {
 				return z.Err(nil, "store %q: unknown mode %q", name, s.Mode)
 			}
-			if len(s.Rewrite) == 0 {
-				s.Rewrite = DefaultRewrite()
-			} else {
-				for j := range s.Rewrite {
-					if err := s.Rewrite[j].compile(); err != nil {
-						return z.Err(err, "store %q rewrite[%d]", name, j)
-					}
-				}
-			}
 		case "docker", "containerd":
 			// engine store; address is validated when the store is dialed
 		default:

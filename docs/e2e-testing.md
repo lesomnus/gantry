@@ -70,7 +70,7 @@ Which tier automates each feature (with the test that proves it):
 | 4 | Platform selection | L1 `TestPlatformSelection` |
 | 5 | Caller-chosen `as` names | L1 `TestAsNames` |
 | 6 | Digest pin + verbatim commit | L1 `TestDigestPin` |
-| 7 | Rewrite / `downstream_host` | L1 `TestPlanResolves`; real DNS in L3-infra |
+| 7 | Host substitution (`downstream_host`/`pull_host`) | L1 `TestPlanResolves`; real DNS in L3-infra |
 | 8 | Signature verification (notation, in-process) | L1 `TestVerification` |
 | 9 | Retention / GC (injected clock) | L1 `TestRetentionGC` |
 | 10 | Dedup & `Idempotency-Key` | L1 `TestIdempotencyKey` |
@@ -284,7 +284,7 @@ Store references are always `{"name": "<store>"}`. A `Get`/`Watch` shows the job
 | 4 | Platform selection | [stores.md](stores.md) |
 | 5 | Caller-chosen `as` names | [stores.md](stores.md) |
 | 6 | Digest-pinned job (verbatim, local resolve) | [stores.md](stores.md) |
-| 7 | Rewrite & downstream-host override | [stores.md](stores.md) |
+| 7 | Host substitution (`downstream_host`/`pull_host`) | [stores.md](stores.md) |
 | 8 | Signature verification | [verification.md](verification.md) |
 | 9 | Retention / GC | [retention.md](retention.md) |
 | 10 | Dedup & `Idempotency-Key` | [api.md](api.md) |
@@ -392,21 +392,21 @@ containerd-store `edge` with a matching digest `as` name resolves locally
 (`docker image inspect` hits; a `force_pull=false` pull moves nothing). Verify the
 verbatim guarantee: a digest-ref copy refuses `platforms` narrowing.
 
-## 7. Rewrite & downstream-host override
+## 7. Host substitution (`downstream_host` / `pull_host`)
 
-**What** — the cache-side ref comes from the target store's `rewrite` rules, and
-`downstream_host`/`pull_host` decouple the address gantry pushes to from the one the
-engine pulls from.
+**What** — the cache-side ref is the source repo/tag under the target store's
+own host; `downstream_host`/`pull_host` decouple the address gantry pushes to
+from the one the engine is told to pull from.
 
-**Run** — add `rewrite`/`downstream_host` to the `cache` store, then:
+**Run** — add `downstream_host` to the `cache` store, then:
 ```sh
 plan '{"ref":"library/busybox:1.36","source":{"name":"remote"},"target":{"name":"cache"}}'
 ```
 
-**Expect** — `Plan`'s `target_ref` shows the rewritten cache ref; with
-`downstream_host` set, an engine job's `transfers[].ref` (from `Get`) shows the
-substituted pull host while gantry still pushes to the store's real `host`. See
-[stores.md](stores.md#rewrite-rules).
+**Expect** — `Plan`'s `target_ref` shows the cache ref (the source repo/tag under
+the cache `host`); with `downstream_host` set, an engine job's `transfers[].ref`
+(from `Get`) shows the substituted pull host while gantry still pushes to the
+store's real `host`. See [stores.md](stores.md#downstream_host-and-pull_host).
 
 ## 8. Signature verification
 
