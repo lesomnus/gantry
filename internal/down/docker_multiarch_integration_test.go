@@ -9,6 +9,7 @@ import (
 
 	"github.com/docker/docker/api/types/image"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/dockertest"
 )
 
 // TestDockerAnchoredPlatformPullRecordsIndexDigest proves the daemon-side half of
@@ -30,6 +31,7 @@ func TestDockerAnchoredPlatformPullRecordsIndexDigest(t *testing.T) {
 	if err := eng.Ready(ctx); err != nil {
 		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
 	}
+	dockertest.Lock(t)
 
 	// alpine is a multi-arch image; a plain pull records its index digest. A pull
 	// failure here means no registry access — skip, like a missing daemon.

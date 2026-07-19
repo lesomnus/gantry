@@ -8,6 +8,7 @@ import (
 
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/dockertest"
 )
 
 func containerdAddr() string {
@@ -30,6 +31,7 @@ func TestContainerdEngineLive(t *testing.T) {
 	if _, err := os.Stat(containerdAddr()); err != nil {
 		t.Skipf("no containerd socket at %s", containerdAddr())
 	}
+	dockertest.Lock(t)
 	eng, err := newContainerdEngine(config.StoreConfig{
 		Name:      "live",
 		Kind:      "containerd",
@@ -60,6 +62,7 @@ func TestContainerdAnchoredPull(t *testing.T) {
 	if _, err := os.Stat(containerdAddr()); err != nil {
 		t.Skipf("no containerd socket at %s", containerdAddr())
 	}
+	dockertest.Lock(t)
 	ns := containerdNamespace()
 	eng, err := newContainerdEngine(config.StoreConfig{
 		Name: "live", Kind: "containerd", Address: containerdAddr(), Namespace: ns,
@@ -118,6 +121,7 @@ func TestContainerdDigestAs(t *testing.T) {
 	if _, err := os.Stat(containerdAddr()); err != nil {
 		t.Skipf("no containerd socket at %s", containerdAddr())
 	}
+	dockertest.Lock(t)
 	ns := containerdNamespace()
 	eng, err := newContainerdEngine(config.StoreConfig{
 		Name: "live", Kind: "containerd", Address: containerdAddr(), Namespace: ns,

@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/dockertest"
 )
 
 // TestDockerRetentionLive exercises the retention surface (InUse, SeedUsage,
@@ -28,6 +29,7 @@ func TestDockerRetentionLive(t *testing.T) {
 	if err := eng.Ready(ctx); err != nil {
 		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
 	}
+	dockertest.Lock(t)
 
 	const ref = "busybox:latest"
 	if _, err := eng.Pull(ctx, ref, "", "", nil, nil, nopSink{}); err != nil {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/docker/docker/api/types/image"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/dockertest"
 )
 
 func dockerAddr() string {
@@ -32,6 +33,7 @@ func TestDockerEngineLive(t *testing.T) {
 	if err := eng.Ready(ctx); err != nil {
 		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
 	}
+	dockertest.Lock(t)
 
 	// A distinct image from the containerd test (docker 29 shares the containerd
 	// content store), removed first so the pull actually downloads.

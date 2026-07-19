@@ -8,6 +8,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/dockertest"
 )
 
 // TestDockerEnforcerLive exercises the Enforcer capability (WatchStarts,
@@ -25,6 +26,7 @@ func TestDockerEnforcerLive(t *testing.T) {
 	if err := eng.Ready(ctx); err != nil {
 		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
 	}
+	dockertest.Lock(t)
 
 	const ref = "alpine:latest"
 	if _, err := eng.Pull(ctx, ref, "", "", nil, nil, nopSink{}); err != nil {

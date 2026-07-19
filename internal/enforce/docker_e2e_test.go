@@ -13,6 +13,7 @@ import (
 	dockerclient "github.com/docker/docker/client"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/dockertest"
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/verify"
 )
@@ -56,6 +57,7 @@ func TestEnforceDockerE2E(t *testing.T) {
 	if _, err := cli.Ping(ctx); err != nil {
 		t.Skipf("no reachable docker daemon: %v", err)
 	}
+	dockertest.Lock(t)
 
 	engIface, err := down.New(config.StoreConfig{Name: "dockerd", Kind: "docker", Address: dockerAddr()})
 	if err != nil {
