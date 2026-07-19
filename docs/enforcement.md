@@ -75,6 +75,33 @@ verdict. Under the default `grace` (or `allow`) it does not kill; under
 `on_unavailable: kill` it fails closed. Likewise an inspect failure on the
 container never triggers a kill (it is treated as unresolved).
 
+### Multi-arch images and platform narrowing
+
+A notation signature on a multi-arch image is over the **top-level index**, not
+the per-platform child manifests — so verification proceeds against the **index
+digest**, and an individual platform manifest carries no signature of its own.
+
+This is exactly the digest a container reports even when only one platform was
+pulled. A gantry `local → docker` copy that narrows to a single platform
+(`platforms: ["linux/amd64"]`) still **anchors the daemon's pull to the index
+digest** (`repo@sha256:<index>`, selecting the platform), so the daemon records
+the **index** digest as the container's `RepoDigest`. Enforcement reads that index
+digest and verifies it against the index-level signature in the source registry —
+so a platform-narrowed container is covered by the multi-arch signature without
+any per-platform signing.
+
+Two consequences worth knowing:
+
+- **The signature must be on the index** (the normal `notation sign <index-tag>`).
+  If an image is signed only on a specific platform manifest, the daemon's
+  `RepoDigest` (the index digest) will not match that per-platform signature and
+  the image is treated as unsigned.
+- **The signature reaches the cache only via a full copy.** `copy_referrers`
+  carries the index signature `remote → local` verbatim, all platforms — it
+  refuses platform narrowing (see [verification.md](verification.md)). Narrow the
+  platform on the `local → docker` hop, not on `remote → local`, or `local` will
+  hold a re-indexed image with no signature.
+
 ## The verdict cache
 
 `serve.verify.cache` is a durable [bbolt](https://github.com/etcd-io/bbolt) store

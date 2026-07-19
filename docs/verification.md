@@ -185,6 +185,22 @@ Behavior and constraints:
   must be empty). This is the same verbatim-commit rule a digest-ref registry
   copy follows.
 
+### Multi-arch images
+
+A notation signature on a multi-arch image is a referrer of the **top-level
+index**, not of the per-platform child manifests — so the verified/pinned digest
+is the **index digest**, and `copy_referrers` copies that one index signature
+(all child manifests are committed verbatim so the index digest is preserved).
+There is no per-platform signature to copy.
+
+This is why `copy_referrers` refuses platform narrowing: a platform-filtered copy
+would rebuild a smaller index with a **different digest**, to which the original
+signature no longer applies. Copy the full multi-arch image (with its signature)
+into the cache, then narrow the platform on the downstream engine pull — the
+engine still anchors to the index digest, so the index signature covers it. See
+[enforcement.md](enforcement.md#multi-arch-images-and-platform-narrowing) for how
+a platform-narrowed running container is verified against the index signature.
+
 ## Proxy-destination restriction
 
 A job that **pins a verified digest refuses a `proxy`-mode destination**. A
