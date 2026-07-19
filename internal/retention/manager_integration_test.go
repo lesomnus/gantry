@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/dockertest"
 	"github.com/lesomnus/gantry/internal/down"
 )
 
@@ -38,6 +39,7 @@ func TestManagerWatchPlanLive(t *testing.T) {
 	if err := eng.Ready(ctx); err != nil {
 		t.Skipf("no reachable docker daemon (%s): %v", dockerAddr(), err)
 	}
+	dockertest.Lock(t)
 
 	// A raw client for fixture setup (run a container, make a throwaway tag).
 	cli, err := client.NewClientWithOpts(client.WithHost(dockerAddr()), client.WithAPIVersionNegotiation())

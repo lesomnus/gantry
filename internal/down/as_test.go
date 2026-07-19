@@ -188,8 +188,9 @@ func TestDockerPullDigestAs(t *testing.T) {
 }
 
 // The classic graph store cannot represent a digest reference over local
-// content: digest names degrade to a warning, tags still apply, and the
-// pull-created record survives when nothing else names the content.
+// content, so a digest `as` name is rejected BEFORE the pull rather than
+// silently dropped: a caller that asked for a digest name would otherwise have
+// a node quietly pull through to the origin later.
 func TestDockerPullDigestAsClassic(t *testing.T) {
 	raw := []byte(`{"schemaVersion":2}`)
 	sum := sha256.Sum256(raw)
@@ -198,27 +199,26 @@ func TestDockerPullDigestAsClassic(t *testing.T) {
 
 	d := &tagDaemon{classic: true}
 	eng := tagEngine(t, d)
-	recorded, err := eng.Pull(context.Background(), "cache.local/team/app@"+dg, dg, "", []string{"cr.example.com/team/app@" + dg}, anchor, nopSink{})
-	if err != nil {
-		t.Fatal(err)
+	_, err := eng.Pull(context.Background(), "cache.local/team/app@"+dg, dg, "", []string{"cr.example.com/team/app@" + dg}, anchor, nopSink{})
+	if err == nil {
+		t.Fatal("expected a fail-fast error on the classic graph store, got nil")
+	}
+	if !strings.Contains(err.Error(), "classic") {
+		t.Errorf("error should name the classic image store as the reason, got: %v", err)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if len(d.loads) != 0 {
-		t.Errorf("classic store must not load, got %d", len(d.loads))
+	// Fail-fast means no side effects: nothing pulled, loaded, or tagged.
+	if d.pullTag != "" {
+		t.Errorf("must fail before pulling; pullTag = %q", d.pullTag)
 	}
-	if len(d.deleted) != 0 {
-		t.Errorf("no name was applied; the pull record must survive, deleted %v", d.deleted)
-	}
-	// The skipped name must NOT be reported: retention would otherwise track a
-	// reference the daemon never held and reap the image as unowned-untagged.
-	if len(recorded) != 1 || recorded[0] != "cache.local/team/app@"+dg {
-		t.Errorf("recorded = %v, want the pull reference only", recorded)
+	if len(d.loads) != 0 || len(d.tags) != 0 {
+		t.Errorf("no side effects expected on rejection; loads=%d tags=%d", len(d.loads), len(d.tags))
 	}
 }
 
 // The recorded names reported by Pull mirror what the daemon holds: the tags
-// tagged, the digest names loaded — never a skipped name.
+// tagged, the digest names loaded — never a name the daemon does not hold.
 func TestDockerPullRecorded(t *testing.T) {
 	raw := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}`)
 	sum := sha256.Sum256(raw)

@@ -55,9 +55,9 @@ type harnessCfg struct {
 	cacheMode   string // "copy" (default) | "proxy"
 	tlsCache    bool   // serve the cache over HTTPS with a private CA (ca_cert)
 	rules       []config.RetentionRule
-	rewrite     []config.RewriteRule
 	verify      *config.VerifyConfig
 	storeVerify map[string]*config.StoreVerify
+	enforce     bool // enable serve.enforce (quarantine) + a verdict cache on `edge`
 }
 
 func withCacheMode(m string) harnessOpt { return func(c *harnessCfg) { c.cacheMode = m } }
@@ -65,8 +65,11 @@ func withTLSCache() harnessOpt          { return func(c *harnessCfg) { c.tlsCach
 func withRules(r ...config.RetentionRule) harnessOpt {
 	return func(c *harnessCfg) { c.rules = r }
 }
-func withRewrite(r ...config.RewriteRule) harnessOpt { return func(c *harnessCfg) { c.rewrite = r } }
-func withVerify(v config.VerifyConfig) harnessOpt    { return func(c *harnessCfg) { c.verify = &v } }
+func withVerify(v config.VerifyConfig) harnessOpt { return func(c *harnessCfg) { c.verify = &v } }
+
+// withEnforce turns on runtime enforcement (quarantine) for the `edge` engine
+// store and a verdict cache. Combine with withVerify to supply the trust store.
+func withEnforce() harnessOpt { return func(c *harnessCfg) { c.enforce = true } }
 func withStoreVerify(store string, v config.StoreVerify) harnessOpt {
 	return func(c *harnessCfg) {
 		if c.storeVerify == nil {
@@ -93,7 +96,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	var cacheHost string
 	var uploads *int32
 	var closeCache func()
-	cacheStore := config.StoreConfig{Kind: "oci", Mode: hc.cacheMode, Rewrite: hc.rewrite}
+	cacheStore := config.StoreConfig{Kind: "oci", Mode: hc.cacheMode}
 	if hc.tlsCache {
 		var caFile string
 		cacheHost, caFile, closeCache = newTLSRegistry(t)
@@ -140,6 +143,12 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 	if hc.verify != nil {
 		cfg.Serve.Verify = *hc.verify
+	}
+	if hc.enforce {
+		cfg.Serve.Verify.Cache = config.VerifyCacheConfig{Path: filepath.Join(dir, "verify.db")}
+		cfg.Serve.Enforce = config.EnforceConfig{
+			Mode: "quarantine", Stores: []string{"edge"}, OnUnavailable: "grace",
+		}
 	}
 	if err := cfg.Evaluate(); err != nil {
 		t.Fatalf("evaluate config: %v", err)

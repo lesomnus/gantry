@@ -140,7 +140,7 @@ that job ends and a new submit re-resolves the tag.
 ## `Plan` — dry-run admission
 
 `JobService.Plan` runs the full admission path for a would-be job — store
-binding, target `rewrite`, platform selection, `as` normalization, signature
+binding, platform selection, `as` normalization, signature
 verification, and coalescing — **without submitting**. `JobPlanResponse`
 returns the resolved plan:
 

@@ -56,14 +56,8 @@ stores:
     # registry by a different (trusted) name. e.g. push to an IP but have
     # daemons pull a name. Per-store pull_host wins.
     # downstream_host: "cache.cr.com"
-    # source ref -> ref in this registry (ordered, first match wins; quote both).
-    # Template variables: .Ref .Full .CacheHost .Registry .Repo .Tag .Digest
-    # .Identifier. If the rendered ref omits a tag/digest, the source identifier is
-    # appended (so "{{.CacheHost}}/{{.Repo}}" keeps the original ":7"). ggcr
-    # normalizes Docker Hub to index.docker.io, so .Registry is "index.docker.io"
-    # (match with "index.docker.io/**" or just "**").
-    rewrite:
-      - { "**": "{{.CacheHost}}/{{.Repo}}" }
+    # The in-store reference is the source repo/tag under this store's host:
+    # docker.io/library/redis:7 -> <host>/library/redis:7.
 
   # Engine stores (daemons triggered to pull). Optional pull_host overrides the
   # cache host in the reference this engine pulls.
@@ -211,6 +205,20 @@ serve:
   #   # Per-verification deadline (registry resolve + signature fetch + verify).
   #   timeout: "15s"
   #   # provider: "notation"   # only notation is supported
+  #   # Offline signature source for bootstrap / air-gapped images: an on-disk OCI
+  #   # image layout (subject manifests + signature referrers; image layers are NOT
+  #   # needed to verify). Consulted BEFORE the live registry and verified against
+  #   # the SAME trust_store, so it is unspoofable by naming and works when the
+  #   # registry is unreachable. A trusted hit returns offline; a miss falls through.
+  #   # local_layout: "/etc/gantry/verify/layout"
+  #   # Durable verdict cache (bbolt): admission verification writes a per-content-
+  #   # digest verdict here, and runtime enforcement (serve.enforce, below) reads it
+  #   # offline — so a decision survives a registry outage. REQUIRED when
+  #   # serve.enforce is enabled. Path must differ from every retention/events file.
+  #   # cache:
+  #   #   path: "/var/lib/gantry/verify-cache.db"
+  #   #   ttl: "4w"       # hard max-age of a verdict (default 4w; w/d units accepted)
+  #   #   refresh: "2w"   # soft revalidation age: re-verified past this, usable until ttl
 
   # Per-source-registry override: set verify.mode on an oci store to require
   # signing on some registries and relax it on others (in the top-level
@@ -218,3 +226,33 @@ serve:
   #   stores:
   #     dockerhub:    { kind: "oci", verify: { mode: "require" } }
   #     internal-ci:  { kind: "oci", verify: { mode: "off" } }
+
+  # Runtime signature enforcement ("quarantine"). Whereas serve.verify gates what
+  # gantry COPIES, serve.enforce gates what an engine RUNS: gantry watches each
+  # listed engine store's container-start events and force-removes (docker rm -f)
+  # any container whose image is not signed by a trusted Root CA (the same
+  # serve.verify.trust_store), then removes the image. Post-hoc quarantine — the
+  # container is already running when its start event fires, so a very short-lived
+  # container may finish before it is killed; this is NOT admission control.
+  #
+  # The verdict is keyed on the image's content digest and resolved in order:
+  # the durable cache (offline), a live verification (which also consults
+  # local_layout), then on_unavailable. Requires serve.verify.cache (offline
+  # verdicts) and serve.verify.trust_store; enabling it also builds the verifier
+  # even when serve.verify.mode is off.
+  #
+  # There is deliberately NO image-name allowlist — an image name is attacker-
+  # chosen and is not a security boundary. Images that must run offline should be
+  # signed and placed in serve.verify.local_layout; gantry never removes its own
+  # container (identified by container id, never by image name).
+  # enforce:
+  #   mode: "quarantine"          # off (default) | quarantine
+  #   stores: ["nomad"]           # engine stores (docker; containerd not yet) to police
+  #   on_unavailable: "grace"     # when no verdict is obtainable and none is cached:
+  #                               #   grace (default) — honor a known-but-expired
+  #                               #     trusted verdict, else allow-and-log
+  #                               #   kill  — fail closed (remove it)
+  #                               #   allow — allow on doubt
+  #   # self_container: ""        # gantry's own container id/name so it never removes
+  #                               # itself; empty falls back to hostname then cgroup
+  #                               # (or set the GANTRY_SELF_ID env)

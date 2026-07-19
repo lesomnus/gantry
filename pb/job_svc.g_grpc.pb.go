@@ -50,7 +50,7 @@ type JobServiceClient interface {
 	// of the REST SSE endpoint GET /v1/job/{id}/progress.
 	Watch(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Job], error)
 	// Plan runs admission for a would-be job without submitting it: store
-	// binding, rewrite, verification, and coalescing are all evaluated.
+	// binding, verification, and coalescing are all evaluated.
 	Plan(ctx context.Context, in *JobPlanRequest, opts ...grpc.CallOption) (*JobPlanResponse, error)
 	// Cancel stops a running job but keeps its record for inspection; the
 	// returned snapshot is taken right after the cancel is signaled.
@@ -186,7 +186,7 @@ type JobServiceServer interface {
 	// of the REST SSE endpoint GET /v1/job/{id}/progress.
 	Watch(*JobRef, grpc.ServerStreamingServer[Job]) error
 	// Plan runs admission for a would-be job without submitting it: store
-	// binding, rewrite, verification, and coalescing are all evaluated.
+	// binding, verification, and coalescing are all evaluated.
 	Plan(context.Context, *JobPlanRequest) (*JobPlanResponse, error)
 	// Cancel stops a running job but keeps its record for inspection; the
 	// returned snapshot is taken right after the cancel is signaled.

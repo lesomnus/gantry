@@ -29,7 +29,7 @@ service JobService {
   // of the REST SSE endpoint GET /v1/job/{id}/progress.
   rpc Watch(JobRef) returns (stream Job);
   // Plan runs admission for a would-be job without submitting it: store
-  // binding, rewrite, verification, and coalescing are all evaluated.
+  // binding, verification, and coalescing are all evaluated.
   rpc Plan(JobPlanRequest) returns (JobPlanResponse);
   // Cancel stops a running job but keeps its record for inspection; the
   // returned snapshot is taken right after the cancel is signaled.

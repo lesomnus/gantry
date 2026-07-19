@@ -7,8 +7,9 @@ digest-pinned into the move, how the signature travels into the cache
 (`copy_referrers`), the destination and per-store restrictions, and the
 `VerifyService` introspection/reload surface. The full annotated config lives in
 [../gantry.yaml](../gantry.yaml); related topics are [stores.md](stores.md),
-[retention.md](retention.md), [observability.md](observability.md), and
-[api.md](api.md).
+[enforcement.md](enforcement.md) (verifying what an engine *runs*, not just what
+gantry copies), [retention.md](retention.md), [observability.md](observability.md),
+and [api.md](api.md).
 
 ## Overview
 
@@ -183,6 +184,22 @@ Behavior and constraints:
   child manifest to be present and **refuses platform narrowing** (`platforms`
   must be empty). This is the same verbatim-commit rule a digest-ref registry
   copy follows.
+
+### Multi-arch images
+
+A notation signature on a multi-arch image is a referrer of the **top-level
+index**, not of the per-platform child manifests — so the verified/pinned digest
+is the **index digest**, and `copy_referrers` copies that one index signature
+(all child manifests are committed verbatim so the index digest is preserved).
+There is no per-platform signature to copy.
+
+This is why `copy_referrers` refuses platform narrowing: a platform-filtered copy
+would rebuild a smaller index with a **different digest**, to which the original
+signature no longer applies. Copy the full multi-arch image (with its signature)
+into the cache, then narrow the platform on the downstream engine pull — the
+engine still anchors to the index digest, so the index signature covers it. See
+[enforcement.md](enforcement.md#multi-arch-images-and-platform-narrowing) for how
+a platform-narrowed running container is verified against the index signature.
 
 ## Proxy-destination restriction
 

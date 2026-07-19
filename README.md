@@ -40,16 +40,17 @@ JobService.Get  ·  JobService.Watch (server stream)
   ([docs/verification.md](docs/verification.md)); and keeps a durable audit log
   plus OTLP metrics and traces ([docs/observability.md](docs/observability.md)).
 
-The cache-side reference is derived from the target store's `rewrite` rules
-(ordered `{glob: template}`, first match wins). `source`/`target` may be a
+The cache-side reference is the source repository and tag/digest under the
+target store's host (only the host is substituted). `source`/`target` may be a
 declared store name or a bare registry host (when `allow_unknown_stores` is set).
 
 ## Documentation
 
 The guides below live in [docs/](docs/) ([index](docs/README.md)):
 
-- **[docs/stores.md](docs/stores.md)** — store kinds, copy/proxy fill, `rewrite`,
-  outbound TLS (private-CA and TPM-sealed mTLS), `as` names, digest pinning.
+- **[docs/stores.md](docs/stores.md)** — store kinds, copy/proxy fill,
+  `downstream_host`/`pull_host`, outbound TLS (private-CA and TPM-sealed mTLS),
+  `as` names, digest pinning.
 - **[docs/retention.md](docs/retention.md)** — per-store image GC: policy
   cascade, digest counting, pins, the untagged reaper, the adaptive scheduler.
 - **[docs/verification.md](docs/verification.md)** — source-image signature
@@ -159,7 +160,7 @@ is a smoke test.
 See [gantry.yaml](gantry.yaml) for the full annotated example. Top-level blocks:
 
 - `stores` — the unified store map (keyed by name): `kind: oci` registries
-  (`host`, `mode`, `insecure`, `rewrite`, `downstream_host`, credentials) or
+  (`host`, `mode`, `insecure`, `downstream_host`, credentials) or
   `kind: docker`/`containerd` engines (`address`, `namespace`, `pull_host`). Any
   store may carry outbound TLS (`ca_cert` and TPM-sealed client mTLS). See
   [docs/stores.md](docs/stores.md).

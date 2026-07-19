@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/cpx"
+	"github.com/lesomnus/gantry/internal/enforce"
 	"github.com/lesomnus/gantry/internal/event"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
@@ -182,14 +184,15 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 	}
 	// The interface type matters: a nil *Swappable in a verify.Service interface
 	// is non-nil and would bypass every disabled-guard.
-	var vf verify.Service
-	if c.VerifyEnabled() {
+	var vf verify.Service    // the verifier the copy path + RPC see (cache-wrapped)
+	var vraw verify.Verifier // the raw verifier (bypasses the cache; used by the refresher)
+	var vcache *verify.Cache // the shared verdict cache, nil when unconfigured
+	if c.NeedVerifier() {    // verification anywhere, OR enforcement is on
 		v, err := verify.NewSwappable(c.Serve.Verify)
 		if err != nil {
 			return nil, z.Err(err, "signature verification setup") // fail fast: don't serve unsafe
 		}
-		vf = v
-		wmr.SetVerifier(v)
+		vf, vraw = v, v
 		l := log.From(ctx)
 		l.Info("signature verification enabled",
 			slog.String("mode", string(c.Serve.Verify.Mode)),
@@ -198,12 +201,75 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 			l.Warn("signature verification level is not strict: certificate expiry and revocation are not enforced",
 				slog.String("level", c.Serve.Verify.Level))
 		}
+		if c.Serve.Verify.LocalLayoutEnabled() {
+			l.Info("offline local signature layout enabled", slog.String("local_layout", c.Serve.Verify.LocalLayout))
+		}
+		// Durable verdict cache: wrap the verifier so admission populates it and
+		// enforcement/RPC read it. The copy path and RPC see the cache-wrapped vf.
+		if vc := c.Serve.Verify.Cache; vc.Enabled() {
+			cache, err := verify.OpenCache(vc.Path, time.Duration(vc.TTL), time.Duration(vc.Refresh), verify.WithNow(nowFn))
+			if err != nil {
+				return nil, z.Err(err, "open verify cache")
+			}
+			closers = append(closers, cache.Close)
+			vcache = cache
+			vf = verify.NewCaching(v, cache, c.Serve.Verify, verify.CachingWithNow(nowFn))
+			l.Info("verification result cache enabled", slog.String("path", vc.Path),
+				slog.Duration("ttl", time.Duration(vc.TTL)), slog.Duration("refresh", time.Duration(vc.Refresh)))
+		}
+		wmr.SetVerifier(vf)
+	}
+
+	// Runtime signature enforcement: watch engine start events and quarantine
+	// containers whose image is not signed by a trusted Root CA.
+	var enf *enforce.Manager
+	if c.Serve.Enforce.Enabled() {
+		var enfStores []enforce.Store
+		for _, name := range c.Serve.Enforce.Stores {
+			eng, err := stores.Engine(name)
+			if err != nil {
+				return nil, z.Err(err, "enforce store %q", name)
+			}
+			ee, ok := eng.(enforce.Engine)
+			if !ok {
+				return nil, z.Err(nil, "store %q does not support runtime enforcement (containerd is not yet supported)", name)
+			}
+			enfStores = append(enfStores, enforce.Store{Name: name, Engine: ee})
+		}
+		enf = enforce.NewManager(enfStores, vcache, vf, c.Stores, enforce.Options{
+			OnUnavailable: c.Serve.Enforce.OnUnavailable,
+			SelfContainer: c.Serve.Enforce.SelfContainer,
+			Now:           nowFn,
+		})
+		closers = append(closers, func() error { enf.Stop(); return nil })
+		log.From(ctx).Info("runtime enforcement enabled",
+			slog.Any("stores", c.Serve.Enforce.Stores), slog.String("on_unavailable", c.Serve.Enforce.OnUnavailable))
 	}
 
 	wmr.Start(ctx)
 	if gc != nil {
 		gc.StartWatchers(ctx)
 		gc.StartScheduler(ctx)
+	}
+	if enf != nil {
+		enf.StartWatchers(ctx)
+		// Keep trusted verdicts fresh within the soft-refresh window using the raw
+		// verifier (so a re-check reaches the registry / layout, not the cache).
+		if vcache != nil {
+			resolve := func(sourceRef string) (config.StoreConfig, name.Reference, bool) {
+				r, err := name.ParseReference(sourceRef, name.Insecure)
+				if err != nil {
+					return config.StoreConfig{}, nil, false
+				}
+				for _, s := range c.Stores {
+					if s.IsRegistry() && s.Host == r.Context().RegistryStr() {
+						return s, r, true
+					}
+				}
+				return config.StoreConfig{}, nil, false
+			}
+			go verify.NewRefresher(vcache, vraw, resolve, verify.RefresherWithNow(nowFn)).Run(ctx)
+		}
 	}
 
 	au, as := rpc.Auth(c.Serve.Auth)

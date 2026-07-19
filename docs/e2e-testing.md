@@ -70,13 +70,14 @@ Which tier automates each feature (with the test that proves it):
 | 4 | Platform selection | L1 `TestPlatformSelection` |
 | 5 | Caller-chosen `as` names | L1 `TestAsNames` |
 | 6 | Digest pin + verbatim commit | L1 `TestDigestPin` |
-| 7 | Rewrite / `downstream_host` | L1 `TestPlanResolves`; real DNS in L3-infra |
+| 7 | Host substitution (`downstream_host`/`pull_host`) | L1 `TestPlanResolves`; real DNS in L3-infra |
 | 8 | Signature verification (notation, in-process) | L1 `TestVerification` |
 | 9 | Retention / GC (injected clock) | L1 `TestRetentionGC` |
 | 10 | Dedup & `Idempotency-Key` | L1 `TestIdempotencyKey` |
 | 11 | Cancel & Retry | L1 `TestCancelRetry` |
 | 12 | Audit log | L1 `TestAuditLog`; **real restart in L3 `TestL3BlackBox`** |
 | 13 | Health & readiness | L1 `TestHealth` |
+| 14 | Runtime enforcement (quarantine) | L1 `TestEnforcement`; **real docker in `internal/enforce` (`TestEnforceDockerE2E`) + `internal/down` (`TestDockerEnforcerLive`)** |
 | — | Private-CA TLS (`ca_cert`) | L1 `TestTLSCache`; real registry in L3-infra |
 | — | Graceful shutdown | L3 `TestL3BlackBox` |
 | — | Shipped image runs (scratch base; non-root user writes the audit db) | L3 image `TestL3Image` |
@@ -283,13 +284,14 @@ Store references are always `{"name": "<store>"}`. A `Get`/`Watch` shows the job
 | 4 | Platform selection | [stores.md](stores.md) |
 | 5 | Caller-chosen `as` names | [stores.md](stores.md) |
 | 6 | Digest-pinned job (verbatim, local resolve) | [stores.md](stores.md) |
-| 7 | Rewrite & downstream-host override | [stores.md](stores.md) |
+| 7 | Host substitution (`downstream_host`/`pull_host`) | [stores.md](stores.md) |
 | 8 | Signature verification | [verification.md](verification.md) |
 | 9 | Retention / GC | [retention.md](retention.md) |
 | 10 | Dedup & `Idempotency-Key` | [api.md](api.md) |
 | 11 | Cancel & Retry | [api.md](api.md) |
 | 12 | Audit log | [observability.md](observability.md) |
 | 13 | Health & readiness | [observability.md](observability.md) |
+| 14 | Runtime enforcement (quarantine) | [enforcement.md](enforcement.md) |
 
 Each test below is **What → Run → Expect**.
 
@@ -368,7 +370,7 @@ add '{"ref":"library/busybox:1.36","source":{"name":"cache"},"target":{"name":"e
 **Expect** — `docker images` lists `docker.io/library/busybox:1.36` (the `as` name)
 rather than the `127.0.0.1:5000/...` pull ref. **Digest** `as` names
 (`repo@sha256:…`) require a digest-pinned job (test 6) and a containerd-image-store
-engine; a classic graph store skips them with a warning (tags still apply). See
+engine; a digest `as` name against a classic graph store is rejected before the pull (tags still apply). See
 [stores.md](stores.md#caller-chosen-as-names).
 
 ## 6. Digest-pinned job (verbatim, local resolve)
@@ -390,21 +392,21 @@ containerd-store `edge` with a matching digest `as` name resolves locally
 (`docker image inspect` hits; a `force_pull=false` pull moves nothing). Verify the
 verbatim guarantee: a digest-ref copy refuses `platforms` narrowing.
 
-## 7. Rewrite & downstream-host override
+## 7. Host substitution (`downstream_host` / `pull_host`)
 
-**What** — the cache-side ref comes from the target store's `rewrite` rules, and
-`downstream_host`/`pull_host` decouple the address gantry pushes to from the one the
-engine pulls from.
+**What** — the cache-side ref is the source repo/tag under the target store's
+own host; `downstream_host`/`pull_host` decouple the address gantry pushes to
+from the one the engine is told to pull from.
 
-**Run** — add `rewrite`/`downstream_host` to the `cache` store, then:
+**Run** — add `downstream_host` to the `cache` store, then:
 ```sh
 plan '{"ref":"library/busybox:1.36","source":{"name":"remote"},"target":{"name":"cache"}}'
 ```
 
-**Expect** — `Plan`'s `target_ref` shows the rewritten cache ref; with
-`downstream_host` set, an engine job's `transfers[].ref` (from `Get`) shows the
-substituted pull host while gantry still pushes to the store's real `host`. See
-[stores.md](stores.md#rewrite-rules).
+**Expect** — `Plan`'s `target_ref` shows the cache ref (the source repo/tag under
+the cache `host`); with `downstream_host` set, an engine job's `transfers[].ref`
+(from `Get`) shows the substituted pull host while gantry still pushes to the
+store's real `host`. See [stores.md](stores.md#downstream_host-and-pull_host).
 
 ## 8. Signature verification
 
@@ -540,6 +542,41 @@ after `docker stop cache`). The overall `Health/Check` is `SERVING` while every
 gated store (default: every engine store) probes healthy; stopping the `edge`
 daemon flips it to `NOT_SERVING` within the readiness loop. See
 [observability.md](observability.md).
+
+## 14. Runtime enforcement (quarantine)
+
+**What** — with `serve.enforce` on an engine store, gantry watches that daemon's
+container starts and force-removes any container whose image is not signed by a
+trusted Root CA — then removes the image. Enforcement verifies in `require`
+semantics regardless of `serve.verify.mode`. See [enforcement.md](enforcement.md).
+
+**Setup** — reuse the signed image and trust store from test 8, and add a verdict
+cache plus enforcement on the `edge` engine store (the admission `mode` may stay
+`off` — enforcement forces `require` itself):
+```yaml
+serve:
+  verify:
+    trust_store: "/tmp/gantry-e2e/trust"          # from test 8
+    cache: { path: "/tmp/gantry-e2e/verify.db" }
+  enforce:
+    mode: "quarantine"
+    stores: ["edge"]
+    on_unavailable: "grace"
+```
+Load a signed and an unsigned image onto the `edge` daemon first (a gantry job or
+`docker pull` from the cache), so each is present with a repo digest.
+
+**Run** — start a container from each image on the `edge` daemon:
+```sh
+docker run -d --name ok  <cache-host>/library/signed:1   sleep 300
+docker run -d --name bad <cache-host>/library/unsigned:1 sleep 300
+```
+
+**Expect** — within a moment gantry force-removes `bad` and removes its image,
+while `ok` keeps running (`docker ps` shows only `ok`). The gantry log carries a
+`quarantining untrusted container` warning naming `bad`'s digest; gantry never
+removes its own container. Setting `serve.verify.mode` to `off` does not change
+this — enforcement is independent of the admission mode.
 
 ## Teardown
 

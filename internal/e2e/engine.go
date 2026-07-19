@@ -23,6 +23,11 @@ type fakeEngine struct {
 	held     map[string]string             // ref -> anchor digest ("" if none)
 	untagged map[string]down.UntaggedImage // id -> untagged image
 	pulls    []pullRecord
+
+	// down.Enforcer (runtime enforcement) state.
+	starts  chan down.StartEvent           // injected container-start events
+	running map[string]down.ContainerImage // container id -> its resolved image
+	removed map[string]bool                // container ids force-removed by enforcement
 }
 
 type pullRecord struct {
@@ -38,6 +43,9 @@ func newFakeEngine(name string) *fakeEngine {
 		inUse:    map[string]bool{},
 		held:     map[string]string{},
 		untagged: map[string]down.UntaggedImage{},
+		starts:   make(chan down.StartEvent, 64),
+		running:  map[string]down.ContainerImage{},
+		removed:  map[string]bool{},
 	}
 }
 
@@ -136,7 +144,59 @@ func (e *fakeEngine) ReapUntagged(_ context.Context, id string, owned func(strin
 	return down.RemoveResult{Deleted: []string{id}}, true, nil
 }
 
+// --- down.Enforcer (runtime enforcement) ---
+
+func (e *fakeEngine) WatchStarts(ctx context.Context, sink func(down.StartEvent)) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev := <-e.starts:
+			sink(ev)
+		}
+	}
+}
+
+func (e *fakeEngine) ListRunning(context.Context) ([]down.StartEvent, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]down.StartEvent, 0, len(e.running))
+	for id, img := range e.running {
+		out = append(out, down.StartEvent{ContainerID: id, Image: img.ConfigImage})
+	}
+	return out, nil
+}
+
+func (e *fakeEngine) ResolveImage(_ context.Context, id string) (down.ContainerImage, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.running[id], nil // zero value (no digest) when unknown/removed
+}
+
+func (e *fakeEngine) RemoveContainer(_ context.Context, id string, _ bool) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.removed[id] = true
+	delete(e.running, id)
+	return nil
+}
+
 // --- test controls (hold the lock) ---
+
+// startContainer registers a running container and injects its start event, so
+// the enforcement watcher resolves it to repoDigests and decides a verdict.
+func (e *fakeEngine) startContainer(id, image string, repoDigests ...string) {
+	e.mu.Lock()
+	e.running[id] = down.ContainerImage{ConfigImage: image, ImageID: "sha256:" + id, RepoDigests: repoDigests}
+	e.mu.Unlock()
+	e.starts <- down.StartEvent{ContainerID: id, Image: image}
+}
+
+func (e *fakeEngine) wasRemoved(id string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.removed[id]
+}
 
 func (e *fakeEngine) setReady(err error) { e.mu.Lock(); e.ready = err; e.mu.Unlock() }
 func (e *fakeEngine) setInUse(refs ...string) {

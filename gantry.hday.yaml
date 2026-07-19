@@ -6,6 +6,42 @@
 # (the --config flag is a root flag, so it precedes the `serve` subcommand)
 #
 # `stores` is a top-level section (not nested under `serve`).
+
+# Source-image signature verification (Notary Project / notation). Runs
+# fail-closed at job admission: before a copy starts, gantry resolves the
+# source image's notation signature and requires it to chain to a Root CA in
+# trust_store. This gates BOTH hops — remote->local (source = remote) and
+# local->docker (source = local): the signature is copied into `local` as a
+# referrer during the first hop (source digest preserved), so the second hop
+# re-verifies it there. An unsigned or untrusted image rejects the job.
+serve:
+  verify:
+    mode: require                 # signature mandatory; reject unsigned & untrusted
+    trust_store: "trust-store"    # DIRECTORY of trusted Root CA PEMs (*.crt/*.pem/*.cert)
+    level: strict                 # enforce trust anchor + cert expiry/revocation (default)
+    # Verdict cache: runtime enforcement reads it to decide offline, and it lets a
+    # decision survive a registry outage. Required by serve.enforce below.
+    cache:
+      path: "verify-cache.db"     # bbolt file (distinct from any retention/events path)
+      ttl: 4w                     # hard max-age of a cached verdict (default 4w)
+      refresh: 2w                 # soft revalidation age (default 2w)
+
+  # Runtime enforcement: watch container starts on rt and work and force-remove
+  # (docker rm -f) any container whose image is NOT signed by a trusted Root CA
+  # (same trust_store as above), then remove the image. rt is the TPM-mTLS daemon
+  # at 192.168.10.2; work is the local daemon gantry runs on. Signatures are read
+  # from `local` (the cache registry the daemons pulled from); when it is
+  # unreachable, on_unavailable=grace honors an already-cached trusted verdict.
+  enforce:
+    mode: quarantine              # off | quarantine
+    stores: [rt, work]            # kill unsigned-image containers on these daemons
+    on_unavailable: grace         # outage + no cached verdict: honor a known trusted
+                                  # one, else allow-and-log (kill = fail closed)
+    # self_container: ""          # gantry's own container id/name so it never removes
+                                  # itself (empty falls back to hostname; or set
+                                  # GANTRY_SELF_ID). gantry's own image should also be
+                                  # signed so it passes verification regardless.
+
 stores:
   # Source registry (remote). Jobs name this as `source`.
   remote:
@@ -19,25 +55,26 @@ stores:
     host: "192.168.10.33:5000"
     insecure: true          # plain-HTTP registry on :5000
     mode: copy              # push blobs into the cache
-    # source ref -> ref in this registry (first match wins).
-    rewrite:
-      - { "**": "{{.CacheHost}}/{{.Repo}}" }
+    # In-store ref = source repo/tag under this store's host.
 
   # Docker daemons gantry triggers to pull the cached image.
   # Load a cached image onto one of these by adding a job whose `target` names
   # the engine store: gantry.JobService/Add {ref, source, target}.
-  dockerd-10-2:
-    kind: docker
-    address: "tcp://192.168.10.2:2376"    # daemon TLS port
+  rt:
     # Connect over mTLS with the TPM device key (fdy). The private key stays in
     # the TPM; device.crt is presented as the client certificate and ca.crt
-    # verifies the daemon's server certificate.
-    tpm_handle: "0x81666479"              # fdy (device AK persistent handle)
-    tpm_cert: "device.crt"                # client cert (leaf + chain), PEM
-    ca_cert: "ca.crt"                     # CA that signed the daemon's server cert
-  dockerd-10-33:
+    # verifies the daemon's server certificate. Anchored so other daemons
+    # reachable with the same device credential can reuse it (merge key `<<`).
+    <<: &fdy_creds
+      tpm_handle: "0x81666479"            # fdy (device AK persistent handle)
+      tpm_cert: "device.crt"              # client cert (leaf + chain), PEM
+      ca_cert: "ca.crt"                   # CA that signed the daemon's server cert
     kind: docker
-    address: "unix:///var/run/docker.sock"   # host docker socket
-  dockerd-10-34:
+    address: "tcp://192.168.10.2:2376"    # daemon TLS port
+  work:
     kind: docker
-    address: "tcp://192.168.10.34:2375"
+    address: "unix:///var/run/docker.sock"   # host docker socket (gantry runs here)
+  hday:
+    <<: *fdy_creds                        # same fdy device credential as rt
+    kind: docker
+    address: "tcp://192.168.10.34:2376"   # daemon TLS port (mTLS)

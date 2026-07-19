@@ -54,7 +54,7 @@ func (f *fakePullEngine) Pull(_ context.Context, ref, digest, platform string, a
 		return nil, err
 	}
 	if recorded != nil {
-		return recorded, nil // canned: e.g. a classic-store skip reporting the pull ref
+		return recorded, nil // canned: whatever the test wants the engine to report
 	}
 	// Like a real engine: the requested names, or the pull-created record.
 	if len(as) == 0 {

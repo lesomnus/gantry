@@ -106,8 +106,7 @@ job "gantry" {
               host: "192.168.10.33:5000"
               insecure: true        # plain-HTTP registry on :5000
               mode: copy            # push blobs into the cache
-              rewrite:
-                - { "**": "{{ "{{.CacheHost}}/{{.Repo}}" }}" }
+              # In-store ref = source repo/tag under this store's host.
 
             # Docker daemon of the node this allocation runs on.
             dockerd-local:

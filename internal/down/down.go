@@ -67,9 +67,9 @@ type Engine interface {
 	// supplies the manifest bytes backing it). Digest names require an anchored
 	// pull — the Copier admits them only with a non-empty digest.
 	// recorded reports the references the daemon actually holds for the image
-	// after the pull — the applied names, or the pull-created record when a
-	// name could not be applied (classic-store digest skip) — so the caller
-	// stamps its retention index with reality, never with a skipped name.
+	// after the pull (the applied names) so the caller stamps its retention
+	// index with reality. A digest `as` name needs the containerd image store;
+	// on a classic (graph-driver) docker store the pull is rejected up front.
 	Pull(ctx context.Context, ref string, digest string, platform string, as []string, anchor *AnchorBlob, sink Sink) (recorded []string, err error)
 	// Platform reports the daemon host's platform in OCI form ("linux/amd64").
 	Platform(ctx context.Context) (string, error)
@@ -133,12 +133,53 @@ type Reconciler interface {
 	ReapUntagged(ctx context.Context, id string, owned func(repoDigest string) bool) (rr RemoveResult, ok bool, err error)
 }
 
+// StartEvent is a container start/restart observation. Unlike UsageSink (which
+// carries only the image ref), it carries the container ID that runtime
+// enforcement needs to remove the container.
+type StartEvent struct {
+	ContainerID string
+	Image       string // the image reference the event/container reports
+	At          time.Time
+}
+
+// ContainerImage is what a running container's image resolves to, for a verdict
+// lookup. A container references a platform-specific manifest, but a signature is
+// over the top-level index; RepoDigests carry the repo@digest (top-level)
+// spellings, so they are the preferred key. ManifestDigest is the
+// platform-specific manifest digest, kept for cross-check / fallback.
+type ContainerImage struct {
+	ConfigImage    string   // the image reference the container was created from
+	ImageID        string   // the local image content id ("sha256:...")
+	RepoDigests    []string // repo@digest references (top-level digest; preferred key)
+	ManifestDigest string   // platform-specific manifest digest (cross-check / fallback)
+}
+
+// Enforcer is the optional runtime signature-enforcement capability: observe
+// container starts, resolve a container's image to its content digest, and remove
+// a container. docker-only in v1 (containerd's kill mechanic differs), following
+// the same docker-only precedent as Reconciler.
+type Enforcer interface {
+	// WatchStarts streams container start/restart events until ctx is done or the
+	// stream ends (the caller reconnects on a non-nil return).
+	WatchStarts(ctx context.Context, sink func(StartEvent)) error
+	// ListRunning returns the currently-running containers, so a cold reconcile on
+	// (re)connect catches starts missed during a disconnect gap.
+	ListRunning(ctx context.Context) ([]StartEvent, error)
+	// ResolveImage resolves a container's image to the identifiers a verdict is
+	// keyed by. It does not error when the image is gone: it returns what it has.
+	ResolveImage(ctx context.Context, containerID string) (ContainerImage, error)
+	// RemoveContainer removes a container; force stops-and-removes a running one
+	// (docker rm -f). A container already gone is treated as success.
+	RemoveContainer(ctx context.Context, containerID string, force bool) error
+}
+
 // Caps describes which capabilities an engine implements.
 type Caps struct {
 	Pull      bool `json:"pull"`
 	Verify    bool `json:"verify"`
 	GC        bool `json:"gc"`
 	Reconcile bool `json:"reconcile"`
+	Enforce   bool `json:"enforce"`
 }
 
 // Capabilities discovers an engine's optional capabilities by type assertion.
@@ -146,7 +187,8 @@ func Capabilities(e Engine) Caps {
 	_, verify := e.(Verifier)
 	_, gc := e.(Collector)
 	_, recon := e.(Reconciler)
-	return Caps{Pull: true, Verify: verify, GC: gc, Reconcile: recon}
+	_, enforce := e.(Enforcer)
+	return Caps{Pull: true, Verify: verify, GC: gc, Reconcile: recon, Enforce: enforce}
 }
 
 // anchoredRef rewrites a tag reference to pull by digest; a reference that is

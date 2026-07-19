@@ -46,7 +46,7 @@ For an `oci` store, `host` defaults to the store name when omitted (a store name
 `serve.allow_unknown_stores` is set — a bare registry host. A bare host that
 matches a declared registry's `host` resolves to that store even when
 `allow_unknown_stores` is `false`. An undeclared bare host (with the flag on) is
-synthesized as an `oci` copy-mode store with the default rewrite rule. **Engine
+synthesized as an `oci` copy-mode store. **Engine
 stores must always be declared** — a bare host never resolves to a docker /
 containerd daemon. Naming an engine where a registry is required (or vice versa)
 is an error (`store %q is a %s, not a registry`).
@@ -94,50 +94,23 @@ keychain (`~/.docker/config.json`). The cache store's own credentials therefore
 do **not** authenticate the upstream `source` pull in copy mode — that pull uses
 the source store's credentials (or the keychain).
 
-## Rewrite rules
+## Cache-side reference
 
 When a registry is a copy **target**, gantry derives the cache-side reference
-from the store's `rewrite` rules — an **ordered** list of single-key
-`{glob: template}` mappings, **first match wins**. Each rule is written as a
-one-entry YAML mapping so the surrounding sequence preserves priority; a mapping
-with more than one entry is rejected at load.
+from the source reference by substituting **only the host**: the source
+repository path and tag/digest are preserved under the target store's own
+`host`. So `docker.io/library/redis:7` copied into a store whose `host` is
+`cache.local:5000` lands as `cache.local:5000/library/redis:7`; a digest
+reference keeps its `@sha256:…`.
 
-The glob (a `doublestar` pattern) is matched against the source reference's
-fully-qualified name. The template (Go `text/template`) renders the destination
-reference from these variables:
+A copy destination is, by construction, this store's own host, so the mapping is
+fixed — there is nothing to configure. The repository path is never rewritten,
+which keeps `source → cache` a deterministic, one-to-one mapping (so a later
+pull resolves to the same place and duplicate copies coalesce).
 
-| Variable | Meaning |
-|---|---|
-| `.Ref` | the parsed reference as a string |
-| `.Full` | fully-qualified name (`registry/repo:tag`) |
-| `.CacheHost` | the target store's `host` |
-| `.Registry` | source registry, e.g. `index.docker.io` |
-| `.Repo` | repository path, e.g. `library/redis` |
-| `.Tag` | set for tag references |
-| `.Digest` | set for digest references |
-| `.Identifier` | the tag or digest |
-
-If the rendered reference omits a tag/digest, the source identifier is carried
-over — so `{{.CacheHost}}/{{.Repo}}` keeps the original `:7`. (A `:` is only
-treated as a tag when it is in the last path segment; otherwise it is a registry
-port.) The default rule, applied to any `oci` store that declares no `rewrite`
-(and to a synthesized bare-host store), is:
-
-```yaml
-rewrite:
-  - { "**": "{{.CacheHost}}/{{.Repo}}" }
-```
-
-Two matching notes:
-
-- ggcr normalizes Docker Hub to `index.docker.io`, so `.Registry` is
-  `index.docker.io` — match it with `index.docker.io/**` or just `**`.
-- If no rule matches, the job fails with `no rewrite rule matched %q` listing the
-  patterns tried.
-
-Rewrite applies only to a **registry** target. An **engine** target is told to
-pull the source reference with only its *host* substituted (below), never a
-rewritten repo path.
+The same host-only substitution applies to an **engine** target, except the
+engine is *told* to pull the reference rather than having blobs pushed into it;
+which host it reaches is set by `downstream_host`/`pull_host` (below).
 
 ## downstream_host and pull_host
 
@@ -261,13 +234,14 @@ Digest names require the **containerd image store**:
   `/images/load` over the content the pull just placed — no registry contact.
   This works only when the daemon runs the containerd image store
   (`driver-type = io.containerd.snapshotter.v1`). A **classic graph store cannot
-  represent a digest reference** without a real registry pull, so gantry **skips**
-  the digest names and logs a warning; tag `as` names still apply, and the image
-  resolves by its pull reference.
+  represent a digest reference** without a real registry pull, so a digest `as`
+  name against a classic-store docker is **rejected before the pull** (the job
+  fails with a clear error) rather than silently dropped — a caller that asked
+  for a digest name would otherwise have a node quietly pull through to the
+  origin later. Tag `as` names are unaffected and work on either store.
 
 The retention index is stamped with the names the daemon **actually** holds (as
-reported back by the engine), never with a skipped name — so a classic-store skip
-leaves the image tracked under its pull reference, not a phantom digest name (see
+reported back by the engine), never with a name it does not resolve (see
 `retention.md`).
 
 The net effect: a jobspec pinned to `repo@sha256:INDEX` resolves locally after
@@ -313,11 +287,10 @@ keyed by name; the key is the store name (and, for `oci`, the default `host`).
 
 | Key | Meaning |
 |---|---|
-| `host` | Registry host, exposed to rewrite templates as `.CacheHost`. Defaults to the store name. |
+| `host` | Registry host. Copy target: the cache-side ref is the source repo/tag under this host. Defaults to the store name. |
 | `mode` | `copy` (default; push blobs) \| `proxy` (read-through self-fill). |
 | `insecure` | Allow plain-HTTP / self-signed (skip TLS verification). |
 | `username` / `password` | Credentials for operations against **this** store (env-expanded). Empty = docker keychain. |
-| `rewrite` | Ordered `{glob: template}` rules for the cache-side ref (copy target). First match wins; default `{"**": "{{.CacheHost}}/{{.Repo}}"}`. |
 | `downstream_host` | Host engines are told to pull from when pulling out of this registry (overridden per-engine by `pull_host`). |
 | `verify` | Per-source-registry override of `serve.verify.mode` (see `verification.md`). |
 

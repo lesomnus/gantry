@@ -175,10 +175,11 @@ func TestJobDigestRefCopyVerbatim(t *testing.T) {
 	}
 }
 
-// The retention hook stamps what the engine reports as recorded, not what was
-// requested: a classic-store docker skips digest names, and stamping a skipped
-// name would leave the image unowned while the index claims it is tracked.
-func TestAsDigestClassicSkipStampsReality(t *testing.T) {
+// The retention hook stamps what the engine reports as recorded, not what the
+// job requested — so the index never claims a name the daemon does not hold.
+// Modeled with a fake engine that reports the pull ref instead of the requested
+// digest name.
+func TestAsDigestStampsEngineReportedNames(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
 	w, js, up := engineCopier(t, eng)
 	idx := pushIndex(t, up+"/team/app:multi", "linux/amd64")
@@ -188,7 +189,7 @@ func TestAsDigestClassicSkipStampsReality(t *testing.T) {
 	}
 	dg := desc.Digest.String()
 	pullRef := up + "/team/app@" + dg
-	eng.recorded = []string{pullRef} // canned: the engine skipped the digest name
+	eng.recorded = []string{pullRef} // canned: engine reports the pull ref, not the requested digest name
 
 	var mu sync.Mutex
 	var stamped []string
