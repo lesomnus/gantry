@@ -7,8 +7,9 @@ digest-pinned into the move, how the signature travels into the cache
 (`copy_referrers`), the destination and per-store restrictions, and the
 `VerifyService` introspection/reload surface. The full annotated config lives in
 [../gantry.yaml](../gantry.yaml); related topics are [stores.md](stores.md),
-[retention.md](retention.md), [observability.md](observability.md), and
-[api.md](api.md).
+[enforcement.md](enforcement.md) (verifying what an engine *runs*, not just what
+gantry copies), [retention.md](retention.md), [observability.md](observability.md),
+and [api.md](api.md).
 
 ## Overview
 
