@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,30 +19,86 @@ import (
 // --- test doubles ---
 
 type fakeEngine struct {
-	name         string
-	img          down.ContainerImage
-	resolveErr   error
-	removedConts []string
-	removedImgs  []string
+	name       string
+	img        down.ContainerImage
+	resolveErr error
+
+	mu             sync.Mutex
+	removedConts   []string
+	removedImgs    []string
+	running        []down.StartEvent // ListRunning result (cold-reconcile tests)
+	watchErr       chan error        // WatchStarts drains a queued error before blocking
+	watchCalls     int
+	removeContErr  error // RemoveContainer returns this (failure-branch tests)
+	removeImgErr   error // Remove returns this
+	listRunningErr error // ListRunning returns this
 }
 
 func (f *fakeEngine) Name() string { return f.name }
 func (f *fakeEngine) Kind() string { return "docker" }
 func (f *fakeEngine) WatchStarts(ctx context.Context, _ func(down.StartEvent)) error {
+	f.mu.Lock()
+	f.watchCalls++
+	ch := f.watchErr
+	f.mu.Unlock()
+	if ch != nil {
+		select {
+		case err := <-ch:
+			return err // simulate a dropped stream so the manager reconnects
+		default:
+		}
+	}
 	<-ctx.Done()
 	return ctx.Err()
 }
-func (f *fakeEngine) ListRunning(context.Context) ([]down.StartEvent, error) { return nil, nil }
+func (f *fakeEngine) ListRunning(context.Context) ([]down.StartEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.running, f.listRunningErr
+}
 func (f *fakeEngine) ResolveImage(context.Context, string) (down.ContainerImage, error) {
 	return f.img, f.resolveErr
 }
 func (f *fakeEngine) RemoveContainer(_ context.Context, id string, _ bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.removeContErr != nil {
+		return f.removeContErr
+	}
 	f.removedConts = append(f.removedConts, id)
 	return nil
 }
 func (f *fakeEngine) Remove(_ context.Context, ref string) (down.RemoveResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.removedImgs = append(f.removedImgs, ref)
-	return down.RemoveResult{}, nil
+	return down.RemoveResult{}, f.removeImgErr
+}
+
+func (f *fakeEngine) contRemovals() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.removedConts)
+}
+func (f *fakeEngine) imgRemovals() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.removedImgs)
+}
+func (f *fakeEngine) removedContainer(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.removedConts {
+		if c == id {
+			return true
+		}
+	}
+	return false
+}
+func (f *fakeEngine) setRunning(evs ...down.StartEvent) {
+	f.mu.Lock()
+	f.running = evs
+	f.mu.Unlock()
 }
 
 type fakeVerifier struct {
@@ -99,7 +156,7 @@ func (h *harness) handle(id string) {
 	h.m.handle(context.Background(), h.eng, down.StartEvent{ContainerID: id, Image: testHost + "/app:1"})
 }
 
-func killed(h *harness) bool { return len(h.eng.removedConts) > 0 }
+func killed(h *harness) bool { return h.eng.contRemovals() > 0 }
 
 // --- tests ---
 
@@ -125,7 +182,7 @@ func TestFreshUntrustedCacheKills(t *testing.T) {
 	if !killed(h) {
 		t.Error("untrusted cache hit must be quarantined")
 	}
-	if len(h.eng.removedImgs) == 0 {
+	if h.eng.imgRemovals() == 0 {
 		t.Error("image should be removed after the kill")
 	}
 }
@@ -213,7 +270,7 @@ func TestIdempotentReplay(t *testing.T) {
 	h.handle("c1")
 	h.handle("c1") // replayed event
 	// both removals are attempted; RemoveContainer is a no-op on a gone container
-	if len(h.eng.removedConts) != 2 {
+	if h.eng.contRemovals() != 2 {
 		t.Errorf("replay should re-attempt removal idempotently, got %d", len(h.eng.removedConts))
 	}
 }
@@ -250,5 +307,121 @@ func TestImageToRemoveUsesDigest(t *testing.T) {
 	// no digest -> the event image verbatim
 	if got := imageToRemove(down.StartEvent{Image: "alpine:1"}, decision{}); got != "alpine:1" {
 		t.Errorf("imageToRemove(no digest) = %q", got)
+	}
+}
+
+// --- policy, mapping, and quarantine-failure branches ---
+
+func TestOnUnavailableAllowPolicy(t *testing.T) {
+	h := newHarness(t, "allow", func() (verify.Result, error) {
+		return verify.Result{}, errors.New("dial tcp: connection refused")
+	})
+	h.handle("c1")
+	if killed(h) {
+		t.Error("on_unavailable=allow must never quarantine on an unobtainable verdict")
+	}
+}
+
+func TestNoMatchingSourceStore(t *testing.T) {
+	// A RepoDigest host that matches no configured oci store: no live verify runs,
+	// and the decision falls to the policy.
+	h := newHarness(t, "kill", func() (verify.Result, error) {
+		return verify.Result{}, errors.New("should not be called")
+	})
+	h.eng.img = down.ContainerImage{RepoDigests: []string{"unknown.host/app@" + testDigest("a")}}
+	h.handle("c1")
+	if !killed(h) {
+		t.Error("no matching source store under kill policy should quarantine")
+	}
+	if h.verify.calls != 0 {
+		t.Errorf("live verify must not run without a matching store, calls=%d", h.verify.calls)
+	}
+}
+
+func TestQuarantineRemoveContainerErrorSkipsImage(t *testing.T) {
+	h := newHarness(t, "grace", func() (verify.Result, error) { return verify.Result{}, verify.ErrUnsigned })
+	h.eng.removeContErr = errors.New("daemon busy")
+	h.handle("c1") // must not panic
+	if h.eng.imgRemovals() != 0 {
+		t.Error("image removal must be skipped when container removal fails")
+	}
+}
+
+func TestQuarantineImageRemoveErrorTolerated(t *testing.T) {
+	h := newHarness(t, "grace", func() (verify.Result, error) { return verify.Result{}, verify.ErrUnsigned })
+	h.eng.removeImgErr = errors.New("conflict: image is referenced by another container")
+	h.handle("c1") // image-remove conflict must be swallowed
+	if !killed(h) {
+		t.Error("container should still be removed")
+	}
+	if h.eng.imgRemovals() != 1 {
+		t.Error("image removal should have been attempted")
+	}
+}
+
+// --- watch loop: cold reconcile, reconnect, list-error ---
+
+func waitRemoval(h *harness, id string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if h.eng.removedContainer(id) {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return h.eng.removedContainer(id)
+}
+
+func TestColdReconcileQuarantines(t *testing.T) {
+	// A trusted verifier would allow, so a pre-running container that IS removed
+	// proves the cold reconcile decided from the untrusted cache verdict.
+	h := newHarness(t, "grace", trustedResult)
+	_ = h.cache.Put(testDigest("a"), false, config.VerifyRequire, "")
+	h.eng.setRunning(down.StartEvent{ContainerID: "pre", Image: testHost + "/app:1"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() { cancel(); h.m.Stop() }()
+	h.m.StartWatchers(ctx)
+
+	if !waitRemoval(h, "pre", 2*time.Second) {
+		t.Fatal("a pre-running untrusted container was not quarantined by the cold reconcile")
+	}
+}
+
+func TestWatchReconnects(t *testing.T) {
+	h := newHarness(t, "grace", func() (verify.Result, error) { return verify.Result{}, verify.ErrUnsigned })
+	h.eng.watchErr = make(chan error, 1)
+	h.eng.watchErr <- errors.New("event stream dropped")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() { cancel(); h.m.Stop() }()
+	h.m.StartWatchers(ctx)
+
+	// After the first WatchStarts errors, the manager backs off (~2s) and
+	// re-reconciles. Register a running container so the reconnect reconcile
+	// quarantines it (live verify -> unsigned).
+	time.Sleep(100 * time.Millisecond)
+	h.eng.setRunning(down.StartEvent{ContainerID: "late", Image: testHost + "/app:1"})
+
+	if !waitRemoval(h, "late", 5*time.Second) {
+		t.Fatal("reconnect reconcile did not quarantine the container")
+	}
+	h.eng.mu.Lock()
+	calls := h.eng.watchCalls
+	h.eng.mu.Unlock()
+	if calls < 2 {
+		t.Errorf("expected a reconnect (>=2 WatchStarts calls), got %d", calls)
+	}
+}
+
+func TestReconcileListErrorDoesNotQuarantine(t *testing.T) {
+	h := newHarness(t, "grace", func() (verify.Result, error) { return verify.Result{}, nil })
+	h.eng.listRunningErr = errors.New("daemon unreachable")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() { cancel(); h.m.Stop() }()
+	h.m.StartWatchers(ctx) // reconcile logs the error and returns; no panic
+	time.Sleep(50 * time.Millisecond)
+	if killed(h) {
+		t.Error("a failed reconcile must not quarantine anything")
 	}
 }

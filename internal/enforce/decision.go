@@ -122,6 +122,14 @@ func (m *Manager) sourceFor(ci down.ContainerImage) (name.Digest, config.StoreCo
 			continue
 		}
 		if st, ok := m.ociByHost[ref.Context().RegistryStr()]; ok {
+			// Enforcement is a run-time signature REQUIREMENT, independent of the
+			// store's admission verify mode. Force `require` for the enforcement
+			// verify so an unsigned image is classified (and quarantined) even when
+			// admission is off or verify-if-present for this store — otherwise the
+			// verifier would short-circuit on an off effective mode and enforcement
+			// would silently degrade to on_unavailable for every image. st is a copy
+			// (map range value), so this does not mutate the shared config.
+			st.Verify = &config.StoreVerify{Mode: config.VerifyRequire}
 			return ref, st, true
 		}
 	}

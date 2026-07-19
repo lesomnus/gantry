@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,6 +91,58 @@ func TestRefresherLeavesEntryOnOutage(t *testing.T) {
 	after, found, _ := cache.Get(h.String())
 	if !found || !after.Trusted || !after.ExpiresAt.Equal(before.ExpiresAt) {
 		t.Errorf("an unreachable registry must leave the entry untouched: before=%+v after=%+v", before, after)
+	}
+}
+
+// countingVerifier is a concurrency-safe raw verifier for the Run test.
+type countingVerifier struct {
+	n   atomic.Int64
+	res Result
+	err error
+}
+
+func (c *countingVerifier) Verify(context.Context, config.StoreConfig, name.Reference) (Result, error) {
+	c.n.Add(1)
+	return c.res, c.err
+}
+
+func TestRefresherRunSweepsOnTick(t *testing.T) {
+	// Real clock, tiny refresh window so an entry goes stale and the ticker fires
+	// quickly; the production entry point Run drives Sweep.
+	cache, err := OpenCache(filepath.Join(t.TempDir(), "v.db"), time.Hour, 30*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+	h := hashOf("a")
+	_ = cache.Put(h.String(), true, config.VerifyRequire, "reg.example/app@"+h.String())
+
+	cv := &countingVerifier{res: Result{Mode: config.VerifyRequire, Digest: h}}
+	resolve := func(sourceRef string) (config.StoreConfig, name.Reference, bool) {
+		r, err := name.ParseReference(sourceRef, name.Insecure)
+		if err != nil {
+			return config.StoreConfig{}, nil, false
+		}
+		return config.StoreConfig{Kind: "oci", Host: r.Context().RegistryStr(), Insecure: true}, r, true
+	}
+	r := NewRefresher(cache, cv, resolve)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { r.Run(ctx); close(done) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for cv.n.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cv.n.Load() == 0 {
+		t.Fatal("Run did not re-verify the stale entry")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop on context cancel")
 	}
 }
 

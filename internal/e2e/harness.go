@@ -58,6 +58,7 @@ type harnessCfg struct {
 	rewrite     []config.RewriteRule
 	verify      *config.VerifyConfig
 	storeVerify map[string]*config.StoreVerify
+	enforce     bool // enable serve.enforce (quarantine) + a verdict cache on `edge`
 }
 
 func withCacheMode(m string) harnessOpt { return func(c *harnessCfg) { c.cacheMode = m } }
@@ -67,6 +68,10 @@ func withRules(r ...config.RetentionRule) harnessOpt {
 }
 func withRewrite(r ...config.RewriteRule) harnessOpt { return func(c *harnessCfg) { c.rewrite = r } }
 func withVerify(v config.VerifyConfig) harnessOpt    { return func(c *harnessCfg) { c.verify = &v } }
+
+// withEnforce turns on runtime enforcement (quarantine) for the `edge` engine
+// store and a verdict cache. Combine with withVerify to supply the trust store.
+func withEnforce() harnessOpt { return func(c *harnessCfg) { c.enforce = true } }
 func withStoreVerify(store string, v config.StoreVerify) harnessOpt {
 	return func(c *harnessCfg) {
 		if c.storeVerify == nil {
@@ -140,6 +145,12 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 	if hc.verify != nil {
 		cfg.Serve.Verify = *hc.verify
+	}
+	if hc.enforce {
+		cfg.Serve.Verify.Cache = config.VerifyCacheConfig{Path: filepath.Join(dir, "verify.db")}
+		cfg.Serve.Enforce = config.EnforceConfig{
+			Mode: "quarantine", Stores: []string{"edge"}, OnUnavailable: "grace",
+		}
 	}
 	if err := cfg.Evaluate(); err != nil {
 		t.Fatalf("evaluate config: %v", err)

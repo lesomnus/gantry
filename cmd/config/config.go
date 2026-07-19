@@ -284,8 +284,8 @@ func (c *Config) evaluateEnforce() error {
 		if !ok {
 			return z.Err(nil, "serve.enforce.stores: unknown store %q", n)
 		}
-		if !s.IsEngine() {
-			return z.Err(nil, "serve.enforce.stores: store %q is kind %q; enforcement needs an engine store (docker/containerd)", n, s.Kind)
+		if s.Kind != "docker" {
+			return z.Err(nil, "serve.enforce.stores: store %q is kind %q; runtime enforcement currently supports only docker stores", n, s.Kind)
 		}
 	}
 	// Offline verdicts are the whole point of enforcement surviving a registry

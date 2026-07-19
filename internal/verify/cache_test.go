@@ -72,6 +72,23 @@ func TestCacheExpiryBoundaries(t *testing.T) {
 	if !v.Expired(base.Add(29 * 24 * time.Hour)) {
 		t.Error("should be expired past ttl")
 	}
+
+	// exact boundary instants: the predicates use strict After, so AT the boundary
+	// they are still false and only flip one instant later.
+	refreshAt := v.RefreshAfter
+	if v.StaleForRefresh(refreshAt) {
+		t.Error("must not be stale exactly at RefreshAfter")
+	}
+	if !v.StaleForRefresh(refreshAt.Add(time.Nanosecond)) {
+		t.Error("must be stale one instant past RefreshAfter")
+	}
+	expireAt := v.ExpiresAt
+	if v.Expired(expireAt) {
+		t.Error("must not be expired exactly at ExpiresAt")
+	}
+	if !v.Expired(expireAt.Add(time.Nanosecond)) {
+		t.Error("must be expired one instant past ExpiresAt")
+	}
 }
 
 func TestCacheGetMissAndCountAndForEach(t *testing.T) {

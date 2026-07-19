@@ -77,6 +77,7 @@ Which tier automates each feature (with the test that proves it):
 | 11 | Cancel & Retry | L1 `TestCancelRetry` |
 | 12 | Audit log | L1 `TestAuditLog`; **real restart in L3 `TestL3BlackBox`** |
 | 13 | Health & readiness | L1 `TestHealth` |
+| 14 | Runtime enforcement (quarantine) | L1 `TestEnforcement`; **real docker in `internal/enforce` (`TestEnforceDockerE2E`) + `internal/down` (`TestDockerEnforcerLive`)** |
 | — | Private-CA TLS (`ca_cert`) | L1 `TestTLSCache`; real registry in L3-infra |
 | — | Graceful shutdown | L3 `TestL3BlackBox` |
 | — | Shipped image runs (scratch base; non-root user writes the audit db) | L3 image `TestL3Image` |
@@ -290,6 +291,7 @@ Store references are always `{"name": "<store>"}`. A `Get`/`Watch` shows the job
 | 11 | Cancel & Retry | [api.md](api.md) |
 | 12 | Audit log | [observability.md](observability.md) |
 | 13 | Health & readiness | [observability.md](observability.md) |
+| 14 | Runtime enforcement (quarantine) | [enforcement.md](enforcement.md) |
 
 Each test below is **What → Run → Expect**.
 
@@ -540,6 +542,41 @@ after `docker stop cache`). The overall `Health/Check` is `SERVING` while every
 gated store (default: every engine store) probes healthy; stopping the `edge`
 daemon flips it to `NOT_SERVING` within the readiness loop. See
 [observability.md](observability.md).
+
+## 14. Runtime enforcement (quarantine)
+
+**What** — with `serve.enforce` on an engine store, gantry watches that daemon's
+container starts and force-removes any container whose image is not signed by a
+trusted Root CA — then removes the image. Enforcement verifies in `require`
+semantics regardless of `serve.verify.mode`. See [enforcement.md](enforcement.md).
+
+**Setup** — reuse the signed image and trust store from test 8, and add a verdict
+cache plus enforcement on the `edge` engine store (the admission `mode` may stay
+`off` — enforcement forces `require` itself):
+```yaml
+serve:
+  verify:
+    trust_store: "/tmp/gantry-e2e/trust"          # from test 8
+    cache: { path: "/tmp/gantry-e2e/verify.db" }
+  enforce:
+    mode: "quarantine"
+    stores: ["edge"]
+    on_unavailable: "grace"
+```
+Load a signed and an unsigned image onto the `edge` daemon first (a gantry job or
+`docker pull` from the cache), so each is present with a repo digest.
+
+**Run** — start a container from each image on the `edge` daemon:
+```sh
+docker run -d --name ok  <cache-host>/library/signed:1   sleep 300
+docker run -d --name bad <cache-host>/library/unsigned:1 sleep 300
+```
+
+**Expect** — within a moment gantry force-removes `bad` and removes its image,
+while `ok` keeps running (`docker ps` shows only `ok`). The gantry log carries a
+`quarantining untrusted container` warning naming `bad`'s digest; gantry never
+removes its own container. Setting `serve.verify.mode` to `off` does not change
+this — enforcement is independent of the admission mode.
 
 ## Teardown
 

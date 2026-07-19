@@ -83,7 +83,11 @@ func TestEnforceDockerE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cache.Close()
-	m := NewManager([]Store{{Name: "dockerd", Engine: eng}}, cache, unavailableVerifier{}, nil, Options{OnUnavailable: "grace"})
+	// on_unavailable=kill makes the "trusted verdict is allowed" assertion
+	// load-bearing: with the verifier stubbed unavailable, a container survives
+	// ONLY if the trusted cache path decided it — a broken cache path would fall
+	// through to kill.
+	m := NewManager([]Store{{Name: "dockerd", Engine: eng}}, cache, unavailableVerifier{}, nil, Options{OnUnavailable: "kill"})
 
 	run := func(t *testing.T, name string) string {
 		t.Helper()

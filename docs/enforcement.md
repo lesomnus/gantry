@@ -23,8 +23,13 @@ When enabled (`serve.enforce.mode: quarantine`), gantry runs one watcher per
 listed engine store. For each started container it resolves the image's content
 digest, decides a verdict (trusted or not), and — when untrusted — force-removes
 the container (`docker rm -f`) and then removes the image. The trust anchor is the
-**same `serve.verify.trust_store`** used for admission; enabling enforcement
-builds the verifier even when `serve.verify.mode` is `off`.
+**same `serve.verify.trust_store`** used for admission, but enforcement is a
+run-time **signature requirement independent of the admission
+[verify mode](verification.md)**: it verifies in `require` semantics regardless of
+whether `serve.verify.mode` is `off`, `verify-if-present`, or `require` (and
+regardless of any per-store override). So enforcement works — and quarantines
+unsigned images — even with `serve.verify.mode: off`; the verifier is built
+whenever enforcement is on.
 
 Enforcement **requires** a verdict cache (`serve.verify.cache`) and a trust store
 (`serve.verify.trust_store`); startup fails without them. It is **docker-only** in
@@ -49,21 +54,26 @@ For each start event, in order:
    the [`on_unavailable`](#when-a-verdict-cant-be-obtained-on_unavailable) policy
    decides.
 3. **Verdict, in precedence:**
-   - **Cache** — a fresh (within hard TTL) cached verdict is decisive and
-     offline: trusted ⇒ allow, untrusted ⇒ quarantine.
-   - **Live verification** — on a cache miss or a soft-expired entry, gantry
-     verifies the digest against the source registry it was pulled from (matched
-     by the `RepoDigests` host to a configured `oci` store), which also consults
-     the [local layout](#offline-signatures-the-local-layout) and writes the
-     result back to the cache. A verified signature ⇒ allow; an unsigned or
-     untrusted image ⇒ quarantine.
+   - **Cache** — any cached verdict still within its hard TTL is decisive and
+     offline: trusted ⇒ allow, untrusted ⇒ quarantine. (A soft-expired but
+     within-TTL verdict is still served here; it is re-verified out-of-band by the
+     background sweeper, not inline in the start-event decision.)
+   - **Live verification** — only on a cache miss (or a past-hard-TTL entry)
+     gantry verifies the digest against the source registry it was pulled from
+     (matched by the `RepoDigests` host to a configured `oci` store), which also
+     consults the [local layout](#offline-signatures-the-local-layout) and writes
+     the result back to the cache. A verified signature ⇒ allow; an unsigned or
+     untrusted image ⇒ quarantine (enforcement verifies in `require` semantics, so
+     an unsigned image is quarantined regardless of the store's admission mode).
    - **`on_unavailable`** — if no live answer is obtainable (registry
      unreachable, no matching source store), the policy decides.
 
-A "could not reach the registry" outcome is **never** treated as untrusted and
-**never** kills — a transient failure is a non-sentinel error, distinct from a
-signature that genuinely fails to verify. Likewise an inspect failure on the
-container never triggers a kill.
+A "could not reach the registry" outcome is **never** treated as untrusted — a
+transient failure is a non-sentinel error, distinct from a signature that
+genuinely fails to verify — so it routes to `on_unavailable` rather than a
+verdict. Under the default `grace` (or `allow`) it does not kill; under
+`on_unavailable: kill` it fails closed. Likewise an inspect failure on the
+container never triggers a kill (it is treated as unresolved).
 
 ## The verdict cache
 

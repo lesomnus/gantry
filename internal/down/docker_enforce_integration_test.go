@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
 	"github.com/lesomnus/gantry/cmd/config"
 )
 
@@ -112,7 +111,4 @@ func TestDockerEnforcerLive(t *testing.T) {
 			}
 		}
 	})
-
-	// keep the image around for other tests; nothing to clean here
-	_ = image.RemoveOptions{}
 }

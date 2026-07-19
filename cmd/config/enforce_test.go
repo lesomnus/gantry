@@ -99,7 +99,12 @@ func TestEnforceConfigRejections(t *testing.T) {
 		{
 			name: "non-engine store",
 			yaml: baseStores + "\nserve:\n  verify:\n    trust_store: /ca\n    cache: {path: /v.db}\n  enforce:\n    mode: quarantine\n    stores: [local]\n",
-			want: "needs an engine store",
+			want: "supports only docker",
+		},
+		{
+			name: "containerd store rejected",
+			yaml: "stores:\n  ctr:\n    kind: containerd\n    address: \"/run/containerd/containerd.sock\"\nserve:\n  verify:\n    trust_store: /ca\n    cache: {path: /v.db}\n  enforce:\n    mode: quarantine\n    stores: [ctr]\n",
+			want: "supports only docker",
 		},
 		{
 			name: "enforce without cache",
