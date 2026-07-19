@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -25,7 +24,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/xport"
-	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/z"
 )
 
@@ -149,6 +147,22 @@ func ociPlatform(osType, arch string) (string, error) {
 func (e *dockerEngine) Close() error { return e.cli.Close() }
 
 func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, anchor *AnchorBlob, sink Sink) ([]string, error) {
+	// A digest-named `as` reference is registered by forging a RepoDigest over
+	// the pulled content, which only the containerd image store can do. Probe
+	// BEFORE pulling and fail fast on the classic graph store: a caller that
+	// asked for a digest name needs it to resolve locally, so silently dropping
+	// it (and pulling anyway) would leave a node quietly pulling through to the
+	// origin later. The store kind is stable for the pull that follows — a
+	// daemon restart mid-pull fails the pull itself.
+	if _, digests := splitNames(as); len(digests) > 0 {
+		ok, err := e.containerdStore(ctx)
+		if err != nil {
+			return nil, z.Err(err, "probe image store")
+		}
+		if !ok {
+			return nil, fmt.Errorf("engine %q uses the classic (graph-driver) image store, which cannot register digest-named references %v; the containerd image store (driver-type io.containerd.snapshotter.v1) is required for digest `as` names", e.name, digests)
+		}
+	}
 	pull_ref := ref
 	if digest != "" {
 		var err error
@@ -222,32 +236,21 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 	if len(digests) > 0 {
 		// Digest names cannot be tagged — a RepoDigest is forged by importing a
 		// thin OCI archive (the anchor manifest under the requested names) over
-		// the content the pull just placed. Containerd image store only; the
-		// classic graph store cannot represent it, so it degrades to a no-op:
-		// the names are NOT reported as recorded and the caller stamps what the
-		// daemon really holds (the pull reference) instead.
-		ok, err := e.containerdStore(ctx)
-		if err != nil {
+		// the content the pull just placed, no registry contact. The classic
+		// graph store, which cannot represent this, was already rejected before
+		// the pull, so the daemon here runs the containerd image store.
+		if err := e.loadDigestNames(ctx, digests, digest, anchor); err != nil {
 			cleanup()
-			return nil, z.Err(err, "probe image store")
+			return nil, err
 		}
-		if !ok {
-			log.From(ctx).Warn("digest-named references skipped: the daemon uses the classic graph store, which cannot record a digest reference without a registry pull; the image resolves only by its pull reference",
-				slog.String("engine", e.name), slog.String("names", strings.Join(digests, ", ")))
-		} else {
-			if err := e.loadDigestNames(ctx, digests, digest, anchor); err != nil {
-				cleanup()
-				return nil, err
-			}
-			recorded = append(recorded, digests...)
-		}
+		recorded = append(recorded, digests...)
 	}
 	if !anchored && len(recorded) > 0 && !slices.Contains(names, ref) {
 		// The caller renamed the image away from the pull-created name; drop it.
-		// Content held by the names above stays — the len(recorded) guard covers
-		// the classic-store digest fallback, where no name was applied and
-		// removing the pull record would orphan the content. Skip when another
-		// pull of the same reference is in flight and racing to tag it.
+		// Content held by the names above stays — the len(recorded) guard keeps
+		// the pull record when nothing else names the content, which removing it
+		// would orphan. Skip when another pull of the same reference is in flight
+		// and racing to tag it.
 		if e.pullCount(ref) == 1 {
 			if _, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{}); err != nil {
 				return nil, z.Err(err, "untag %q", ref)
@@ -255,9 +258,9 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		}
 	}
 	if len(recorded) == 0 {
-		// Nothing was applied (digest names skipped on a classic store): the
-		// image survives solely as the pull-created record — report that, so
-		// retention tracks a reference the daemon actually resolves.
+		// Defensive: if no name was applied, the image survives solely as the
+		// pull-created record — report that, so retention tracks a reference the
+		// daemon actually resolves.
 		recorded = []string{pull_ref}
 	}
 	return recorded, nil

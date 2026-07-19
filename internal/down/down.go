@@ -67,9 +67,9 @@ type Engine interface {
 	// supplies the manifest bytes backing it). Digest names require an anchored
 	// pull — the Copier admits them only with a non-empty digest.
 	// recorded reports the references the daemon actually holds for the image
-	// after the pull — the applied names, or the pull-created record when a
-	// name could not be applied (classic-store digest skip) — so the caller
-	// stamps its retention index with reality, never with a skipped name.
+	// after the pull (the applied names) so the caller stamps its retention
+	// index with reality. A digest `as` name needs the containerd image store;
+	// on a classic (graph-driver) docker store the pull is rejected up front.
 	Pull(ctx context.Context, ref string, digest string, platform string, as []string, anchor *AnchorBlob, sink Sink) (recorded []string, err error)
 	// Platform reports the daemon host's platform in OCI form ("linux/amd64").
 	Platform(ctx context.Context) (string, error)

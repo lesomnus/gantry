@@ -77,8 +77,9 @@ type Request struct {
 	// name. Tag references — or, for a digest-pinned job (a digest ref, or a
 	// verified source), digest references carrying the pinned digest: those are
 	// registered over the pulled content so the upstream digest name resolves
-	// locally without touching its registry (containerd image store; a classic
-	// docker graph store skips them with a warning). Engine targets only.
+	// locally without touching its registry (containerd image store only; a
+	// classic graph-driver docker rejects the job before pulling). Engine
+	// targets only.
 	As []string
 	// Labels is caller metadata attached to the job for List filtering; it does
 	// not affect the move or coalescing. Each coalesced caller keeps its own.
@@ -733,10 +734,9 @@ func (w *Copier) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 		t.State = "done"
 	})
 	if w.pullHook != nil {
-		// Stamp the names the daemon ACTUALLY records, as reported by the
-		// engine — not the requested ones: a classic-store docker skips digest
-		// `as` names, and stamping a name the daemon never held would leave the
-		// image unowned (reaped as untagged) while the index claims otherwise.
+		// Stamp the names the daemon ACTUALLY holds, as reported by the engine —
+		// not the requested ones — so the index never claims a name the daemon
+		// does not resolve (which would leave the image reaped as untagged).
 		names := recorded
 		if len(names) == 0 {
 			names = []string{ex.pullRef}

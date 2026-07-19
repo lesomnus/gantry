@@ -234,13 +234,14 @@ Digest names require the **containerd image store**:
   `/images/load` over the content the pull just placed — no registry contact.
   This works only when the daemon runs the containerd image store
   (`driver-type = io.containerd.snapshotter.v1`). A **classic graph store cannot
-  represent a digest reference** without a real registry pull, so gantry **skips**
-  the digest names and logs a warning; tag `as` names still apply, and the image
-  resolves by its pull reference.
+  represent a digest reference** without a real registry pull, so a digest `as`
+  name against a classic-store docker is **rejected before the pull** (the job
+  fails with a clear error) rather than silently dropped — a caller that asked
+  for a digest name would otherwise have a node quietly pull through to the
+  origin later. Tag `as` names are unaffected and work on either store.
 
 The retention index is stamped with the names the daemon **actually** holds (as
-reported back by the engine), never with a skipped name — so a classic-store skip
-leaves the image tracked under its pull reference, not a phantom digest name (see
+reported back by the engine), never with a name it does not resolve (see
 `retention.md`).
 
 The net effect: a jobspec pinned to `repo@sha256:INDEX` resolves locally after

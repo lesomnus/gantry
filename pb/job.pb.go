@@ -958,9 +958,9 @@ type Job_builder struct {
 	// source), digest references carrying the pinned digest: those are
 	// registered over the pulled content so the upstream digest name (e.g.
 	// "cr.example.com/app@sha256:...") resolves locally without touching its
-	// registry (containerd image store; a classic docker graph store skips
-	// them with a warning). Non-empty replaces the pull-reference name
-	// entirely — include it in the list to keep it.
+	// registry (containerd image store only; a classic docker graph-driver
+	// store rejects the job before pulling). Non-empty replaces the
+	// pull-reference name entirely — include it in the list to keep it.
 	As          []string
 	DateEnded   *timestamppb.Timestamp
 	DateStarted *timestamppb.Timestamp

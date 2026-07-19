@@ -43,7 +43,8 @@ type puller interface {
 	// as-is (the daemon errors if the image has no such platform). anchor backs
 	// digest-named `as` references with the anchored manifest's raw bytes (nil
 	// when there are none). recorded reports the references the daemon actually
-	// holds afterwards (a classic-store docker skips digest names).
+	// holds afterwards. A digest `as` name needs the containerd image store; a
+	// classic graph-driver docker rejects the pull up front.
 	pull(ctx context.Context, ref, digest, platform string, as []string, anchor *down.AnchorBlob, sink down.Sink) (recorded []string, err error)
 	// hostPlatform is the daemon host's platform in OCI form ("linux/amd64"),
 	// the default platform when a job does not name one.

@@ -370,7 +370,7 @@ add '{"ref":"library/busybox:1.36","source":{"name":"cache"},"target":{"name":"e
 **Expect** — `docker images` lists `docker.io/library/busybox:1.36` (the `as` name)
 rather than the `127.0.0.1:5000/...` pull ref. **Digest** `as` names
 (`repo@sha256:…`) require a digest-pinned job (test 6) and a containerd-image-store
-engine; a classic graph store skips them with a warning (tags still apply). See
+engine; a digest `as` name against a classic graph store is rejected before the pull (tags still apply). See
 [stores.md](stores.md#caller-chosen-as-names).
 
 ## 6. Digest-pinned job (verbatim, local resolve)
