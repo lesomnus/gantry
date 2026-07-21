@@ -129,7 +129,7 @@ the source registry's `downstream_host`, else the source registry's own `host`
 (no substitution). Only the host is rewritten; the repository path and tag/digest
 are preserved.
 
-## Outbound TLS: private-CA verification and TPM-sealed client mTLS
+## Outbound TLS: private-CA verification and client mTLS
 
 Any store — registry or engine — may carry outbound TLS settings. These build a
 single per-store transport (`internal/xport`), memoized so the same store config
@@ -146,19 +146,32 @@ certificate. Empty falls back to the system roots — or is skipped entirely whe
 `insecure` is set. `insecure` allows plain-HTTP or self-signed registries (skip
 verification); plain HTTP itself is driven by `name.Insecure` on the reference.
 
-### TPM-sealed client mTLS
+### Client mTLS (`cred`)
 
-For mutual TLS whose client key never leaves the device, gantry signs the TLS
-handshake with a key held in a TPM and addressed by its persistent handle:
+`cred` is the client credential gantry presents to the store. Like a store it
+carries a `kind`, which selects where the private key lives; `cred.cert` — the
+client certificate (leaf + chain), PEM — is common to every kind, and its public
+key **must match** the private key, or the transport build fails with a clear
+config error rather than an opaque handshake failure at pull time. Unlike a
+store, a field belonging to another kind is **rejected** rather than ignored: a
+stray `key` or `handle` usually means the wrong kind was picked.
 
-- **`tpm`** — the TPM device path. Defaults to `/dev/tpmrm0` (the resource-manager
-  device, which multiplexes access) when omitted.
-- **`tpm_handle`** — the persistent handle of the client signing key, as hex
+**kind `tpm`** — the key is sealed in a TPM and never leaves the device; gantry
+signs the TLS handshake inside it:
+
+```yaml
+cred:
+  kind: "tpm"
+  handle: "0x81000001"            # persistent handle of the client key
+  cert: "/etc/gantry/device.crt"  # client cert (leaf + chain), PEM
+  # device: "/dev/tpmrm0"         # default
+```
+
+- **`handle`** — the persistent handle of the client signing key, as hex
   (`0x81000001`) or decimal; the value must fit in a uint32. gantry does **not**
   create keys — the handle must reference a key already provisioned in the TPM.
-- **`tpm_cert`** — the client certificate (leaf + chain), PEM. Its public key
-  **must match** the key at the handle, or the transport build fails with a clear
-  config error rather than an opaque handshake failure at pull time.
+- **`device`** — the TPM device path. Defaults to `/dev/tpmrm0` (the
+  resource-manager device, which multiplexes access) when omitted.
 
 **ECC keys only** — the signer supports NIST P-256 / P-384 / P-521; any other TPM
 key type is rejected. Signing runs `TPM2_Sign` inside the device and returns the
@@ -167,7 +180,25 @@ never present in process memory. Access to a single TPM connection is serialized
 (one file descriptor, no internal locking), so parallel TLS handshakes signing
 with the same key are safe.
 
-For an `oci` registry, TPM mTLS applies to **every** outbound direction — pull,
+**kind `file`** — an ordinary PEM key pair on disk:
+
+```yaml
+cred:
+  kind: "file"
+  cert: "/etc/gantry/client.crt"  # client cert (leaf + chain), PEM
+  key: "/etc/gantry/client.key"   # private key, PEM
+```
+
+- **`key`** — the private key, PEM. PKCS#8 (`PRIVATE KEY`), SEC1
+  (`EC PRIVATE KEY`), and PKCS#1 (`RSA PRIVATE KEY`) blocks are accepted;
+  encrypted keys are not. A combined file (certificate + key blocks in one PEM)
+  works as `key` — non-key blocks are skipped.
+
+Both kinds share the exact transport wiring (same chain assembly, key-match
+check, `ca_cert` verification, memoization) — the only difference is where the
+private key lives and who signs.
+
+For an `oci` registry, a cred applies to **every** outbound direction — pull,
 push, referrer copy — including the bearer-token endpoint. For a **docker**
 engine it is the client certificate presented to the daemon's TLS port (tcp
 mTLS); the docker client detects the transport's TLS config and dials the daemon
@@ -176,15 +207,16 @@ does not use this.)
 
 Validation and lifecycle:
 
-- `tpm_handle` and `tpm_cert` are **both required** once any TPM field is set;
-  `ca_cert` is intentionally excluded from that trigger (it configures server
-  verification and is valid on its own).
-- `insecure` **cannot** be combined with TPM mTLS: `insecure` enables plain HTTP
-  on the oras path, which would silently drop the client certificate. To trust a
-  self-signed mTLS server, set `ca_cert` instead.
-- The device and certificate files are validated lazily on first use, so a
-  missing TPM does not block startup for stores that do not use it. Devices are
-  released at server shutdown.
+- `cred.kind` and `cred.cert` are always required; `kind: tpm` additionally
+  requires `handle`, `kind: file` requires `key`. `ca_cert` is intentionally a
+  sibling of `cred`, not part of it: it configures server verification and is
+  valid on its own.
+- `insecure` **cannot** be combined with a cred: `insecure` enables plain HTTP
+  on the oras path, which would silently drop the client certificate. To trust
+  a self-signed mTLS server, set `ca_cert` instead.
+- The device, certificate, and key files are validated lazily on first use, so a
+  missing TPM or key file does not block startup for stores that do not use it.
+  Devices are released at server shutdown.
 
 ## Caller-chosen `as` names
 
@@ -278,9 +310,12 @@ keyed by name; the key is the store name (and, for `oci`, the default `host`).
 | Key | Applies to | Meaning |
 |---|---|---|
 | `kind` | all | `oci` \| `docker` \| `containerd`. Required. |
-| `tpm` | all | TPM device path for client mTLS. Default `/dev/tpmrm0` when any TPM field is set. |
-| `tpm_handle` | all | Persistent handle of the TPM client key (hex or decimal, uint32). Required with `tpm_cert`. |
-| `tpm_cert` | all | Client certificate (leaf + chain), PEM; public key must match the TPM key. |
+| `cred` | all | Client-mTLS credential block; omit for no client certificate. |
+| `cred.kind` | all | `tpm` (key sealed in a TPM) \| `file` (PEM key pair on disk). Required. |
+| `cred.cert` | all | Client certificate (leaf + chain), PEM; public key must match the private key. Required. |
+| `cred.handle` | all | `tpm` — persistent handle of the client key (hex or decimal, uint32). Required. |
+| `cred.device` | all | `tpm` — TPM device path. Default `/dev/tpmrm0`. |
+| `cred.key` | all | `file` — private key, PEM (PKCS#8 / SEC1 EC / PKCS#1 RSA; unencrypted). Required. |
 | `ca_cert` | all | PEM CA(s) to verify the server. Usable on its own. Empty = system roots (skipped when `insecure`). |
 
 ### `oci` registry

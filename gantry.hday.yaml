@@ -66,8 +66,10 @@ stores:
     # verifies the daemon's server certificate. Anchored so other daemons
     # reachable with the same device credential can reuse it (merge key `<<`).
     <<: &fdy_creds
-      tpm_handle: "0x81666479"            # fdy (device AK persistent handle)
-      tpm_cert: "device.crt"              # client cert (leaf + chain), PEM
+      cred:
+        kind: "tpm"
+        handle: "0x81666479"              # fdy (device AK persistent handle)
+        cert: "device.crt"                # client cert (leaf + chain), PEM
       ca_cert: "ca.crt"                   # CA that signed the daemon's server cert
     kind: docker
     address: "tcp://192.168.10.2:2376"    # daemon TLS port

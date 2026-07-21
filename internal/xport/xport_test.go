@@ -123,7 +123,7 @@ func TestMTLSTransportFullHandshake(t *testing.T) {
 	defer srv.Close()
 
 	// clientKey stands in for the TPM signer (both are crypto.Signer).
-	rt, err := mtlsTransport(clientCertPEM, caPEM, clientKey, false)
+	rt, err := mtlsTransport("the key at the TPM handle", clientCertPEM, caPEM, clientKey, false)
 	if err != nil {
 		t.Fatalf("build transport: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestMTLSTransportKeyMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mtlsTransport(certPEM, nil, otherKey, false); err == nil {
+	if _, err := mtlsTransport("the key at the TPM handle", certPEM, nil, otherKey, false); err == nil {
 		t.Error("expected error when signer does not match the certificate key")
 	}
 }
@@ -155,7 +155,7 @@ func TestMTLSTransportRejectsBadCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mtlsTransport([]byte("not a pem"), nil, key, false); err == nil {
+	if _, err := mtlsTransport("the key at the TPM handle", []byte("not a pem"), nil, key, false); err == nil {
 		t.Error("expected error for a certificate file with no CERTIFICATE block")
 	}
 }
@@ -163,9 +163,161 @@ func TestMTLSTransportRejectsBadCert(t *testing.T) {
 func TestMTLSTransportRejectsBadCA(t *testing.T) {
 	ca, caKey, _ := genCA(t)
 	certPEM, key := issueCert(t, ca, caKey, "client", false)
-	if _, err := mtlsTransport(certPEM, []byte("garbage ca"), key, false); err == nil {
+	if _, err := mtlsTransport("the key at the TPM handle", certPEM, []byte("garbage ca"), key, false); err == nil {
 		t.Error("expected error for an unparseable ca_cert")
 	}
+}
+
+// TestKeyPairTransportFullHandshake proves a store configured with a kind
+// "file" cred (a PEM cert/key file pair, no TPM) presents its certificate to a
+// server that requires and verifies it, through the public Transport entry
+// point — including the memoization the TPM path gets.
+func TestKeyPairTransportFullHandshake(t *testing.T) {
+	ca, caKey, caPEM := genCA(t)
+	serverCertPEM, serverKey := issueCert(t, ca, caKey, "server", true)
+	clientCertPEM, clientKey := issueCert(t, ca, caKey, "client", false)
+
+	serverCert, err := tls.X509KeyPair(serverCertPEM, encodeKey(t, serverKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		t.Fatal("append CA")
+	}
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			http.Error(w, "no client cert", http.StatusBadRequest)
+			return
+		}
+		io.WriteString(w, r.TLS.PeerCertificates[0].Subject.CommonName)
+	}))
+	srv.TLS = &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+	}
+	srv.StartTLS()
+	defer srv.Close()
+
+	dir := t.TempDir()
+	write := func(name string, data []byte) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	c := config.StoreConfig{
+		Cred: &config.CredConfig{
+			Kind: "file",
+			Cert: write("client.crt", clientCertPEM),
+			Key:  write("client.key", encodeKey(t, clientKey)),
+		},
+		CACert: write("ca.crt", caPEM),
+	}
+	defer CloseTPM() // clear the cache for other tests
+
+	rt, err := Transport(c)
+	if err != nil {
+		t.Fatalf("build transport: %v", err)
+	}
+	resp, err := (&http.Client{Transport: rt}).Get(srv.URL)
+	if err != nil {
+		t.Fatalf("mTLS GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "client" {
+		t.Fatalf("status %d body %q; want 200 \"client\"", resp.StatusCode, body)
+	}
+
+	again, err := Transport(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != rt {
+		t.Error("Transport should return the same cached transport for identical config")
+	}
+}
+
+// A cred.cert issued for a different key than cred.key must fail the
+// transport build with a config error, not an opaque handshake failure.
+func TestKeyPairTransportKeyMismatch(t *testing.T) {
+	ca, caKey, _ := genCA(t)
+	certPEM, _ := issueCert(t, ca, caKey, "client", false)
+	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, encodeKey(t, otherKey), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defer CloseTPM()
+
+	c := config.StoreConfig{Cred: &config.CredConfig{Kind: "file", Cert: certPath, Key: keyPath}}
+	if _, err := Transport(c); err == nil {
+		t.Error("expected error when cred.key does not match cred.cert")
+	}
+}
+
+func TestParsePrivateKey(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("PKCS#8", func(t *testing.T) {
+		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
+		s, err := parsePrivateKey(pemBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !key.PublicKey.Equal(s.Public()) {
+			t.Error("parsed key does not match")
+		}
+	})
+	t.Run("SEC1 EC", func(t *testing.T) {
+		s, err := parsePrivateKey(encodeKey(t, key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !key.PublicKey.Equal(s.Public()) {
+			t.Error("parsed key does not match")
+		}
+	})
+	t.Run("key block after a certificate block", func(t *testing.T) {
+		ca, caKey, _ := genCA(t)
+		certPEM, _ := issueCert(t, ca, caKey, "client", false)
+		combined := append(append([]byte{}, certPEM...), encodeKey(t, key)...)
+		if _, err := parsePrivateKey(combined); err != nil {
+			t.Errorf("combined cert+key file should parse: %v", err)
+		}
+	})
+	t.Run("no key block", func(t *testing.T) {
+		if _, err := parsePrivateKey([]byte("not a pem")); err == nil {
+			t.Error("expected error for a file with no private-key block")
+		}
+	})
+	t.Run("corrupt key block", func(t *testing.T) {
+		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("garbage")})
+		if _, err := parsePrivateKey(pemBytes); err == nil {
+			t.Error("expected error for an unparseable key block")
+		}
+	})
 }
 
 func TestTransportFallback(t *testing.T) {
