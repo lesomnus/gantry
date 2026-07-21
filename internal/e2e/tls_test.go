@@ -18,3 +18,16 @@ func TestTLSCache(t *testing.T) {
 		t.Fatalf("TLS copy state=%v error=%q", job.GetState(), job.GetError())
 	}
 }
+
+// mTLS: the cache registry REQUIRES a client certificate; the store supplies a
+// kind "file" cred (PEM cert/key pair). Proves the file-based client-mTLS
+// transport is presented on the copy path.
+func TestMTLSCache(t *testing.T) {
+	h := newHarness(t, withMTLSCache())
+	seedImage(t, h.remote, "lib/app", "1")
+
+	job := h.waitDone(h.add(copyReq("remote", "cache")).GetId())
+	if job.GetState() != pb.JobState_JOB_STATE_DONE {
+		t.Fatalf("mTLS copy state=%v error=%q", job.GetState(), job.GetError())
+	}
+}

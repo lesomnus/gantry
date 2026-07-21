@@ -27,19 +27,32 @@ stores:
   # Source registry (remote). host defaults to the store name when omitted.
   docker.io: { kind: "oci" }
 
-  # Private registry reached with mutual TLS whose client key is sealed in a TPM.
-  # gantry presents the client certificate — and signs the TLS handshake with the
-  # TPM-held key — for every outbound request to this registry, including the
-  # bearer-token exchange. The key never leaves the device.
+  # Private registry reached with mutual TLS. `cred` is the client credential
+  # gantry presents for every outbound request to this registry, including the
+  # bearer-token exchange; `cred.kind` selects where the private key lives.
+  #
+  # kind "tpm": the key is sealed in a TPM and never leaves the device.
   # internal:
   #   kind: "oci"
   #   host: "registry.internal"
-  #   tpm: "/dev/tpmrm0"            # TPM device (default; omit to use it)
-  #   tpm_handle: "0x81000001"     # persistent handle of the client key
-  #   tpm_cert: "/etc/gantry/device.crt"  # client cert (leaf + chain), PEM; its
-  #                                        # public key must match the TPM key
-  #   ca_cert: "/etc/gantry/ca.crt"       # verify the registry/token server
-  #                                        # (usable on its own, without TPM)
+  #   cred:
+  #     kind: "tpm"
+  #     device: "/dev/tpmrm0"       # TPM device (default; omit to use it)
+  #     handle: "0x81000001"        # persistent handle of the client key
+  #     cert: "/etc/gantry/device.crt"  # client cert (leaf + chain), PEM; its
+  #                                     # public key must match the TPM key
+  #   ca_cert: "/etc/gantry/ca.crt"     # verify the registry/token server
+  #                                     # (usable on its own, without cred)
+  #
+  # kind "file": an ordinary PEM key pair on disk.
+  # internal-file:
+  #   kind: "oci"
+  #   host: "registry.internal"
+  #   cred:
+  #     kind: "file"
+  #     cert: "/etc/gantry/client.crt"  # client cert (leaf + chain), PEM
+  #     key: "/etc/gantry/client.key"   # private key, PEM (PKCS#8 / EC / RSA)
+  #   ca_cert: "/etc/gantry/ca.crt"
 
   # Cache registry gantry fills and engines pull from.
   cache:

@@ -376,17 +376,13 @@ type StoreConfig struct {
 	// nil disables GC for the store. See StoreRetention.
 	Retention *StoreRetention `yaml:"retention"`
 
-	// --- mTLS client auth via a TPM-backed key ---
-	// When TPMHandle is set, gantry authenticates to this store with a client
-	// certificate whose private key never leaves the TPM. The key is addressed by
-	// its persistent handle; the leaf (+ chain) is read from TPMCert and its
-	// public key must match the key at the handle. For an oci registry this
-	// applies to every outbound direction (pull, push, referrer copy) including
-	// the bearer-token endpoint; for a docker engine it is the client certificate
-	// presented to the daemon's TLS port (tcp mTLS).
-	TPMDevice string `yaml:"tpm"`        // TPM device path (default /dev/tpmrm0)
-	TPMHandle string `yaml:"tpm_handle"` // persistent handle, hex e.g. "0x81000001"
-	TPMCert   string `yaml:"tpm_cert"`   // client certificate (leaf + chain), PEM
+	// Cred is the client-mTLS credential gantry presents to this store; nil
+	// means no client certificate. For an oci registry it applies to every
+	// outbound direction (pull, push, referrer copy) including the bearer-token
+	// endpoint; for a docker engine it is the client certificate presented to
+	// the daemon's TLS port (tcp mTLS).
+	Cred *CredConfig `yaml:"cred"`
+
 	// CACert verifies the registry/token server. Empty uses the system roots (or
 	// is skipped when insecure is set).
 	CACert string `yaml:"ca_cert"`
@@ -407,43 +403,79 @@ func (s StoreConfig) IsRegistry() bool { return s.Kind == "oci" }
 // IsEngine reports whether the store is a daemon gantry triggers to pull.
 func (s StoreConfig) IsEngine() bool { return s.Kind == "docker" || s.Kind == "containerd" }
 
-// HasTPM reports whether the store authenticates with a TPM-backed client
-// certificate (mTLS).
-func (s StoreConfig) HasTPM() bool { return s.TPMHandle != "" }
+// CredConfig is a store's client-mTLS credential — how gantry proves its
+// identity to the store. kind selects where the private key lives; cert is
+// common to every kind. Unlike a store, a field of another kind is rejected
+// rather than ignored: a stray key or handle usually means the wrong kind was
+// picked, and this is security configuration.
+type CredConfig struct {
+	Kind string `yaml:"kind"` // tpm | file
 
-// TPMHandleValue parses the persistent handle. It accepts hex ("0x81000001") or
+	// Cert is the client certificate (leaf + chain), PEM. Its public key must
+	// match the private key the kind selects, checked at transport build time.
+	Cert string `yaml:"cert"`
+
+	// --- kind "tpm": the key is sealed in a TPM and never leaves it ---
+	Device string `yaml:"device"` // TPM device path (default /dev/tpmrm0)
+	Handle string `yaml:"handle"` // persistent handle, hex e.g. "0x81000001"
+
+	// --- kind "file": an ordinary PEM key pair on disk ---
+	Key string `yaml:"key"` // private key, PEM (PKCS#8, SEC1 EC, or PKCS#1 RSA)
+}
+
+// IsTPM reports whether the credential signs with a TPM-sealed key. Safe on a
+// nil receiver (no credential).
+func (c *CredConfig) IsTPM() bool { return c != nil && c.Kind == "tpm" }
+
+// HandleValue parses the persistent handle. It accepts hex ("0x81000001") or
 // decimal; the value must fit in 32 bits, as a TPM handle is a uint32.
-func (s StoreConfig) TPMHandleValue() (uint32, error) {
-	v, err := strconv.ParseUint(s.TPMHandle, 0, 32)
+func (c CredConfig) HandleValue() (uint32, error) {
+	v, err := strconv.ParseUint(c.Handle, 0, 32)
 	if err != nil {
-		return 0, z.Err(err, "tpm_handle %q is not a valid 32-bit integer (use hex, e.g. 0x81000001)", s.TPMHandle)
+		return 0, z.Err(err, "cred.handle %q is not a valid 32-bit integer (use hex, e.g. 0x81000001)", c.Handle)
 	}
 	return uint32(v), nil
 }
 
-// validateTPM checks the TPM mTLS fields are internally consistent. ca_cert is
-// intentionally excluded from the trigger: it configures server verification and
-// is valid on its own (with or without a client certificate). The device and
-// certificate files are validated lazily on first use, so a missing TPM does not
-// block startup for stores that do not use it.
-func (s StoreConfig) validateTPM() error {
-	if s.TPMHandle == "" && s.TPMCert == "" && s.TPMDevice == "" {
-		return nil // no TPM client-certificate auth configured
-	}
-	if s.TPMHandle == "" {
-		return z.Err(nil, "tpm_handle is required when TPM mTLS is configured")
-	}
-	if s.TPMCert == "" {
-		return z.Err(nil, "tpm_cert is required when TPM mTLS is configured")
+// validateCred checks the cred block is internally consistent for its kind.
+// ca_cert is intentionally separate: it configures server verification and is
+// valid on its own (with or without a credential). The device, certificate,
+// and key files are validated lazily on first use, so a missing TPM or key
+// file does not block startup for stores that do not use it.
+func (s StoreConfig) validateCred() error {
+	c := s.Cred
+	if c == nil {
+		return nil // no client-certificate auth configured
 	}
 	if s.Insecure {
 		// mTLS requires TLS, but insecure enables plain HTTP on the oras path
 		// (PlainHTTP) — the two are mutually exclusive and would silently drop the
 		// client certificate. To trust a self-signed mTLS server, set ca_cert.
-		return z.Err(nil, "insecure cannot be combined with TPM mTLS; use ca_cert to trust a self-signed server")
+		return z.Err(nil, "insecure cannot be combined with cred (client mTLS); use ca_cert to trust a self-signed server")
 	}
-	if _, err := s.TPMHandleValue(); err != nil {
-		return err
+	if c.Cert == "" {
+		return z.Err(nil, "cred.cert is required")
+	}
+	switch c.Kind {
+	case "tpm":
+		if c.Key != "" {
+			return z.Err(nil, `cred.key is a kind "file" field; cred.kind is "tpm"`)
+		}
+		if c.Handle == "" {
+			return z.Err(nil, `cred.handle is required for kind "tpm"`)
+		}
+		if _, err := c.HandleValue(); err != nil {
+			return err
+		}
+	case "file":
+		if c.Handle != "" || c.Device != "" {
+			return z.Err(nil, `cred.handle and cred.device are kind "tpm" fields; cred.kind is "file"`)
+		}
+		if c.Key == "" {
+			return z.Err(nil, `cred.key is required for kind "file"`)
+		}
+	default:
+		return z.Err(nil, `cred.kind %q is not one of "tpm" or "file"`, c.Kind)
 	}
 	return nil
 }

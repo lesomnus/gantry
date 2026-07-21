@@ -54,6 +54,7 @@ type harnessOpt func(*harnessCfg)
 type harnessCfg struct {
 	cacheMode   string // "copy" (default) | "proxy"
 	tlsCache    bool   // serve the cache over HTTPS with a private CA (ca_cert)
+	mtlsCache   bool   // cache additionally REQUIRES a client cert (kind "file" cred)
 	rules       []config.RetentionRule
 	verify      *config.VerifyConfig
 	storeVerify map[string]*config.StoreVerify
@@ -62,6 +63,7 @@ type harnessCfg struct {
 
 func withCacheMode(m string) harnessOpt { return func(c *harnessCfg) { c.cacheMode = m } }
 func withTLSCache() harnessOpt          { return func(c *harnessCfg) { c.tlsCache = true } }
+func withMTLSCache() harnessOpt         { return func(c *harnessCfg) { c.mtlsCache = true } }
 func withRules(r ...config.RetentionRule) harnessOpt {
 	return func(c *harnessCfg) { c.rules = r }
 }
@@ -97,7 +99,14 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	var uploads *int32
 	var closeCache func()
 	cacheStore := config.StoreConfig{Kind: "oci", Mode: hc.cacheMode}
-	if hc.tlsCache {
+	if hc.mtlsCache {
+		var caFile, certFile, keyFile string
+		cacheHost, caFile, certFile, keyFile, closeCache = newMTLSRegistry(t)
+		cacheStore.Host = cacheHost
+		cacheStore.CACert = caFile
+		cacheStore.Cred = &config.CredConfig{Kind: "file", Cert: certFile, Key: keyFile}
+		uploads = new(int32) // upload counting is not wired for the TLS variants
+	} else if hc.tlsCache {
 		var caFile string
 		cacheHost, caFile, closeCache = newTLSRegistry(t)
 		cacheStore.Host = cacheHost

@@ -123,8 +123,10 @@ job "gantry" {
             # dockerd-10-2:
             #   kind: docker
             #   address: "tcp://192.168.10.2:2376"
-            #   tpm_handle: "0x81666479"
-            #   tpm_cert: "device.crt"
+            #   cred:
+            #     kind: tpm
+            #     handle: "0x81666479"
+            #     cert: "device.crt"
             #   ca_cert: "ca.crt"
         EOT
       }
