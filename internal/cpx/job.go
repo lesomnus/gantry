@@ -88,12 +88,16 @@ type Job struct {
 	exec     *jobExec
 	req      Request     // the original request, for Retry's fresh re-plan
 	canceled atomic.Bool // Cancel was requested; Active must not coalesce onto it
+	// sealed marks a still-running execution that has already failed and is only
+	// winding down. It is not a state — the job's outcome is decided by its error
+	// — but coalescing must skip it, or a racing identical submit would be handed
+	// this failure instead of a fresh move. Guarded by the store mutex.
+	sealed bool
 	// done is closed once the execution has finished, whatever its outcome. It
 	// is the signal another job waits on when it needs this one's output; unlike
-	// ctx it means "finished", not "abandon the work" — a layer failure cancels
-	// ctx while the job is still running, and the store cancels it when the last
-	// handle goes. Closed by run() so an erased or evicted record still releases
-	// its waiters.
+	// ctx it means "finished", not "abandon the work" — the store cancels ctx
+	// when the last handle goes, which says nothing about the work being over.
+	// Closed by run() so an erased or evicted record still releases its waiters.
 	done     chan struct{}
 	doneOnce sync.Once
 

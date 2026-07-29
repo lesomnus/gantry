@@ -1128,6 +1128,17 @@ func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	if c < 1 {
 		c = 1
 	}
+	// A failing layer aborts its siblings, and nothing beyond them: the abort is
+	// scoped to this fan-out, not to the job. Cancelling the JOB here would leave
+	// every later attempt or step of the same job starting on a dead context — and
+	// a dead context is read as "the job is being cancelled", which suppresses the
+	// retry that was supposed to recover from this very failure.
+	lctx, abort := context.WithCancel(ctx)
+	defer abort()
+	// New callers must not join a move that is already failing; they would be
+	// handed the failure instead of a fresh copy.
+	sealed := false
+
 	sem := make(chan struct{}, c)
 	var wg sync.WaitGroup
 	var once sync.Once
@@ -1138,15 +1149,15 @@ func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	for i := range plan.Layers {
 		select {
 		case sem <- struct{}{}:
-		case <-ctx.Done():
+		case <-lctx.Done():
 			wg.Wait()
-			// A failing layer cancels ctx to abort the dispatch, so the real error,
-			// not the derived cancellation, is the job's outcome. (wg.Wait orders
-			// the once.Do write of firstErr before this read.)
+			// The abort above is derived from the real failure, so report that
+			// rather than the cancellation it caused. (wg.Wait orders the once.Do
+			// write of firstErr before this read.)
 			if firstErr != nil && !errors.Is(firstErr, context.Canceled) {
 				return firstErr
 			}
-			return ctx.Err()
+			return lctx.Err()
 		}
 		wg.Add(1)
 		go func(pl PlannedLayer, lp *LayerProgress) {
@@ -1154,16 +1165,20 @@ func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 			defer func() { <-sem }()
 			w.store.Update(job.ID, func(*Job) { lp.State = "pulling" })
 			sink := &layerSink{w: w, jobID: job.ID, t: t, lp: lp}
-			if err := src.Fill(ctx, srcRepo, dstRepo, pl, sink); err != nil {
+			if err := src.Fill(lctx, srcRepo, dstRepo, pl, sink); err != nil {
 				w.store.Update(job.ID, func(*Job) { lp.State = "failed" })
 				once.Do(func() {
 					firstErr = err
-					job.Cancel()
+					abort()
+					sealed = true
 				})
 			}
 		}(plan.Layers[i], t.Layers[i])
 	}
 	wg.Wait()
+	if sealed {
+		w.store.Update(job.ID, func(j *Job) { j.sealed = true })
+	}
 	return firstErr
 }
 
@@ -1184,9 +1199,10 @@ func (w *Copier) finish(job *Job, err error) {
 		case err == nil:
 			j.State = JobDone
 		case errors.Is(err, context.Canceled):
-			// Only an error that IS the cancellation counts as canceled. A layer
-			// failure cancels job.ctx to abort its sibling copies, but the job must
-			// be recorded as failed with the real error, not silently "canceled".
+			// Only an error that IS the cancellation counts as canceled. An abort
+			// derived from a real failure (a layer aborting its siblings, an
+			// attempt aborting) reports that failure instead, and is scoped so it
+			// never reaches job.ctx in the first place.
 			j.State = JobCanceled
 		default:
 			j.State = JobFailed

@@ -87,10 +87,11 @@ func (s *memStore) resolve(id string) (*Job, bool) {
 // Caller holds mu.
 func (s *memStore) activeJob(key string) (*Job, bool) {
 	for _, j := range s.jobs {
-		if j.State.Terminal() || j.Canceled() || j.enqueuing {
+		if j.State.Terminal() || j.Canceled() || j.enqueuing || j.sealed {
 			// A canceled job is on its way out; a resubmit must start fresh
 			// rather than coalesce onto the dying one. An enqueuing job is not
 			// yet guaranteed to run, so it is not a coalescing target either.
+			// A sealed job is still running but already failing.
 			continue
 		}
 		if j.dedup == key {

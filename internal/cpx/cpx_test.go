@@ -224,7 +224,7 @@ func TestCopierSweepsTerminalJobs(t *testing.T) {
 }
 
 // failSource fails the first layer with a real error; other layers block until
-// the failure's self-cancel aborts them, like in-flight sibling copies.
+// the failure's abort reaches them, like in-flight sibling copies.
 type failSource struct{}
 
 func (failSource) Resolve(context.Context, name.Reference, name.Reference, []string) (*Plan, error) {
@@ -259,11 +259,26 @@ func TestCopyLayersReportsLayerError(t *testing.T) {
 	ex := &jobExec{srcRef: src_ref, cacheRef: dst_ref}
 	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}, {Digest: "sha256:2"}, {Digest: "sha256:3"}}}
 
-	// The failing layer self-cancels the job ctx while the dispatcher is still
+	// The failing layer aborts its siblings while the dispatcher is still
 	// admitting layers; the returned error must be the layer error either way.
 	err := w.copyLayers(job.ctx, job, tr, failSource{}, plan, ex)
 	if err == nil || errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the layer error", err)
+	}
+	// The abort is scoped to the fan-out: the JOB's context is untouched, so a
+	// later attempt or step of the same job still has a live context to run on.
+	// Cancelling the job here would make every retry inherit a dead context —
+	// which reads as "the job is being cancelled" and suppresses the retry.
+	if cerr := job.ctx.Err(); cerr != nil {
+		t.Errorf("job context = %v, want live after a layer failure", cerr)
+	}
+	if job.Canceled() {
+		t.Error("a layer failure is not a cancellation of the job")
+	}
+	// It does stop attracting new callers, though: an identical submit must get a
+	// fresh move rather than this failing one.
+	if _, ok := js.Active(job.dedup); ok && job.dedup != "" {
+		t.Error("a failing job should not be a coalescing target")
 	}
 	w.finish(job, err)
 	snap, _ := js.Snapshot("job_l")
@@ -273,7 +288,7 @@ func TestCopyLayersReportsLayerError(t *testing.T) {
 }
 
 func TestFinish(t *testing.T) {
-	t.Run("layer failure self-cancel is recorded as failed", func(t *testing.T) {
+	t.Run("a real error beats a racing cancellation", func(t *testing.T) {
 		w, js := newCopier(t, nil, true)
 		ctx, cancel := context.WithCancel(context.Background())
 		job := NewJob("job_f", "a/b:1", nil, time.Now())
@@ -281,8 +296,8 @@ func TestFinish(t *testing.T) {
 		if err := js.Add(job); err != nil {
 			t.Fatal(err)
 		}
-		// A failing layer cancels the job context to abort its siblings before
-		// the error propagates; the real error must win over that cancellation.
+		// A cancellation racing a real failure: the real error must win, so the
+		// job is recorded as failed rather than silently canceled.
 		job.Cancel()
 		w.finish(job, errors.New("copy blob: boom"))
 		snap, _ := js.Snapshot("job_f")
