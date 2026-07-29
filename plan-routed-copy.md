@@ -395,10 +395,52 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 | - | ---- | ----- | ----- |
 | 0 | This plan | ☑ | |
 | 0.1 | Scope the layer abort to the fan-out (§7a) | ☑ | `Job.sealed` replaces the coalescing side effect; mutation-checked |
-| 0.2 | Execution-model redesign: recon + two independent designs + judge | ◐ | deciding whether the plan model is a step/attempt tree or something else, and whether the queue/worker dispatch needs to change at all |
+| 0.2 | Execution-model redesign: recon + two independent designs + judge | ◐ | recon in; two designs and the judge still running |
+| 0.3 | `Job.Source`/`Target` carried on the record, not derived from a transfer (§3.6) | ☑ | + `docs/api.md` section and an rpc test; one e2e assertion updated |
+| 0.4 | `StoreConfig.Cache` + cross-store validation | ☑ | declared, a registry, not itself, and not on an engine store; a store that is someone's cache may declare its own (routing is one level) |
+| 0.5 | Recon bugs in the prerequisite: seal on every exit, `Filling` skips sealed | ☑ | both pinned by tests |
 | — | **Phase 1 — steps** | ☐ | |
 | — | **Phase 2 — the route** | ☐ | |
 | — | **Phase 3 — `require_authority`** | ☐ | |
+
+### Findings from the recon pass (folded into the design, not yet implemented)
+
+Four readers mapped what the single-hop model bakes in. The load-bearing ones:
+
+- **`Transfer` needs step identity.** With both attempts (alternatives) and steps (a
+  sequence) in one flat list, five concrete row-sets are ambiguous — including
+  `[site←origin failed, local←origin done]` from §5.4, where row 1 is *not* a retry of row 0
+  but the abandoned route falling through, and the mixed `[site←origin done, node←site
+  failed, node←origin done]` from §5.6. One added field settles it: `Transfer.step`, with
+  rows sharing a step being alternatives. A nested message and a job-level step list were
+  both considered and cost more (the ORM derives `JobAddRequest`/`JobSelect`/`JobPatchRequest`
+  from `Job`, so a shape change there propagates).
+- **The warm probe can report a miss on content the cache holds.** `dstRef` preserves the
+  tag, but a non-verbatim commit *rebuilds* a platform-filtered index, so its digest differs
+  from the authority's. Probing `A'/repo@digest` would then 404 on every job. The fill step
+  must therefore be **verbatim regardless** of `copy_referrers` or whether the cache ref is a
+  digest — which also means a routed fill copies every platform.
+- **A digest-pinned routed job leaves `A'` holding the manifest with no tag**, which matters
+  to retention on the intermediate.
+- **`Job.Fills` must become per-step**, and `memStore.Filling` has no way to exclude the
+  asking job — harmless today (an engine job fills nothing) and a self-deadlock once a job
+  has a fill step whose ref it then reads.
+- **`sourceFallbackWorthy` cannot be reused verbatim on the copy path**: "the cache refused
+  the push" is a reason to abandon the *route*, not to re-attempt the same step elsewhere.
+- Smaller: `PlannedLayer.Repo` is written and never read; duplicate blob digests within one
+  `Plan` are filled concurrently with no dedup; `copyReferrers` per step doubles a
+  fail-closed surface; nothing cleans up a partially-filled destination, which stops being
+  incidental once a route can be abandoned midway.
+
+Two of the recon findings were bugs in the prerequisite that had just landed, both fixed
+before anything else was built:
+
+- `Job.sealed` was written after the layer fan-out, but the dispatch loop returns as soon as
+  the abort reaches it — so the flag was set only when every layer goroutine finished
+  normally, i.e. never in the case it exists for. It is now written where the failure is
+  recorded, and a test drives the early-return path specifically.
+- `memStore.Filling` did not exclude sealed jobs, so a waiter could park on a move that had
+  already failed and burn its whole `source_wait`.
 
 ### Log
 

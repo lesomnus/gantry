@@ -170,6 +170,21 @@ returns the resolved plan:
 resolution error as `INVALID_ARGUMENT`, so it doubles as a preflight for job
 admissibility.
 
+## What a job's `source` / `target` mean
+
+A `Job`'s `source` and `target` are the stores it was **admitted for** — the caller's
+request, resolved to store names. They are not derived from its `transfers`.
+
+`transfers` says where bytes actually moved, and one job can have several rows: alternatives,
+when the planned source could not serve the image and another was attempted
+([stores.md](stores.md#falling-back-to-the-origin)); and one row per step, when gantry routes
+a move through another store. No single row answers "what was this job for" — and for a
+routed move the first row's target is an intermediate store, not the job's target at all.
+
+So read `source`/`target` for intent and `transfers[]` for what happened. A job that was
+served by somewhere other than its `source` is flagged by `gantry.job.fallback` and the
+`job_fallback` audit event rather than by rewriting the job's own fields.
+
 ## Job records vs. history
 
 `JobService.Get` and `List` read the **live, in-memory** job registry: the

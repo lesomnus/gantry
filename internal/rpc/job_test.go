@@ -423,3 +423,37 @@ func TestJobFallbackToOrigin(t *testing.T) {
 			res.GetFallbackToOrigin(), res.GetFallbackRef())
 	}
 }
+
+// A job reports the stores it was admitted for, not whichever transfer served
+// it: a job can have several transfers — alternatives, and one per routed step —
+// and none of them answers what the job was for.
+func TestJobStoresAreTheRequest(t *testing.T) {
+	e := newEnv(t)
+	snap := snap("job_1", "cr.example.com/app:1", cpx.JobDone, time.Now())
+	snap.Source, snap.Target = "cache", "edge"
+	snap.Transfers = []cpx.TransferSnapshot{
+		{Store: "edge", Source: "cache", State: "failed", Err: "manifest unknown"},
+		{Store: "edge", Source: "origin", State: "done"},
+	}
+	e.copier.snap = snap
+	e.copier.created = true
+
+	job, err := e.client.Job().Add(context.Background(), pb.JobAddRequest_builder{
+		Ref: "cr.example.com/app:1", Target: pb.StoreByName("edge"),
+	}.Build())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := job.GetSource().GetName(); got != "cache" {
+		t.Errorf("source = %q, want the admitted source even though `origin` served it", got)
+	}
+	if got := job.GetTarget().GetName(); got != "edge" {
+		t.Errorf("target = %q, want the admitted target", got)
+	}
+	if n := len(job.GetTransfers()); n != 2 {
+		t.Fatalf("transfers = %d, want both rows carried through", n)
+	}
+	if job.GetTransfers()[1].GetSource() != "origin" {
+		t.Error("the transfer rows are where the serving store is reported")
+	}
+}

@@ -262,23 +262,17 @@ func jobToPB(snap cpx.JobSnapshot) *pb.Job {
 		// alone does not say whether the fallback was permitted or merely absent.
 		FallbackToOrigin: proto.Bool(snap.FallbackToOrigin),
 	}
-	// The snapshot carries the resolved stores inside its transfer steps. The
-	// one that SERVED the job decides: a job that fell back was delivered by its
-	// later attempt, and naming the first (failed) one would report a store the
-	// image did not come from. When nothing served it — every attempt failed, or
-	// none has finished yet — the first attempt is the honest answer, because
-	// that is the source the job was actually pointed at. Single-transfer jobs
-	// are unaffected either way.
-	if len(snap.Transfers) > 0 {
-		t := snap.Transfers[0]
-		for _, c := range snap.Transfers {
-			if c.State == "done" || c.State == "exists" {
-				t = c
-				break
-			}
-		}
-		b.Source = storeByName(t.Source)
-		b.Target = storeByName(t.Store)
+	// The job's stores are what it was admitted for, carried on the record — not
+	// read out of a transfer. A transfer says where some bytes came from, and a
+	// job can have several: alternatives when a source could not serve it, and
+	// one per step when the move is routed through another store. Neither "the
+	// first row" nor "the row that served it" answers what the job was for, and
+	// for a routed job the first row's target is not even the job's target.
+	if snap.Source != "" {
+		b.Source = storeByName(snap.Source)
+	}
+	if snap.Target != "" {
+		b.Target = storeByName(snap.Target)
 	}
 	return b.Build()
 }

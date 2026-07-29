@@ -67,6 +67,14 @@ type Job struct {
 	// for a registry target — the one thing another job could be waiting on.
 	// Empty for an engine target, which fills nothing another job reads.
 	Fills string
+	// Source and Target are the stores the job was ADMITTED for: what the caller
+	// asked, resolved to store names. They are deliberately not derived from the
+	// transfers. A transfer says where some bytes actually came from, and there can
+	// be several of those for one job — alternatives when a source could not serve
+	// it, and one per step when gantry routes the move through another store — so
+	// no single row answers "what was this job for".
+	Source string
+	Target string
 	// Labels is the seed metadata of the job's originating handle; per-caller
 	// labels live on the handles (see the store), so a coalesced move keeps
 	// each caller's own set. Not used to run the move, only to find it.
@@ -219,6 +227,10 @@ type JobSnapshot struct {
 	Ref       string   `json:"ref"`
 	Platforms []string `json:"platforms"`
 	As        []string `json:"as,omitempty"`
+	// Source and Target are the stores the job was admitted for — the request,
+	// not whichever transfer served it.
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
 	// FallbackToOrigin is the effective decision this job ran under.
 	FallbackToOrigin bool                  `json:"fallback_to_origin"`
 	Labels           map[string]string     `json:"labels,omitempty"`
@@ -258,6 +270,8 @@ func (j *Job) snapshot() JobSnapshot {
 		Ref:              j.Ref,
 		Platforms:        j.Platforms,
 		As:               j.As,
+		Source:           j.Source,
+		Target:           j.Target,
 		FallbackToOrigin: j.FallbackToOrigin,
 		Labels:           j.Labels,
 		State:            j.State,

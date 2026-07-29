@@ -196,10 +196,11 @@ func (s *memStore) Filling(ref string) (<-chan struct{}, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, j := range s.jobs {
-		// Same exclusions as coalescing: a terminal or canceled job will never
-		// produce the ref, and an enqueuing one is not yet guaranteed to run, so
-		// waiting on either would only burn the caller's timeout.
-		if j.State.Terminal() || j.Canceled() || j.enqueuing || j.done == nil {
+		// Same exclusions as coalescing: a terminal, canceled or already-failing
+		// job will never produce the ref, and an enqueuing one is not yet
+		// guaranteed to run, so waiting on any of them would only burn the
+		// caller's timeout.
+		if j.State.Terminal() || j.Canceled() || j.enqueuing || j.sealed || j.done == nil {
 			continue
 		}
 		if j.Fills == ref {

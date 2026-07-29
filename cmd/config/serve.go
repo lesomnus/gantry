@@ -371,6 +371,15 @@ type StoreConfig struct {
 	// Verify overrides the global serve.verify.mode for images pulled from this
 	// source registry (nil = inherit the global default).
 	Verify *StoreVerify `yaml:"verify"`
+	// Cache names another declared registry that holds copies of this store's
+	// content — a site registry standing in front of a cloud one. gantry may then
+	// satisfy a job that reads from this store by going through that one instead,
+	// filling it first if it does not already hold the image, so the content is
+	// fetched from here once rather than once per destination. It is a routing
+	// decision gantry makes for its own cost efficiency: the caller neither names
+	// the cache nor sees a different result. Empty (the default) means jobs read
+	// from this store directly. See docs/stores.md.
+	Cache string `yaml:"cache"`
 
 	// Retention configures per-repo image GC for this store (engine stores only).
 	// nil disables GC for the store. See StoreRetention.

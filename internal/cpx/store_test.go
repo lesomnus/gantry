@@ -371,6 +371,7 @@ func TestFillingSkipsJobsThatCannotDeliver(t *testing.T) {
 		{"terminal", func(j *Job) { j.State = JobDone }},
 		{"canceled", func(j *Job) { j.Cancel() }},
 		{"enqueuing", func(j *Job) { j.enqueuing = true }},
+		{"sealed", func(j *Job) { j.sealed = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := NewMemStore()

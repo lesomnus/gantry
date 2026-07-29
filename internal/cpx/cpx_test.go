@@ -369,3 +369,34 @@ func TestRetryRequiresTerminal(t *testing.T) {
 		t.Errorf("retry = (%s, %v, %v), want a fresh job", s2.ID, created, err)
 	}
 }
+
+// The seal must land on every way out of copyLayers. The dispatch loop returns
+// as soon as the abort reaches it, so a write placed after the fan-out would be
+// skipped in exactly the case it exists for.
+func TestLayerFailureSealsTheJobOnTheEarlyReturn(t *testing.T) {
+	w, js := newCopier(t, nil, true)
+	w.wc.MaxConcurrentLayers = 1 // force the dispatcher to block on the semaphore
+	ctx, cancel := context.WithCancel(context.Background())
+	job := NewJob("job_s", "a/b:1", nil, time.Now())
+	job.ctx, job.cancel = ctx, cancel
+	job.dedup = "k"
+	tr := &Transfer{Layers: []*LayerProgress{{}, {}, {}}}
+	job.Transfers = []*Transfer{tr}
+	if err := js.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
+	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
+	ex := &jobExec{srcRef: src_ref, cacheRef: dst_ref}
+	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}, {Digest: "sha256:2"}, {Digest: "sha256:3"}}}
+
+	if _, ok := js.Active("k"); !ok {
+		t.Fatal("the job should start out coalesceable")
+	}
+	if err := w.copyLayers(job.ctx, job, tr, failSource{}, plan, ex); err == nil {
+		t.Fatal("expected the layer error")
+	}
+	if _, ok := js.Active("k"); ok {
+		t.Error("a failing job must stop being a coalescing target on every exit path")
+	}
+}

@@ -51,9 +51,13 @@ func TestEnginePullFallsBackToOrigin(t *testing.T) {
 		got.GetSource() != "remote" {
 		t.Errorf("transfer[1] = %+v, want the origin attempt to have served the image", got)
 	}
-	// The job reports the source that actually served it, not the one it tried first.
-	if got := job.GetSource().GetName(); got != "remote" {
-		t.Errorf("job source = %q, want the store the image came from", got)
+	// The job's stores are what it was ADMITTED for. Where the bytes came from is
+	// a property of an attempt, and this job had two — asserted above.
+	if got := job.GetSource().GetName(); got != "cache" {
+		t.Errorf("job source = %q, want the requested source", got)
+	}
+	if got := job.GetTarget().GetName(); got != "edge" {
+		t.Errorf("job target = %q, want the requested target", got)
 	}
 	if !h.engine.has(h.remote + "/lib/app:1") {
 		t.Error("the engine should hold the image under the origin ref")
@@ -97,9 +101,8 @@ func (cacheMissError) Error() string { return "MANIFEST_UNKNOWN: manifest unknow
 
 var errMissingFromCache = cacheMissError{}
 
-// A job that no source could serve reports the source it was POINTED at, not
-// the last one it tried — the job failed, nothing served it, and naming the
-// fallback would read as though the operator had asked for it.
+// A job reports the stores it was admitted for whatever happened to it — here,
+// nothing served it at all.
 func TestFailedFallbackReportsTheRequestedSource(t *testing.T) {
 	h := newHarness(t)
 	seedImage(t, h.remote, "lib/app", "1")

@@ -344,6 +344,7 @@ func (w *Copier) Submit(req Request) (snap JobSnapshot, created bool, err error)
 	job.As = ex.as
 	job.FallbackToOrigin = ex.fallback
 	job.Fills = ex.fills
+	job.Source, job.Target = ex.source.Name, ex.dst.Name()
 	job.Labels = req.Labels
 	job.Verification = ex.verification
 	job.Transfers = transfers
@@ -1135,10 +1136,6 @@ func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	// retry that was supposed to recover from this very failure.
 	lctx, abort := context.WithCancel(ctx)
 	defer abort()
-	// New callers must not join a move that is already failing; they would be
-	// handed the failure instead of a fresh copy.
-	sealed := false
-
 	sem := make(chan struct{}, c)
 	var wg sync.WaitGroup
 	var once sync.Once
@@ -1170,15 +1167,15 @@ func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 				once.Do(func() {
 					firstErr = err
 					abort()
-					sealed = true
+					// Sealed here rather than on the way out: the dispatch loop
+					// above returns early once the abort lands, so a bottom-of-
+					// function write would be skipped exactly when it matters.
+					w.store.Update(job.ID, func(j *Job) { j.sealed = true })
 				})
 			}
 		}(plan.Layers[i], t.Layers[i])
 	}
 	wg.Wait()
-	if sealed {
-		w.store.Update(job.ID, func(j *Job) { j.sealed = true })
-	}
 	return firstErr
 }
 

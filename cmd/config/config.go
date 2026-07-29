@@ -134,6 +134,29 @@ func (c *Config) Evaluate() error {
 		c.Stores[name] = s
 	}
 
+	// A store's `cache` is a route, so it can only be validated once every store
+	// is known. Routing is one level deep by construction — a step gantry
+	// generates is never itself routed — so a store that is someone's cache may
+	// declare a cache of its own without any risk of a cycle.
+	for name, s := range c.Stores {
+		if s.Cache == "" {
+			continue
+		}
+		if !s.IsRegistry() {
+			return z.Err(nil, "store %q: cache is a route for reading FROM a registry; a %s store is never a job's source", name, s.Kind)
+		}
+		if s.Cache == name {
+			return z.Err(nil, "store %q: cache names the store itself", name)
+		}
+		cache, declared := c.Stores[s.Cache]
+		if !declared {
+			return z.Err(nil, "store %q: cache %q is not a declared store", name, s.Cache)
+		}
+		if !cache.IsRegistry() {
+			return z.Err(nil, "store %q: cache %q is a %s; only a registry can hold copies of another registry's content", name, s.Cache, cache.Kind)
+		}
+	}
+
 	// bbolt files take an exclusive lock, so two components sharing one path make
 	// the second Open fail with an opaque timeout at startup. Every bbolt file —
 	// per-store retention indexes, the audit log, and the verify cache — must have

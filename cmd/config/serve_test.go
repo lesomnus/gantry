@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -96,4 +97,74 @@ func TestStoreValidation(t *testing.T) {
 			t.Error("expected empty-name error")
 		}
 	})
+}
+
+// A store's `cache` is a route to another registry that holds its content. It is
+// resolved across stores, so it is validated after every store is known.
+func TestStoreCacheValidation(t *testing.T) {
+	load := func(t *testing.T, stores map[string]StoreConfig) error {
+		t.Helper()
+		c := Config{Stores: stores}
+		return c.Evaluate()
+	}
+	reg := func(host string) StoreConfig { return StoreConfig{Kind: "oci", Host: host} }
+
+	t.Run("a registry cached by another registry", func(t *testing.T) {
+		if err := load(t, map[string]StoreConfig{
+			"cloud": {Kind: "oci", Host: "cr.example.com", Cache: "site"},
+			"site":  reg("registry.corp"),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	t.Run("a store that is a cache may declare its own", func(t *testing.T) {
+		// Routing is one level deep, so this is two independent routes rather
+		// than a chain — and never a cycle.
+		if err := load(t, map[string]StoreConfig{
+			"cloud": {Kind: "oci", Host: "cr.example.com", Cache: "site"},
+			"site":  {Kind: "oci", Host: "registry.corp", Cache: "rack"},
+			"rack":  reg("cache.rack1"),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		stores map[string]StoreConfig
+		want   string
+	}{
+		{
+			"undeclared cache",
+			map[string]StoreConfig{"cloud": {Kind: "oci", Host: "cr.example.com", Cache: "nope"}},
+			"not a declared store",
+		},
+		{
+			"cache names itself",
+			map[string]StoreConfig{"cloud": {Kind: "oci", Host: "cr.example.com", Cache: "cloud"}},
+			"names the store itself",
+		},
+		{
+			"cache is an engine",
+			map[string]StoreConfig{
+				"cloud": {Kind: "oci", Host: "cr.example.com", Cache: "edge"},
+				"edge":  {Kind: "docker"},
+			},
+			"only a registry can hold copies",
+		},
+		{
+			"declared on an engine",
+			map[string]StoreConfig{
+				"edge": {Kind: "docker", Cache: "site"},
+				"site": reg("registry.corp"),
+			},
+			"never a job's source",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := load(t, tc.stores)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
 }
