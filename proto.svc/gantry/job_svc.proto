@@ -15,7 +15,8 @@ import "google/protobuf/timestamp.proto";
 // generated API only as a test affordance, so a harness can seed or rewrite a
 // job's initial state; production keeps it off the client surface.
 service JobService {
-  // List returns jobs newest-first.
+  // List returns jobs newest-first from the same live registry as Get, so it too
+  // holds only jobs since process start; use EventService for job history.
   rpc List(JobListRequest) returns (JobListResponse);
   // Watch streams snapshots of the job as its transfers progress and ends
   // after the snapshot that carries a terminal state. The gRPC counterpart
@@ -73,6 +74,9 @@ message JobPlanRequest {
   bool copy_referrers = 5;
   // Engine target only: names the image would be recorded under.
   repeated string as = 6;
+  // Engine target only: pull from the registry named in `ref` when `source`
+  // cannot serve the image; absent = server default.
+  bool fallback_to_origin = 7;
 }
 
 message JobPlanResponse {
@@ -96,4 +100,11 @@ message JobPlanResponse {
   string coalesces = 8;
   // Engine target: the (normalized) names the image is recorded under.
   repeated string as = 9;
+  // Effective value after the server default is applied.
+  bool fallback_to_origin = 10;
+  // Engine target: the ref the engine would be told to pull if `source` could
+  // not serve the image. Empty when the job has no fallback — the flag is off,
+  // `source` already is the origin, or the origin is not addressable from this
+  // engine.
+  string fallback_ref = 11;
 }

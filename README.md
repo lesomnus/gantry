@@ -31,8 +31,14 @@ JobService.Get  ·  JobService.Watch (server stream)
   of the pull reference, so a cache-fed node keeps the upstream name
   (`docker.io/library/redis:7`). For a **digest-pinned** job the names may be
   digest references (`cr.example.com/app@sha256:…`) that gantry registers over
-  the pulled content — resolved locally from the cache, the origin registry never
-  contacted. Digest names need a containerd-backed engine; see
+  the pulled content — resolved from whichever source served the pull, normally
+  the cache, so the origin registry is never contacted unless the job falls back
+  to it. Digest names need a containerd-backed engine; see
+  [docs/stores.md](docs/stores.md).
+- `fallback_to_origin` lets an engine pull that its `source` could not serve
+  re-attempt against the registry named in `ref`, so a cache is an optimization
+  rather than a dependency; the failed attempt stays on the record as a failed
+  transfer of a job that completed. Off unless asked for; see
   [docs/stores.md](docs/stores.md).
 - Optionally, gantry reclaims space on the engines it feeds with an adaptive,
   policy-driven GC ([docs/retention.md](docs/retention.md)); verifies the

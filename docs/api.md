@@ -127,8 +127,11 @@ client retry (network blip, restart) safe without double-moving an image.
 ## Dedup key and mutable-tag stability
 
 Coalescing (and idempotency's "identical move" notion) keys on the tuple
-**(`ref`, `platforms`, `source`, `target`, `as`)**. Two submits that differ in
-any of those five run as separate jobs; two that match an active job coalesce.
+**(`ref`, `platforms`, `source`, `target`, `as`, `fallback_to_origin`)**. Two
+submits that differ in any of those six run as separate jobs; two that match an
+active job coalesce. `fallback_to_origin` is in the key because it changes where
+the bytes may come from: a submit that refused the origin must not be handed a
+job allowed to pull from it, nor the reverse.
 
 A **tag is treated as stable for the life of an active job**: a tag re-pushed
 mid-job does *not* start a second copy until the first finishes — the second
@@ -154,6 +157,11 @@ returns the resolved plan:
 - `copy_referrers` — the effective value after the server default is applied
   (on by default when the job verified a signature and platforms weren't
   narrowed).
+- `fallback_to_origin` — the effective value after the server default is
+  applied.
+- `fallback_ref` — the ref the engine would be told to pull if `source` could
+  not serve the image; empty when the job has no fallback (see
+  [stores.md](stores.md#falling-back-to-the-origin)).
 - `verification` — the admission verification outcome, when verification ran.
 - `coalesces` — the id of the active job an identical `Add` would coalesce onto,
   if any (empty otherwise).

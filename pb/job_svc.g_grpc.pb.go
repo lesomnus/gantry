@@ -43,7 +43,8 @@ type JobServiceClient interface {
 	Patch(ctx context.Context, in *JobPatchRequest, opts ...grpc.CallOption) (*Job, error)
 	// Erase deletes a Job
 	Erase(ctx context.Context, in *JobRef, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// List returns jobs newest-first.
+	// List returns jobs newest-first from the same live registry as Get, so it too
+	// holds only jobs since process start; use EventService for job history.
 	List(ctx context.Context, in *JobListRequest, opts ...grpc.CallOption) (*JobListResponse, error)
 	// Watch streams snapshots of the job as its transfers progress and ends
 	// after the snapshot that carries a terminal state. The gRPC counterpart
@@ -179,7 +180,8 @@ type JobServiceServer interface {
 	Patch(context.Context, *JobPatchRequest) (*Job, error)
 	// Erase deletes a Job
 	Erase(context.Context, *JobRef) (*emptypb.Empty, error)
-	// List returns jobs newest-first.
+	// List returns jobs newest-first from the same live registry as Get, so it too
+	// holds only jobs since process start; use EventService for job history.
 	List(context.Context, *JobListRequest) (*JobListResponse, error)
 	// Watch streams snapshots of the job as its transfers progress and ends
 	// after the snapshot that carries a terminal state. The gRPC counterpart

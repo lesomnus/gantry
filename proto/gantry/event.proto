@@ -18,11 +18,13 @@ enum EventType {
   EVENT_TYPE_IMAGE_REMOVED = 5;
   EVENT_TYPE_PINNED = 6;
   EVENT_TYPE_UNPINNED = 7;
+  EVENT_TYPE_JOB_FALLBACK = 8;
 }
 
 // Type-specific payload; which fields are set depends on the event type.
 message EventDetail {
-  // job_admitted: the source store.
+  // job_admitted, job_fallback: the source store — the one the job was admitted
+  // with for job_admitted, the one that could not serve it for job_fallback.
   string source = 1;
   // job_done: the job id.
   string job = 2;

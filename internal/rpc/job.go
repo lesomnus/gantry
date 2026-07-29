@@ -92,6 +92,10 @@ func (v *jobService) Add(ctx context.Context, req *pb.JobAddRequest) (*pb.Job, e
 		cr := req.GetCopyReferrers()
 		r.CopyReferrers = &cr
 	}
+	if req.HasFallbackToOrigin() {
+		fb := req.GetFallbackToOrigin()
+		r.FallbackToOrigin = &fb
+	}
 
 	// An idempotency key replays the remembered job instead of re-running the
 	// move; the key alone wins, like the HTTP Idempotency-Key header.
@@ -205,6 +209,10 @@ func (v *jobService) Plan(ctx context.Context, req *pb.JobPlanRequest) (*pb.JobP
 	if req.HasCopyReferrers() {
 		cr := req.GetCopyReferrers()
 		r.CopyReferrers = &cr
+	}
+	if req.HasFallbackToOrigin() {
+		fb := req.GetFallbackToOrigin()
+		r.FallbackToOrigin = &fb
 	}
 	res, err := v.s.copier.Plan(ctx, r)
 	if err != nil {

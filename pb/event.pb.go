@@ -33,6 +33,7 @@ const (
 	EventType_EVENT_TYPE_IMAGE_REMOVED EventType = 5
 	EventType_EVENT_TYPE_PINNED        EventType = 6
 	EventType_EVENT_TYPE_UNPINNED      EventType = 7
+	EventType_EVENT_TYPE_JOB_FALLBACK  EventType = 8
 )
 
 // Enum value maps for EventType.
@@ -46,6 +47,7 @@ var (
 		5: "EVENT_TYPE_IMAGE_REMOVED",
 		6: "EVENT_TYPE_PINNED",
 		7: "EVENT_TYPE_UNPINNED",
+		8: "EVENT_TYPE_JOB_FALLBACK",
 	}
 	EventType_value = map[string]int32{
 		"EVENT_TYPE_UNSPECIFIED":   0,
@@ -56,6 +58,7 @@ var (
 		"EVENT_TYPE_IMAGE_REMOVED": 5,
 		"EVENT_TYPE_PINNED":        6,
 		"EVENT_TYPE_UNPINNED":      7,
+		"EVENT_TYPE_JOB_FALLBACK":  8,
 	}
 )
 
@@ -200,7 +203,8 @@ func (x *EventDetail) SetErrors(v int32) {
 type EventDetail_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	// job_admitted: the source store.
+	// job_admitted, job_fallback: the source store — the one the job was admitted
+	// with for job_admitted, the one that could not serve it for job_fallback.
 	Source string
 	// job_done: the job id.
 	Job string
@@ -457,7 +461,7 @@ const file_gantry_event_proto_rawDesc = "" +
 	" \x01(\v2\x13.gantry.EventDetailB\x06\xea\x82\x16\x02@\x01R\x06detail\x12.\n" +
 	"\x05state\x18\x10 \x01(\x0e2\x10.gantry.JobStateB\x06\xea\x82\x16\x02@\x01R\x05state\x12\x1c\n" +
 	"\x05error\x18\x11 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05error\x12E\n" +
-	"\fdate_created\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\x06\xea\x82\x16\x02@\x01R\vdateCreated:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\xe3\x01\n" +
+	"\fdate_created\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\x06\xea\x82\x16\x02@\x01R\vdateCreated:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\x80\x02\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17EVENT_TYPE_JOB_ADMITTED\x10\x01\x12\x17\n" +
@@ -466,7 +470,8 @@ const file_gantry_event_proto_rawDesc = "" +
 	"\x17EVENT_TYPE_IMAGE_PULLED\x10\x04\x12\x1c\n" +
 	"\x18EVENT_TYPE_IMAGE_REMOVED\x10\x05\x12\x15\n" +
 	"\x11EVENT_TYPE_PINNED\x10\x06\x12\x17\n" +
-	"\x13EVENT_TYPE_UNPINNED\x10\aB$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
+	"\x13EVENT_TYPE_UNPINNED\x10\a\x12\x1b\n" +
+	"\x17EVENT_TYPE_JOB_FALLBACK\x10\bB$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
 
 var file_gantry_event_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_gantry_event_proto_msgTypes = make([]protoimpl.MessageInfo, 2)

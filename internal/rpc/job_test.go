@@ -366,3 +366,60 @@ func TestJobPlan(t *testing.T) {
 	_, err = e.client.Job().Plan(ctx, pb.JobPlanRequest_builder{Ref: proto.String("x:1")}.Build())
 	wantCode(t, err, codes.FailedPrecondition)
 }
+
+// The fallback flag is tri-state on the wire: absent leaves the server default
+// in charge, present forces the decision either way. Plan echoes the effective
+// value and the ref the engine would be told to pull.
+func TestJobFallbackToOrigin(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.copier.snap = snap("job_1", "cr.example.com/app:1", cpx.JobPending, time.Now())
+	e.copier.created = true
+
+	add := func(req *pb.JobAddRequest) {
+		t.Helper()
+		if _, err := e.client.Job().Add(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(pb.JobAddRequest_builder{
+		Ref: "cr.example.com/app:1", Target: pb.StoreByName("node"),
+	}.Build())
+	add(pb.JobAddRequest_builder{
+		Ref: "cr.example.com/app:1", Target: pb.StoreByName("node"),
+		FallbackToOrigin: proto.Bool(true),
+	}.Build())
+	add(pb.JobAddRequest_builder{
+		Ref: "cr.example.com/app:1", Target: pb.StoreByName("node"),
+		FallbackToOrigin: proto.Bool(false),
+	}.Build())
+
+	if n := len(e.copier.submits); n != 3 {
+		t.Fatalf("submits = %d, want 3", n)
+	}
+	if got := e.copier.submits[0].FallbackToOrigin; got != nil {
+		t.Errorf("absent flag forwarded as %v, want nil so the server default decides", *got)
+	}
+	if got := e.copier.submits[1].FallbackToOrigin; got == nil || !*got {
+		t.Errorf("fallback_to_origin=true forwarded as %v", got)
+	}
+	if got := e.copier.submits[2].FallbackToOrigin; got == nil || *got {
+		t.Errorf("fallback_to_origin=false must be forwarded, not dropped: %v", got)
+	}
+
+	e.copier.planRes = cpx.PlanResult{
+		Ref: "cr.example.com/app:1", Source: "cache", Target: "node",
+		FallbackToOrigin: true, FallbackRef: "cr.example.com/app:1",
+	}
+	res, err := e.client.Job().Plan(ctx, pb.JobPlanRequest_builder{
+		Ref: proto.String("cr.example.com/app:1"), Target: pb.StoreByName("node"),
+		FallbackToOrigin: proto.Bool(true),
+	}.Build())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.GetFallbackToOrigin() || res.GetFallbackRef() != "cr.example.com/app:1" {
+		t.Errorf("plan = {fallback:%v ref:%q}, want the effective decision and its ref",
+			res.GetFallbackToOrigin(), res.GetFallbackRef())
+	}
+}

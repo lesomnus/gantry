@@ -19,6 +19,10 @@ type fakeEngine struct {
 	platform string
 	ready    error
 	pullErr  error
+	// failFor fails a pull whose reference matches, so one source can be broken
+	// while another serves the same image (a fallback's whole point). Consulted
+	// after pullErr.
+	failFor  func(ref string) error
 	inUse    map[string]bool
 	held     map[string]string             // ref -> anchor digest ("" if none)
 	untagged map[string]down.UntaggedImage // id -> untagged image
@@ -67,10 +71,17 @@ func (e *fakeEngine) Platform(context.Context) (string, error) {
 func (e *fakeEngine) Pull(_ context.Context, ref, digest, platform string, as []string, _ *down.AnchorBlob, sink down.Sink) ([]string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// Recorded before any failure is applied: pullRecords is the history of what
+	// the engine was ASKED to pull, which is what a fallback test reasons about.
+	e.pulls = append(e.pulls, pullRecord{Ref: ref, Digest: digest, Platform: platform, As: append([]string(nil), as...)})
 	if e.pullErr != nil {
 		return nil, e.pullErr
 	}
-	e.pulls = append(e.pulls, pullRecord{Ref: ref, Digest: digest, Platform: platform, As: append([]string(nil), as...)})
+	if e.failFor != nil {
+		if err := e.failFor(ref); err != nil {
+			return nil, err
+		}
+	}
 	if sink != nil {
 		sink.Layer(down.LayerUpdate{Digest: "sha256:" + ref, Total: 1, Done: 1, State: "done"})
 	}
@@ -207,6 +218,14 @@ func (e *fakeEngine) setInUse(refs ...string) {
 	e.mu.Unlock()
 }
 func (e *fakeEngine) pullCount() int { e.mu.Lock(); defer e.mu.Unlock(); return len(e.pulls) }
+
+// pullRecords returns every pull the engine was asked for, in order — a job
+// with a fallback source makes more than one.
+func (e *fakeEngine) pullRecords() []pullRecord {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]pullRecord(nil), e.pulls...)
+}
 func (e *fakeEngine) lastPull() pullRecord {
 	e.mu.Lock()
 	defer e.mu.Unlock()

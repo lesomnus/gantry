@@ -27,6 +27,12 @@ const (
 	ImageRemove Type = "image_removed"
 	Pinned      Type = "pinned"
 	Unpinned    Type = "unpinned"
+	// JobFallback records that a job could not be served by the store it was
+	// pointed at and was served from somewhere else. The in-memory job record
+	// shows this too, as a failed transfer on a job that completed — but that
+	// record is gone on restart, and a cache quietly falling out of use is
+	// exactly the kind of thing worth still knowing tomorrow.
+	JobFallback Type = "job_fallback"
 )
 
 // Event is one audit record. Seq is a monotonic id; the rest is best-effort
@@ -214,10 +220,11 @@ func kvi(id string, bytes int64) json.RawMessage {
 	return b
 }
 
-// admittedDetail carries the job id alongside the source so an admitted event
-// can be traced to its job_done by id — the log alone reconstructs a job's
-// lifecycle without the in-memory registry.
-func admittedDetail(id, source string) json.RawMessage {
+// jobDetail carries the job id alongside a store name so an event can be traced
+// to its job_done by id — the log alone reconstructs a job's lifecycle without
+// the in-memory registry. The store is the source the job was admitted with, or
+// the source that failed to serve it on a fallback.
+func jobDetail(id, source string) json.RawMessage {
 	m := map[string]string{"job": id}
 	if source != "" {
 		m["source"] = source

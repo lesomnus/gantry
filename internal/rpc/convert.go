@@ -139,6 +139,7 @@ var storeModeToPB = map[string]pb.StoreMode{
 
 var eventTypeToPB = map[event.Type]pb.EventType{
 	event.JobAdmitted: pb.EventType_EVENT_TYPE_JOB_ADMITTED,
+	event.JobFallback: pb.EventType_EVENT_TYPE_JOB_FALLBACK,
 	event.JobDone:     pb.EventType_EVENT_TYPE_JOB_DONE,
 	event.GCApplied:   pb.EventType_EVENT_TYPE_GC_APPLIED,
 	event.ImagePulled: pb.EventType_EVENT_TYPE_IMAGE_PULLED,
@@ -149,6 +150,7 @@ var eventTypeToPB = map[event.Type]pb.EventType{
 
 var eventTypeFromPB = map[pb.EventType]event.Type{
 	pb.EventType_EVENT_TYPE_JOB_ADMITTED:  event.JobAdmitted,
+	pb.EventType_EVENT_TYPE_JOB_FALLBACK:  event.JobFallback,
 	pb.EventType_EVENT_TYPE_JOB_DONE:      event.JobDone,
 	pb.EventType_EVENT_TYPE_GC_APPLIED:    event.GCApplied,
 	pb.EventType_EVENT_TYPE_IMAGE_PULLED:  event.ImagePulled,
@@ -255,11 +257,28 @@ func jobToPB(snap cpx.JobSnapshot) *pb.Job {
 		DateCreated:  ts(snap.DateCreated),
 		DateStarted:  ts(snap.DateStarted),
 		DateEnded:    ts(snap.DateEnded),
+		// The effective decision, so a reader can tell a job that was allowed to
+		// leave its source from one that was not — the failed first transfer
+		// alone does not say whether the fallback was permitted or merely absent.
+		FallbackToOrigin: proto.Bool(snap.FallbackToOrigin),
 	}
-	// The snapshot carries the resolved stores inside its transfer step.
+	// The snapshot carries the resolved stores inside its transfer steps. The
+	// one that SERVED the job decides: a job that fell back was delivered by its
+	// later attempt, and naming the first (failed) one would report a store the
+	// image did not come from. When nothing served it — every attempt failed, or
+	// none has finished yet — the first attempt is the honest answer, because
+	// that is the source the job was actually pointed at. Single-transfer jobs
+	// are unaffected either way.
 	if len(snap.Transfers) > 0 {
-		b.Source = storeByName(snap.Transfers[0].Source)
-		b.Target = storeByName(snap.Transfers[0].Store)
+		t := snap.Transfers[0]
+		for _, c := range snap.Transfers {
+			if c.State == "done" || c.State == "exists" {
+				t = c
+				break
+			}
+		}
+		b.Source = storeByName(t.Source)
+		b.Target = storeByName(t.Store)
 	}
 	return b.Build()
 }
@@ -424,6 +443,10 @@ func planToPB(res cpx.PlanResult) *pb.JobPlanResponse {
 		b.TargetRef = proto.String(res.TargetRef)
 	}
 	b.CopyReferrers = proto.Bool(res.CopyReferrers)
+	b.FallbackToOrigin = proto.Bool(res.FallbackToOrigin)
+	if res.FallbackRef != "" {
+		b.FallbackRef = proto.String(res.FallbackRef)
+	}
 	if res.Coalesces != "" {
 		b.Coalesces = proto.String(res.Coalesces)
 	}

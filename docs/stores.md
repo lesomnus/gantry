@@ -229,7 +229,8 @@ instead of the pull reference — so a cache-fed node keeps the upstream name
 `as` strings are kept **verbatim** — containerd resolves image names by exact
 match, so normalizing (`docker.io` → `index.docker.io`) would break kubelet
 lookups. `as` participates in the coalescing key `(ref, platforms, source,
-target, as)`, so two submits differing only in `as` are distinct moves.
+target, as, fallback_to_origin)`, so two submits differing only in `as` are
+distinct moves.
 
 An `as` entry is a tag reference on any engine. A **digest** reference
 (`repo@sha256:…`) is also allowed, under the conditions below.
@@ -249,13 +250,16 @@ not that digest. The plan rejects a mismatched or unpinned digest `as` name
 require a digest-pinned job`).
 
 The anchor manifest's raw bytes back the digest name. gantry fetches them from
-the job's **source** (the cache) — the origin registry is **never contacted** —
-and hashes them against the reference's digest (sha256 only) rather than trusting
-the transport, because they are about to be registered on a node under that
-digest's name. The fetch happens **before** the pull, so a cache that cannot
-resolve the digest fails the job before any bytes move; the engine registers the
-names only **after** its pull succeeds, so a name never resolves to absent
-content.
+the store the attempt pulls from — normally the job's **source** (the cache), so
+the origin registry is **never contacted**; the one exception is a
+`fallback_to_origin` attempt, which fetches the anchor from the origin along with
+the content (see [Falling back to the origin](#falling-back-to-the-origin)).
+Either way the bytes are hashed against the reference's digest (sha256 only)
+rather than trusting the transport, because they are about to be registered on a
+node under that digest's name. The fetch happens **before** the pull, so a source
+that cannot resolve the digest fails the attempt before any bytes move; the
+engine registers the names only **after** its pull succeeds, so a name never
+resolves to absent content.
 
 Digest names require the **containerd image store**:
 
@@ -279,6 +283,131 @@ reported back by the engine), never with a name it does not resolve (see
 The net effect: a jobspec pinned to `repo@sha256:INDEX` resolves locally after
 the move — `docker image inspect` hits, and a `force_pull=false` deployment pulls
 nothing.
+
+## Falling back to the origin
+
+The `remote → cache → engine` flow is two jobs, and nothing links them: there is
+no dependency edge and **no ordering guarantee** between a cache-fill job and an
+engine pull that reads from that cache. From the pull's side, a cache that is
+empty because its fill job failed, has not run yet, or is unreachable is one
+indistinguishable fact — *this source cannot serve the image* — and by default
+that fails the job.
+
+`fallback_to_origin` (engine targets only) makes the pull re-attempt against the
+registry named in the job's own `ref` instead:
+
+```
+JobService.Add {ref: "cr.example.com/app:1", source: cache, target: node,
+                fallback_to_origin: true}
+
+   attempt 1  node ◀── cache            failed   transfers[0]
+   attempt 2  node ◀── cr.example.com   done     transfers[1]     job: DONE
+```
+
+`source` is only ever an *override* of the ref's own registry, so the fallback
+binding needs no new input — it is the binding the job would have had with
+`source` unset. Each attempt is its own `transfers` entry, so the failed one
+stays on the record (with its error) while the job itself completes: **a cache
+miss reads as a miss, not an outage.** The job's reported `source` is the attempt
+that actually served it — or, when nothing did, the source the job was pointed
+at, since naming the fallback on a wholly failed job would read as though the
+operator had asked for it.
+
+Absent from the request, the value is the server default
+`worker.fallback_to_origin` (default `false` — a deployment that has not opted in
+behaves exactly as before). What a job *reports* is the **effective** decision:
+false when it has no second source to reach, whatever the request said. That is
+also what enters the coalescing key, so two jobs that provably behave the same
+still collapse onto one move.
+
+**What the fallback does and does not guarantee**
+
+- A **digest-pinned** job (a digest ref, or a verified source) falls back to that
+  same digest: the daemon is asked for `origin/repo@sha256:…`, so the origin
+  cannot serve different bytes than the cache would have. The admission-time
+  `verification` record still describes exactly what was pulled.
+- An **unpinned tag** job resolves its tag at the origin, which is that tag's
+  authority — if the result differs from what the cache held, the cache was
+  stale. No signature claim is made either way, because the job never made one.
+- Verification is **not** re-run against the origin. It would add nothing to a
+  pinned job (the content is digest-identical) and cannot apply to an unpinned
+  one.
+
+**When it does not apply**
+
+- A **registry** target — its `source` is normally the origin already
+  (`fallback_to_origin applies to an engine target`).
+- An engine with **`pull_host`** set, or a `downstream_host` shared by both
+  stores: both sources then resolve to the same pull ref, so the second attempt
+  would re-pull from the same place (`fallback to origin %q is not addressable
+  from engine %q`).
+- A job whose `source` already **is** the origin — a normal shape, not an error.
+- An origin that cannot be resolved as a store (a bare host with
+  `allow_unknown_stores` off — note that a repository-only `ref` resolves its
+  origin to `index.docker.io`).
+
+A job whose `source` already is the origin is never an error — a client that
+always sets the flag hits that shape on every direct job. The `pull_host`
+collision and the unresolvable origin are errors only when the request set
+`fallback_to_origin` **explicitly**; inherited from the server default they
+simply do not apply to that job, because a blanket default must not start
+failing every job whose ref names an origin nobody declared. `JobService.Plan` reports the effective decision and the
+`fallback_ref` the engine would be told to pull, so the difference is visible
+before submitting.
+
+**Waiting out a fill that is still running**
+
+A cache that is empty *because its fill job has not finished yet* is a different
+situation from one that cannot serve the image at all — but the pull cannot tell
+them apart from a single failed attempt. `worker.source_wait` (default `0` =
+off) lets a missed pull wait for an active job that is putting **exactly this
+image** into **exactly this store**, then try that source once more:
+
+```
+attempt 1  node ◀── cache    failed        transfers[0]
+           (a cache-fill job for this image is running — wait for it)
+attempt 2  node ◀── cache    done          transfers[1]     job: DONE
+```
+
+The two jobs are joined on an exact string: the ref a registry-target job puts
+into its store is the same ref an engine pull reads out of it. No heuristics, no
+dependency graph, and **nothing is declared up front** — the wait happens only
+after a real miss, so a cache that can already serve the image is never delayed
+by an unrelated re-warm job running beside it.
+
+The wait is bounded by `source_wait` and takes one of a limited number of slots
+— `max_concurrent_jobs - 1`, but never fewer than one — so a pool of two or more
+always keeps a worker free to run the fills themselves. A pull that cannot take a
+slot, or whose wait expires, goes straight on to the fallback. (With
+`max_concurrent_jobs: 1` the pipeline is serial by construction: nothing can be
+filling the cache while the pull runs, so a wait there only spends its bound
+before falling back. Leave `source_wait` at `0` on a single-worker server.) If the fill *failed*, the retry costs one cheap
+miss and the fallback follows — only the source itself can say whether it now
+holds the image.
+
+Waiting is independent of `fallback_to_origin`: with `source_wait` set and the
+fallback off, a missed pull still waits for the fill and then either succeeds or
+fails, never leaving the source it was given.
+
+**Operational consequences worth knowing**
+
+- A pull that failed over is **not retried** for anything the *engine* itself
+  could not do — a capability the daemon lacks, or a step after the content
+  already arrived. Those fail identically wherever the bytes come from. Every
+  other failure, including a platform this cache's copy of the index lacks, is
+  treated as a property of the source.
+- **The node ends up holding the origin-host name**, and the retention index is
+  stamped with what the daemon actually holds. Retention rules are patterns over
+  host-qualified repositories, so a rule written for the cache host will not
+  match an image the fallback delivered — it lands as `unmanaged` and is never
+  collected. Use `as` to give the image a stable name independent of which
+  attempt won.
+- The daemon, not gantry, authenticates the pull. A node with no credentials for
+  the origin fails the fallback attempt; the job's error carries both attempts'
+  errors.
+- Falling back does **not** fill the cache. The next pull misses again. Watch
+  `gantry.job.fallback` (labelled `from`/`to`): a cache quietly not being used
+  looks like success everywhere else.
 
 ## Verbatim digest-ref registry copies
 

@@ -188,6 +188,26 @@ func (s *memStore) Active(key string) (JobSnapshot, bool) {
 	return JobSnapshot{}, false
 }
 
+func (s *memStore) Filling(ref string) (<-chan struct{}, bool) {
+	if ref == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, j := range s.jobs {
+		// Same exclusions as coalescing: a terminal or canceled job will never
+		// produce the ref, and an enqueuing one is not yet guaranteed to run, so
+		// waiting on either would only burn the caller's timeout.
+		if j.State.Terminal() || j.Canceled() || j.enqueuing || j.done == nil {
+			continue
+		}
+		if j.Fills == ref {
+			return j.done, true
+		}
+	}
+	return nil, false
+}
+
 func (s *memStore) Counts() map[JobState]int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

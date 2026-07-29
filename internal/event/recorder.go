@@ -42,7 +42,15 @@ func (r *Recorder) emit(e Event) {
 // --- cpx.Recorder ---
 
 func (r *Recorder) JobAdmitted(id, ref, source, target, digest string) {
-	r.emit(Event{Type: JobAdmitted, Ref: ref, Store: target, Digest: digest, Detail: admittedDetail(id, source)})
+	r.emit(Event{Type: JobAdmitted, Ref: ref, Store: target, Digest: digest, Detail: jobDetail(id, source)})
+}
+
+// JobFellBack records that a job left the store it was pointed at: `from` could
+// not serve it, `to` was tried instead, and cause is why. Emitted when the
+// second attempt STARTS, so it is present even if that one fails too — the fact
+// worth keeping is that the intended source did not deliver.
+func (r *Recorder) JobFellBack(id, ref, from, to, cause string) {
+	r.emit(Event{Type: JobFallback, Ref: ref, Store: to, Error: cause, Detail: jobDetail(id, from)})
 }
 
 func (r *Recorder) JobFinished(id, ref, state, errMsg string, bytes int64) {

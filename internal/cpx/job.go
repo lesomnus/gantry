@@ -7,7 +7,9 @@ package cpx
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -57,6 +59,14 @@ type Job struct {
 	Ref       string // the requested image reference
 	Platforms []string
 	As        []string // engine dest: names the image is recorded under
+	// FallbackToOrigin is the effective decision for this job (request value, or
+	// the server default): an engine pull its source could not serve is
+	// re-attempted against the registry named in Ref.
+	FallbackToOrigin bool
+	// Fills is the target-side reference this job puts into its target store,
+	// for a registry target — the one thing another job could be waiting on.
+	// Empty for an engine target, which fills nothing another job reads.
+	Fills string
 	// Labels is the seed metadata of the job's originating handle; per-caller
 	// labels live on the handles (see the store), so a coalesced move keeps
 	// each caller's own set. Not used to run the move, only to find it.
@@ -78,6 +88,14 @@ type Job struct {
 	exec     *jobExec
 	req      Request     // the original request, for Retry's fresh re-plan
 	canceled atomic.Bool // Cancel was requested; Active must not coalesce onto it
+	// done is closed once the execution has finished, whatever its outcome. It
+	// is the signal another job waits on when it needs this one's output; unlike
+	// ctx it means "finished", not "abandon the work" — a layer failure cancels
+	// ctx while the job is still running, and the store cancels it when the last
+	// handle goes. Closed by run() so an erased or evicted record still releases
+	// its waiters.
+	done     chan struct{}
+	doneOnce sync.Once
 
 	// refs and pins track the handles pointing at this shared execution, both
 	// guarded by the store mutex. refs counts handles that still want the move
@@ -101,7 +119,22 @@ func NewJob(id, ref string, platforms []string, now time.Time) *Job {
 		Platforms:   platforms,
 		State:       JobPending,
 		DateCreated: now,
+		done:        make(chan struct{}),
 	}
+}
+
+// Done is closed when the execution finishes. A job built outside NewJob has no
+// channel and reads as never finishing; Filling skips such records rather than
+// handing a waiter something that can only time out.
+func (j *Job) Done() <-chan struct{} { return j.done }
+
+// markDone releases everyone waiting on this execution. Safe to call more than
+// once and from any goroutine.
+func (j *Job) markDone() {
+	if j.done == nil {
+		return
+	}
+	j.doneOnce.Do(func() { close(j.done) })
 }
 
 func (j *Job) SetCancel(fn context.CancelFunc) { j.cancel = fn }
@@ -118,13 +151,19 @@ func (j *Job) Canceled() bool { return j.canceled.Load() }
 
 func (j *Job) DedupKey() string { return j.dedup }
 
-// dedupKey collapses identical moves (same image, platforms, route) onto one job.
-func dedupKey(ref string, platforms []string, source, target string, as []string) string {
+// dedupKey collapses identical moves (same image, platforms, route) onto one
+// job — an interchangeable move. fallback is part of it because
+// it changes where the bytes may come from: a submit that refused the origin
+// must not be handed a job that is allowed to pull from it (nor the reverse,
+// which would silently drop the fallback the caller asked for).
+func dedupKey(ref string, platforms []string, source, target string, as []string, fallback bool) string {
 	ps := append([]string(nil), platforms...)
 	sort.Strings(ps)
 	ns := append([]string(nil), as...)
 	sort.Strings(ns)
-	return strings.Join([]string{ref, strings.Join(ps, ","), source, target, strings.Join(ns, ",")}, "\x00")
+	return strings.Join([]string{
+		ref, strings.Join(ps, ","), source, target, strings.Join(ns, ","), strconv.FormatBool(fallback),
+	}, "\x00")
 }
 
 // Transfer is one step of a job: moving an image into a store. A registry copy
@@ -172,18 +211,20 @@ type PlannedLayer struct {
 // --- snapshots (immutable views for the API) ---
 
 type JobSnapshot struct {
-	ID           string                `json:"id"`
-	Ref          string                `json:"ref"`
-	Platforms    []string              `json:"platforms"`
-	As           []string              `json:"as,omitempty"`
-	Labels       map[string]string     `json:"labels,omitempty"`
-	State        JobState              `json:"state"`
-	Err          string                `json:"error"`
-	Verification *VerificationSnapshot `json:"verification,omitempty"`
-	Transfers    []TransferSnapshot    `json:"transfers"`
-	DateCreated  time.Time             `json:"date_created"`
-	DateStarted  time.Time             `json:"date_started,omitempty"`
-	DateEnded    time.Time             `json:"date_ended,omitempty"`
+	ID        string   `json:"id"`
+	Ref       string   `json:"ref"`
+	Platforms []string `json:"platforms"`
+	As        []string `json:"as,omitempty"`
+	// FallbackToOrigin is the effective decision this job ran under.
+	FallbackToOrigin bool                  `json:"fallback_to_origin"`
+	Labels           map[string]string     `json:"labels,omitempty"`
+	State            JobState              `json:"state"`
+	Err              string                `json:"error"`
+	Verification     *VerificationSnapshot `json:"verification,omitempty"`
+	Transfers        []TransferSnapshot    `json:"transfers"`
+	DateCreated      time.Time             `json:"date_created"`
+	DateStarted      time.Time             `json:"date_started,omitempty"`
+	DateEnded        time.Time             `json:"date_ended,omitempty"`
 }
 
 type TransferSnapshot struct {
@@ -209,16 +250,17 @@ type LayerSnapshot struct {
 
 func (j *Job) snapshot() JobSnapshot {
 	s := JobSnapshot{
-		ID:          j.ID,
-		Ref:         j.Ref,
-		Platforms:   j.Platforms,
-		As:          j.As,
-		Labels:      j.Labels,
-		State:       j.State,
-		Err:         j.Err,
-		DateCreated: j.DateCreated,
-		DateStarted: j.DateStarted,
-		DateEnded:   j.DateEnded,
+		ID:               j.ID,
+		Ref:              j.Ref,
+		Platforms:        j.Platforms,
+		As:               j.As,
+		FallbackToOrigin: j.FallbackToOrigin,
+		Labels:           j.Labels,
+		State:            j.State,
+		Err:              j.Err,
+		DateCreated:      j.DateCreated,
+		DateStarted:      j.DateStarted,
+		DateEnded:        j.DateEnded,
 	}
 	if j.Verification != nil {
 		v := *j.Verification
@@ -282,6 +324,13 @@ type Store interface {
 	// (polled by the metrics observer on every collection).
 	Counts() map[JobState]int
 	Active(key string) (JobSnapshot, bool)
+	// Filling reports an active execution whose target-side reference is ref —
+	// a job that is, right now, putting exactly this image into the store some
+	// other job wants to read it from. The returned channel closes when that
+	// execution finishes, whatever its outcome; ok=false when nothing is filling
+	// ref. Used to wait out a cache that is merely not filled YET rather than
+	// treating it as a miss.
+	Filling(ref string) (done <-chan struct{}, ok bool)
 	Update(id string, fn func(*Job)) bool
 	// RetrySource returns the request to resubmit for a handle and that
 	// handle's effective (per-caller) state, so a retry honors the caller's own

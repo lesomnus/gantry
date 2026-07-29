@@ -63,7 +63,9 @@ func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, 
 	if digest != "" {
 		var err error
 		if pull_ref, err = anchoredRef(ref, digest); err != nil {
-			return nil, err
+			// A ref this engine cannot form is not the registry's fault; the same
+			// input fails identically wherever it would have pulled from.
+			return nil, fmt.Errorf("%w: %w", ErrEngine, err)
 		}
 	}
 	opts := []containerd.RemoteOpt{containerd.WithPullUnpack}
@@ -104,7 +106,7 @@ func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, 
 			if anchored && len(recorded) == 0 {
 				e.untrack(ctx, pull_ref)
 			}
-			return nil, fmt.Errorf("digest name %q does not carry the pulled digest %s", n, img.Target().Digest)
+			return nil, fmt.Errorf("%w: digest name %q does not carry the pulled digest %s", ErrEngine, n, img.Target().Digest)
 		}
 		rec := images.Image{Name: n, Target: img.Target()}
 		if _, err := e.cli.ImageService().Create(ctx, rec); err != nil {
@@ -112,13 +114,13 @@ func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, 
 				if anchored && len(recorded) == 0 {
 					e.untrack(ctx, pull_ref) // don't leave content rooted by an invisible record
 				}
-				return nil, z.Err(err, "tag %q", n)
+				return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "tag %q", n))
 			}
 			if _, err := e.cli.ImageService().Update(ctx, rec, "target"); err != nil {
 				if anchored && len(recorded) == 0 {
 					e.untrack(ctx, pull_ref)
 				}
-				return nil, z.Err(err, "retag %q", n)
+				return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "retag %q", n))
 			}
 		}
 		recorded = append(recorded, n)
@@ -130,7 +132,7 @@ func (e *containerdEngine) Pull(ctx context.Context, ref string, digest string, 
 		// would root the content forever. (A digest name the caller DID request
 		// via `as` is stamped into the index and reclaimed by name.)
 		if err := e.cli.ImageService().Delete(ctx, pull_ref); err != nil && !cerrdefs.IsNotFound(err) {
-			return nil, z.Err(err, "untrack %q", pull_ref)
+			return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "untrack %q", pull_ref))
 		}
 	}
 	return recorded, nil

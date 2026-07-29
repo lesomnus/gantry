@@ -635,26 +635,27 @@ func (b0 Transfer_builder) Build() *Transfer {
 
 // A move of one image from a source registry into a target store.
 type Job struct {
-	state                    protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Id            string                 `protobuf:"bytes,1,opt,name=id"`
-	xxx_hidden_Labels        map[string]string      `protobuf:"bytes,7,rep,name=labels" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	xxx_hidden_Ref           string                 `protobuf:"bytes,8,opt,name=ref"`
-	xxx_hidden_Source        *Store                 `protobuf:"bytes,9,opt,name=source"`
-	xxx_hidden_Target        *Store                 `protobuf:"bytes,10,opt,name=target"`
-	xxx_hidden_Platforms     []string               `protobuf:"bytes,11,rep,name=platforms"`
-	xxx_hidden_As            []string               `protobuf:"bytes,12,rep,name=as"`
-	xxx_hidden_DateEnded     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=date_ended,json=dateEnded"`
-	xxx_hidden_DateStarted   *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=date_started,json=dateStarted"`
-	xxx_hidden_DateCreated   *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_created,json=dateCreated"`
-	xxx_hidden_State         JobState               `protobuf:"varint,16,opt,name=state,enum=gantry.JobState"`
-	xxx_hidden_Error         string                 `protobuf:"bytes,17,opt,name=error"`
-	xxx_hidden_Verification  *Verification          `protobuf:"bytes,18,opt,name=verification"`
-	xxx_hidden_Transfers     *[]*Transfer           `protobuf:"bytes,19,rep,name=transfers"`
-	xxx_hidden_CopyReferrers bool                   `protobuf:"varint,20,opt,name=copy_referrers,json=copyReferrers"`
-	XXX_raceDetectHookData   protoimpl.RaceDetectHookData
-	XXX_presence             [1]uint32
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	state                       protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id               string                 `protobuf:"bytes,1,opt,name=id"`
+	xxx_hidden_Labels           map[string]string      `protobuf:"bytes,7,rep,name=labels" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	xxx_hidden_Ref              string                 `protobuf:"bytes,8,opt,name=ref"`
+	xxx_hidden_Source           *Store                 `protobuf:"bytes,9,opt,name=source"`
+	xxx_hidden_Target           *Store                 `protobuf:"bytes,10,opt,name=target"`
+	xxx_hidden_Platforms        []string               `protobuf:"bytes,11,rep,name=platforms"`
+	xxx_hidden_As               []string               `protobuf:"bytes,12,rep,name=as"`
+	xxx_hidden_DateEnded        *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=date_ended,json=dateEnded"`
+	xxx_hidden_DateStarted      *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=date_started,json=dateStarted"`
+	xxx_hidden_DateCreated      *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=date_created,json=dateCreated"`
+	xxx_hidden_State            JobState               `protobuf:"varint,16,opt,name=state,enum=gantry.JobState"`
+	xxx_hidden_Error            string                 `protobuf:"bytes,17,opt,name=error"`
+	xxx_hidden_Verification     *Verification          `protobuf:"bytes,18,opt,name=verification"`
+	xxx_hidden_Transfers        *[]*Transfer           `protobuf:"bytes,19,rep,name=transfers"`
+	xxx_hidden_CopyReferrers    bool                   `protobuf:"varint,20,opt,name=copy_referrers,json=copyReferrers"`
+	xxx_hidden_FallbackToOrigin bool                   `protobuf:"varint,21,opt,name=fallback_to_origin,json=fallbackToOrigin"`
+	XXX_raceDetectHookData      protoimpl.RaceDetectHookData
+	XXX_presence                [1]uint32
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *Job) Reset() {
@@ -789,6 +790,13 @@ func (x *Job) GetCopyReferrers() bool {
 	return false
 }
 
+func (x *Job) GetFallbackToOrigin() bool {
+	if x != nil {
+		return x.xxx_hidden_FallbackToOrigin
+	}
+	return false
+}
+
 func (x *Job) SetId(v string) {
 	x.xxx_hidden_Id = v
 }
@@ -847,7 +855,12 @@ func (x *Job) SetTransfers(v []*Transfer) {
 
 func (x *Job) SetCopyReferrers(v bool) {
 	x.xxx_hidden_CopyReferrers = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 15)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 16)
+}
+
+func (x *Job) SetFallbackToOrigin(v bool) {
+	x.xxx_hidden_FallbackToOrigin = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 15, 16)
 }
 
 func (x *Job) HasSource() bool {
@@ -899,6 +912,13 @@ func (x *Job) HasCopyReferrers() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 14)
 }
 
+func (x *Job) HasFallbackToOrigin() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 15)
+}
+
 func (x *Job) ClearSource() {
 	x.xxx_hidden_Source = nil
 }
@@ -926,6 +946,11 @@ func (x *Job) ClearVerification() {
 func (x *Job) ClearCopyReferrers() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 14)
 	x.xxx_hidden_CopyReferrers = false
+}
+
+func (x *Job) ClearFallbackToOrigin() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 15)
+	x.xxx_hidden_FallbackToOrigin = false
 }
 
 type Job_builder struct {
@@ -958,9 +983,11 @@ type Job_builder struct {
 	// source), digest references carrying the pinned digest: those are
 	// registered over the pulled content so the upstream digest name (e.g.
 	// "cr.example.com/app@sha256:...") resolves locally without touching its
-	// registry (containerd image store only; a classic docker graph-driver
-	// store rejects the job before pulling). Non-empty replaces the
-	// pull-reference name entirely — include it in the list to keep it.
+	// registry — unless the job falls back to that registry, which is the one
+	// case the anchor comes from the origin (containerd image store only; a
+	// classic docker graph-driver store rejects the job before pulling).
+	// Non-empty replaces the pull-reference name entirely — include it in the
+	// list to keep it.
 	As          []string
 	DateEnded   *timestamppb.Timestamp
 	DateStarted *timestamppb.Timestamp
@@ -976,6 +1003,23 @@ type Job_builder struct {
 	// Copy source referrer artifacts (signatures) along with the image.
 	// Absent = server default (on when the job is verified).
 	CopyReferrers *bool
+	// Engine target only: when `source` cannot serve the image, pull it from the
+	// registry named in `ref` (the origin) instead of failing — a cache is then
+	// an optimization rather than a dependency. Whether the cache is empty
+	// because its fill job failed, has not run yet, or is unreachable is one
+	// indistinguishable fact from the pull's side, and none of them need fail the
+	// job. The failed attempt stays on the record as a failed `transfers` entry
+	// of a job that nevertheless completed. A digest-pinned job (a digest ref, or
+	// a verified source) falls back to that same digest, so the origin cannot
+	// serve different bytes; an unpinned job resolves its tag at the origin,
+	// which is that tag's authority. Absent = server default
+	// (worker.fallback_to_origin). Rejected for a registry target; a fallback that
+	// cannot be expressed — an engine whose pull_host collapses both sources onto
+	// one host, or an origin that resolves to no store — is an error only when the
+	// request set this field explicitly, and otherwise just does not apply to that
+	// job. On a job record this is the EFFECTIVE decision: false whenever the job
+	// has no second source to reach, whatever the request said.
+	FallbackToOrigin *bool
 }
 
 func (b0 Job_builder) Build() *Job {
@@ -997,8 +1041,12 @@ func (b0 Job_builder) Build() *Job {
 	x.xxx_hidden_Verification = b.Verification
 	x.xxx_hidden_Transfers = &b.Transfers
 	if b.CopyReferrers != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 15)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 16)
 		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
+	}
+	if b.FallbackToOrigin != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 15, 16)
+		x.xxx_hidden_FallbackToOrigin = *b.FallbackToOrigin
 	}
 	return m0
 }
@@ -1031,7 +1079,7 @@ const file_gantry_job_proto_rawDesc = "" +
 	"bytes_done\x18\b \x01(\x03R\tbytesDone\x12%\n" +
 	"\x06layers\x18\t \x03(\v2\r.gantry.LayerR\x06layers\x12\x14\n" +
 	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"\xee\x05\n" +
+	" \x01(\tR\x05error\"\xa9\x06\n" +
 	"\x03Job\x12\x19\n" +
 	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12/\n" +
 	"\x06labels\x18\a \x03(\v2\x17.gantry.Job.LabelsEntryR\x06labels\x12\x18\n" +
@@ -1049,7 +1097,8 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\x05error\x18\x11 \x01(\tR\x05error\x128\n" +
 	"\fverification\x18\x12 \x01(\v2\x14.gantry.VerificationR\fverification\x12.\n" +
 	"\ttransfers\x18\x13 \x03(\v2\x10.gantry.TransferR\ttransfers\x122\n" +
-	"\x0ecopy_referrers\x18\x14 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x1a9\n" +
+	"\x0ecopy_referrers\x18\x14 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x129\n" +
+	"\x12fallback_to_origin\x18\x15 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\x10fallbackToOrigin\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\x95\x01\n" +

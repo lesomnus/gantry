@@ -1,6 +1,7 @@
 package event
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -191,5 +192,36 @@ func TestRecorderImageRemoved(t *testing.T) {
 	got, _ := l.List(Filter{Type: ImageRemove})
 	if len(got) != 1 || got[0].Ref != "cache.local/a:1" || got[0].Store != "eng" {
 		t.Errorf("image_removed = %+v", got)
+	}
+}
+
+// A fallback is recorded durably: which store could not serve the job, which
+// one was tried instead, and why — correlated to the job by id, like the rest
+// of a job's lifecycle.
+func TestRecorderJobFellBack(t *testing.T) {
+	l := openTemp(t, 16)
+	r := NewRecorder(l, nil)
+	r.JobFellBack("job-9", "cr.example.com/app:1", "cache", "origin", "manifest unknown")
+
+	got, err := l.List(Filter{Type: JobFallback})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("events = %d, want 1", len(got))
+	}
+	e := got[0]
+	if e.Ref != "cr.example.com/app:1" || e.Store != "origin" || e.Error != "manifest unknown" {
+		t.Errorf("event = %+v", e)
+	}
+	var d struct {
+		Job    string `json:"job"`
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal(e.Detail, &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Job != "job-9" || d.Source != "cache" {
+		t.Errorf("detail = %+v, want the job id and the source that failed", d)
 	}
 }

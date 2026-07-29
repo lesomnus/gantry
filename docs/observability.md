@@ -69,6 +69,8 @@ no-ops until the `meter` provider has an exporter.
 | `gantry.bytes` | counter | `By` | — | Bytes moved between stores, summed once per finished job. |
 | `gantry.job.duration` | histogram | `s` | `state` (`done`/`failed`/`canceled`) | Wall-clock duration of each job, labelled by its terminal state. |
 | `gantry.jobs.active` | up-down counter | — | — | Jobs currently executing (in flight). |
+| `gantry.job.fallback` | counter | — | `from`, `to` (store names) | An engine pull was re-attempted against another source because `from` could not serve it. Non-zero means images are reaching nodes from somewhere other than where the operator pointed them — a cache quietly not being used looks like success everywhere else. See [stores.md](stores.md#falling-back-to-the-origin). |
+| `gantry.job.source_wait` | histogram | `s` | `outcome` (`served`/`timeout`/`canceled`/`skipped`) | Time an engine pull spent waiting for an in-flight job filling its source (`worker.source_wait`). `served` means the wait paid off; a lot of `timeout` means the bound is too short or the fills are too slow; `skipped` means no wait slot was free. |
 | `gantry.jobs` | observable gauge | — | `state` (`pending`/`running`/`done`/`failed`/`canceled`) | Count of in-memory job records by state — the live registry the `job_ttl` sweeper trims. |
 | `gantry.queue.depth` | observable gauge | — | — | Jobs waiting in the pending-job queue (visible before a full queue starts rejecting with `RESOURCE_EXHAUSTED`). |
 | `gantry.queue.capacity` | observable gauge | — | — | The queue buffer size (`worker.queue_size`). |
@@ -136,11 +138,17 @@ type:
 |---|---|---|
 | `job_admitted` | a job is accepted into the pipeline | target `store`, source `ref`, pinned `digest`, `detail.job` (id) + `detail.source` |
 | `job_done` | a job reaches a terminal state | `ref`, `state` (`done`/`failed`/`canceled`), `error`, `detail.job` + `detail.bytes` |
+| `job_fallback` | a job's source could not serve it and another was tried | `ref`, `store` (the source tried instead), `error` (why the first one failed), `detail.job` + `detail.source` (the source that failed) |
 | `gc_applied` | a GC pass removes something | `store`, `detail.{deleted,untagged,reaped,errors}` |
 | `image_pulled` | a manual `StoreService.Pull` completes | `store`, `ref` |
 | `image_removed` | a GC deletion or `StoreService.Remove` | `store`, `ref` |
 | `pinned` | `PinService.Add` | `store`, `ref` (the pin value) |
 | `unpinned` | `PinService.Erase` | `store`, `ref` (the pin value) |
+
+`job_fallback` is the durable counterpart of the failed transfer row on a job
+that nevertheless completed: the in-memory job record is emptied on restart, but
+a cache quietly falling out of use is worth still knowing tomorrow. See
+[stores.md](stores.md#falling-back-to-the-origin).
 
 A job's full durable lifecycle is the `job_admitted` → `job_done` pair correlated
 by `detail.job` (the job id): the admitted event names the source and pinned

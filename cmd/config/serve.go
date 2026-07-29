@@ -490,4 +490,21 @@ type WorkerConfig struct {
 	QueueSize int `yaml:"queue_size"`
 	// JobTTL is how long a finished job record is retained.
 	JobTTL Duration `yaml:"job_ttl"`
+	// FallbackToOrigin is the default for a job that does not set
+	// fallback_to_origin: an engine pull its source could not serve is
+	// re-attempted against the registry named in the job's ref, so a cache is an
+	// optimization rather than a dependency. Default false — the behavior of a
+	// deployment that has not opted in does not change.
+	FallbackToOrigin bool `yaml:"fallback_to_origin"`
+	// SourceWait is how long an engine pull that its source could not serve
+	// waits for an active job that is filling that source with exactly this
+	// image, before giving up on it. It costs nothing when the source can serve
+	// the image — the wait happens only after a real miss — so it does not slow
+	// a warm cache down. 0 (default) disables waiting.
+	//
+	// Waiters are capped at MaxConcurrentJobs-1 (minimum one) so a pool of two or
+	// more always keeps a worker free to run the fills. With MaxConcurrentJobs 1
+	// the pipeline is serial and nothing can be filling anything while the pull
+	// runs, so a wait only spends its bound before moving on: leave this at 0.
+	SourceWait Duration `yaml:"source_wait"`
 }

@@ -39,7 +39,9 @@ type metrics struct {
 	bytes    metric.Int64Counter
 	duration metric.Float64Histogram
 	active   metric.Int64UpDownCounter
-	gauges   metric.Registration // queue depth/capacity + jobs-by-state observer
+	fallback metric.Int64Counter     // engine pulls re-attempted against another source
+	srcWait  metric.Float64Histogram // time spent waiting for an in-flight fill
+	gauges   metric.Registration     // queue depth/capacity + jobs-by-state observer
 }
 
 func newMetrics(ctx context.Context) *metrics {
@@ -50,7 +52,16 @@ func newMetrics(ctx context.Context) *metrics {
 		metric.WithDescription("job duration"))
 	active, _ := m.Int64UpDownCounter("gantry.jobs.active",
 		metric.WithDescription("jobs in flight"))
-	return &metrics{bytes: bytes, duration: duration, active: active}
+	// A cache that quietly stops being used looks like success everywhere else:
+	// the job is done, the node has the image. This counter is the signal that
+	// it was served from somewhere other than where the operator intended.
+	fallback, _ := m.Int64Counter("gantry.job.fallback",
+		metric.WithDescription("engine pulls retried against a fallback source"))
+	// Whether waiting for a fill is worth its bound is an operational question,
+	// not a design one: the outcome label answers it per deployment.
+	srcWait, _ := m.Float64Histogram("gantry.job.source_wait", metric.WithUnit("s"),
+		metric.WithDescription("time an engine pull spent waiting for an in-flight fill of its source"))
+	return &metrics{bytes: bytes, duration: duration, active: active, fallback: fallback, srcWait: srcWait}
 }
 
 // Request is a job submission: move Ref from store Source into store Target.
@@ -81,9 +92,31 @@ type Request struct {
 	// classic graph-driver docker rejects the job before pulling). Engine
 	// targets only.
 	As []string
+	// FallbackToOrigin lets an engine pull that its source could not serve
+	// retry against the registry named in Ref (the origin), so a cache is an
+	// optimization rather than a dependency: whether the cache is empty because
+	// its fill job failed, has not run yet, or is unreachable is one
+	// indistinguishable fact from the pull's side, and none of them need fail
+	// the job. nil takes the server default (worker.fallback_to_origin).
+	// Engine targets only.
+	FallbackToOrigin *bool
 	// Labels is caller metadata attached to the job for List filtering; it does
 	// not affect the move or coalescing. Each coalesced caller keeps its own.
 	Labels map[string]string
+}
+
+// sourceBinding is one place an engine pull can be served from. A job has one
+// per attempt: the planned source first, then — when the job allows it — the
+// origin registry named in the job's own ref.
+type sourceBinding struct {
+	store config.StoreConfig
+	// ref is the source-side reference, digest-pinned when the job is, used to
+	// size the pull and to fetch a digest `as` anchor.
+	ref name.Reference
+	// pullRef is what the daemon is told to pull. It keeps the tag (the digest
+	// travels separately and anchors the pull), and carries the engine's
+	// pull_host or the source store's downstream_host.
+	pullRef string
 }
 
 // jobExec is the resolved plan for a job, computed at submit time.
@@ -99,6 +132,31 @@ type jobExec struct {
 	asDigest      bool                  // puller dest: as contains digest references (anchor bytes needed)
 	platform      string                // puller dest: the resolved platform
 	verification  *VerificationSnapshot // admission-time verification, stamped onto the Job
+	// fallback is the effective fallback_to_origin decision. It starts as the
+	// request value (or the server default) and is narrowed by bindSources to
+	// what the job can actually do: true exactly when a second binding exists.
+	// It is part of the dedup key, so a job that refused the origin is never
+	// coalesced onto one that allows it — and, because it is the *effective*
+	// value, two jobs that provably behave the same still coalesce.
+	fallback bool
+	// fallbackAsked records that the REQUEST asked for the fallback, not the
+	// server default. A fallback this job cannot express is then an error the
+	// caller hears about, while a blanket default that does not fit this job
+	// just does not apply — a server-wide default must not start failing jobs
+	// whose ref names an origin nobody declared.
+	fallbackAsked bool
+	// bindings are the sources runPull attempts, in order. bindings[0] is the
+	// planned source; a second entry is the origin, present only when fallback
+	// is on and the origin is a distinct, addressable place to pull from.
+	bindings []sourceBinding
+	// fillWant is the source-side reference an engine pull reads, in its
+	// pre-pinning (tag) form — the exact string a registry-target job records in
+	// Job.Fills when it puts this image into that store. It is the join between
+	// a pull and the fill it may be racing.
+	fillWant string
+	// fills is what a registry-target job puts into its target, stamped onto
+	// Job.Fills so a pull can find it. Empty for an engine target.
+	fills string
 
 	// committed is the digest the cache copy landed at, set by runCopy.
 	committed v1.Hash
@@ -119,6 +177,11 @@ type Copier struct {
 	verifier verify.Verifier          // source-signature verification (nil = disabled)
 	rec      Recorder                 // audit log (nil = disabled)
 
+	// waitSlots bounds how many running jobs may be parked waiting for another
+	// job to fill their source. Sized below the worker count so a worker is
+	// always left to run the fills themselves.
+	waitSlots chan struct{}
+
 	base context.Context
 	stop chan struct{} // closed by Stop; ends goroutines not fed by the jobs channel
 	wg   sync.WaitGroup
@@ -129,14 +192,21 @@ func NewCopier(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Copie
 	if q < 1 {
 		q = 1
 	}
+	// One fewer than the worker pool: a worker parked on a fill is a worker not
+	// running one, so the last slot is always reserved for making progress.
+	waits := wc.MaxConcurrentJobs - 1
+	if waits < 1 {
+		waits = 1
+	}
 	return &Copier{
-		stores:  stores,
-		store:   jobStore,
-		wc:      wc,
-		jobs:    make(chan *Job, q),
-		idgen:   newID,
-		metrics: newMetrics(context.Background()),
-		stop:    make(chan struct{}),
+		stores:    stores,
+		store:     jobStore,
+		wc:        wc,
+		jobs:      make(chan *Job, q),
+		idgen:     newID,
+		metrics:   newMetrics(context.Background()),
+		waitSlots: make(chan struct{}, waits),
+		stop:      make(chan struct{}),
 	}
 }
 
@@ -153,6 +223,10 @@ func (w *Copier) SetVerifier(v verify.Verifier) { w.verifier = v }
 type Recorder interface {
 	JobAdmitted(id, ref, source, target, digest string)
 	JobFinished(id, ref, state, errMsg string, bytes int64)
+	// JobFellBack records that `from` could not serve the job and `to` was tried
+	// instead. Called when the second attempt starts, so it lands even if that
+	// one fails too. Durable, unlike the job record's failed transfer row.
+	JobFellBack(id, ref, from, to, cause string)
 }
 
 // SetRecorder wires the audit log. Must be set before Start/Submit.
@@ -254,7 +328,7 @@ func (w *Copier) Submit(req Request) (snap JobSnapshot, created bool, err error)
 		return JobSnapshot{}, false, err
 	}
 
-	key := dedupKey(req.Ref, platforms, ex.source.Name, ex.dst.Name(), ex.as)
+	key := dedupKey(req.Ref, platforms, ex.source.Name, ex.dst.Name(), ex.as, ex.fallback)
 	now := time.Now()
 	id := w.idgen()
 	// Coalesce onto an identical in-flight move, but hand this caller its own
@@ -268,6 +342,8 @@ func (w *Copier) Submit(req Request) (snap JobSnapshot, created bool, err error)
 	job := NewJob(id, req.Ref, platforms, now)
 	job.ctx, job.cancel, job.dedup, job.exec, job.req = ctx, cancel, key, ex, req
 	job.As = ex.as
+	job.FallbackToOrigin = ex.fallback
+	job.Fills = ex.fills
 	job.Labels = req.Labels
 	job.Verification = ex.verification
 	job.Transfers = transfers
@@ -329,6 +405,13 @@ type PlanResult struct {
 	CopyReferrers bool                  `json:"copy_referrers"`
 	Verification  *VerificationSnapshot `json:"verification,omitempty"`
 	Coalesces     string                `json:"coalesces,omitempty"` // active job an identical submit would join
+	// FallbackToOrigin is the effective value after the server default.
+	FallbackToOrigin bool `json:"fallback_to_origin"`
+	// FallbackRef is the ref the engine would be told to pull if its source
+	// could not serve the image. Empty when the job has no fallback: the flag is
+	// off, the source already is the origin, or the origin is not addressable
+	// from this engine.
+	FallbackRef string `json:"fallback_ref,omitempty"`
 }
 
 // Plan dry-runs admission under the caller's context.
@@ -338,14 +421,15 @@ func (w *Copier) Plan(ctx context.Context, req Request) (PlanResult, error) {
 		return PlanResult{}, err
 	}
 	out := PlanResult{
-		Ref:           req.Ref,
-		Source:        ex.source.Name,
-		Target:        ex.dst.Name(),
-		SourceRef:     ex.srcRef.Name(),
-		Platforms:     platforms,
-		As:            ex.as,
-		CopyReferrers: ex.copyReferrers,
-		Verification:  ex.verification,
+		Ref:              req.Ref,
+		Source:           ex.source.Name,
+		Target:           ex.dst.Name(),
+		SourceRef:        ex.srcRef.Name(),
+		Platforms:        platforms,
+		As:               ex.as,
+		CopyReferrers:    ex.copyReferrers,
+		Verification:     ex.verification,
+		FallbackToOrigin: ex.fallback,
 	}
 	switch {
 	case ex.cacheRef != nil:
@@ -353,7 +437,10 @@ func (w *Copier) Plan(ctx context.Context, req Request) (PlanResult, error) {
 	case ex.pullRef != "":
 		out.TargetRef = ex.pullRef
 	}
-	key := dedupKey(req.Ref, platforms, ex.source.Name, ex.dst.Name(), ex.as)
+	if len(ex.bindings) > 1 {
+		out.FallbackRef = ex.bindings[1].pullRef
+	}
+	key := dedupKey(req.Ref, platforms, ex.source.Name, ex.dst.Name(), ex.as, ex.fallback)
 	if snap, ok := w.store.Active(key); ok {
 		out.Coalesces = snap.ID
 	}
@@ -383,6 +470,10 @@ func (w *Copier) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 	if err != nil {
 		return nil, nil, nil, z.Err(err, "source ref")
 	}
+	// Captured before verification can replace srcRef with a digest ref: a
+	// registry target derives its in-store ref from the tag too, so the tag form
+	// is the one string both sides of a fill/pull pair agree on.
+	ex.fillWant = ex.srcRef.Name()
 
 	// target: a registry gantry pushes into, or an engine that pulls.
 	if req.Target == "" {
@@ -391,6 +482,20 @@ func (w *Copier) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 	ex.dst, err = resolveDest(w.stores, req.Target)
 	if err != nil {
 		return nil, nil, nil, z.Err(err, "target")
+	}
+
+	// The fallback is an engine-pull property: a registry target's source is
+	// normally the origin already, so there is nothing to fall back to. Resolve
+	// the effective value here — it is part of the dedup key, so a job that
+	// refused the origin can never be coalesced onto one that allows it.
+	if _, isPuller := ex.dst.(puller); isPuller {
+		ex.fallback = w.wc.FallbackToOrigin
+		if req.FallbackToOrigin != nil {
+			ex.fallback = *req.FallbackToOrigin
+			ex.fallbackAsked = *req.FallbackToOrigin
+		}
+	} else if req.FallbackToOrigin != nil && *req.FallbackToOrigin {
+		return nil, nil, nil, fmt.Errorf("fallback_to_origin applies to an engine target; store %q is a registry", ex.dst.Name())
 	}
 
 	// The target-side reference is derived from the TAG (before any digest
@@ -424,6 +529,7 @@ func (w *Copier) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 			}
 			ex.verbatim = true
 		}
+		ex.fills = ex.cacheRef.Name()
 		transfers = append(transfers, &Transfer{
 			Store: d.Name(), Kind: d.Kind(), Source: ex.source.Name,
 			Ref: ex.cacheRef.Name(), State: "pending",
@@ -544,7 +650,90 @@ func (w *Copier) plan(ctx context.Context, req Request) (*jobExec, []*Transfer, 
 		}
 	}
 
+	// Source bindings, in attempt order. Built last so the origin binding
+	// inherits whatever verification pinned: a verified job falls back to the
+	// very digest it verified, the same bytes from a different host.
+	if pd, ok := ex.dst.(puller); ok {
+		if err := w.bindSources(ctx, ex, pd, base.Context().RegistryStr(), repo, id); err != nil {
+			return nil, nil, nil, err
+		}
+		// The effective decision IS whether a second source was bound. Keeping
+		// the requested value here instead would report a fallback that cannot
+		// happen, and would split the dedup key between two jobs that behave
+		// identically.
+		ex.fallback = len(ex.bindings) > 1
+	}
+
 	return ex, transfers, platforms, nil
+}
+
+// bindSources fills ex.bindings for an engine destination: the planned source
+// first, then — when the job allows a fallback — the origin registry named in
+// the job's own ref. `source` is only ever an override of that origin
+// (plan() defaults it to the ref's own registry), so the fallback binding needs
+// no new input from the caller.
+func (w *Copier) bindSources(ctx context.Context, ex *jobExec, d puller, originHost, repo, id string) error {
+	ex.bindings = []sourceBinding{{store: ex.source, ref: ex.srcRef, pullRef: ex.pullRef}}
+	if !ex.fallback {
+		return nil
+	}
+	// unavailable reports a fallback this job cannot express. Asked for
+	// explicitly it is an error; inherited from the server default it simply
+	// does not apply here, since one job's undeclared origin must not take down
+	// every job a global default touches. Either way it is never silent: the
+	// job runs with a single binding and Plan reports no fallback ref.
+	unavailable := func(err error) error {
+		if ex.fallbackAsked {
+			return err
+		}
+		ex.fallback = false
+		log.From(ctx).Info("fallback to origin does not apply to this job",
+			slog.String("ref", repo+id), slog.String("source", ex.source.Name), slog.String("reason", err.Error()))
+		return nil
+	}
+
+	origin, err := w.stores.Registry(originHost)
+	if err != nil {
+		return unavailable(z.Err(err, "fallback origin"))
+	}
+	if origin.Name == ex.source.Name {
+		// Already pulling from the origin; there is nowhere to fall back to.
+		// Not a misconfiguration — a client that always sets the flag hits this
+		// on every direct job — so it is not reported as one.
+		return nil
+	}
+	// The pull ref keeps the tag — the pinned digest travels separately and
+	// anchors the pull — so it is derived the same way the planned one was.
+	tagRef, err := name.ParseReference(origin.Host+"/"+repo+id, w.refOpts(origin)...)
+	if err != nil {
+		return unavailable(z.Err(err, "fallback origin ref"))
+	}
+	pullRef, err := d.pullRef(tagRef, origin)
+	if err != nil {
+		return unavailable(z.Err(err, "fallback origin pull ref"))
+	}
+	if pullRef == ex.pullRef {
+		// pull_host (or a downstream_host shared by both stores) collapses every
+		// source onto one host as far as the daemon is concerned, so the second
+		// attempt would re-pull from the same place. Say so rather than ship a
+		// fallback that silently cannot fall back.
+		return unavailable(fmt.Errorf("fallback to origin %q is not addressable from engine %q: both sources resolve to the pull ref %q (pull_host / downstream_host)", origin.Name, d.Name(), pullRef))
+	}
+	// Re-parse under the ORIGIN store's options: http-vs-https is baked into the
+	// parsed reference by name.Insecure, so an insecure cache and a TLS origin
+	// (or the reverse) must not inherit each other's scheme.
+	ref := name.Reference(tagRef)
+	if dg, ok := ex.srcRef.(name.Digest); ok {
+		s, err := rewriteHost(dg, origin.Host)
+		if err != nil {
+			return unavailable(z.Err(err, "fallback origin ref"))
+		}
+		if ref, err = name.ParseReference(s, w.refOpts(origin)...); err != nil {
+			return unavailable(z.Err(err, "fallback origin ref"))
+		}
+	}
+	ex.bindings = append(ex.bindings, sourceBinding{store: origin, ref: ref, pullRef: pullRef})
+	return nil
 }
 
 func (w *Copier) worker() {
@@ -558,6 +747,9 @@ func (w *Copier) run(job *Job) {
 	// Release the job's cancelCtx from the base context once it is terminal;
 	// otherwise every job leaks a child context until its record is deleted.
 	defer job.Cancel()
+	// …and release anyone waiting for this job's output. Deferred here rather
+	// than in finish() so an erased or evicted record still frees its waiters.
+	defer job.markDone()
 	ctx, span := otx.TraceStart(job.ctx, "job", trace.WithAttributes(attribute.String("gantry.ref", job.Ref)))
 	defer span.End()
 	l := log.From(ctx)
@@ -667,16 +859,150 @@ func (w *Copier) runCopy(ctx context.Context, job *Job, ex *jobExec, d pusher) e
 	return nil
 }
 
-// runPull tells a puller destination (an engine daemon) to fetch the image. The
-// transfer total is estimated upfront from the source manifest (best-effort) and
-// refined by the daemon's own progress reports as they arrive; the daemon's
-// error — including an unavailable platform — fails the job as-is.
+// runPull tells a puller destination (an engine daemon) to fetch the image,
+// attempting its source bindings in order: the planned source, then the origin
+// when the job allows a fallback. A source that is merely not filled YET buys
+// one extra attempt, once, after the job filling it finishes. An attempt that
+// fails leaves a failed transfer on the record; the job itself only fails when
+// no attempt could serve it, so a cache that could not deliver reads as a miss
+// rather than an outage.
 func (w *Copier) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) error {
-	t := job.Transfers[0]
+	if len(ex.bindings) == 0 {
+		// plan() always binds at least the planned source for a puller. Guard it
+		// anyway: an empty binding list would fall out of the loop below with no
+		// error and mark the job DONE without pulling anything.
+		return fmt.Errorf("no source bound for the pull")
+	}
+	var errs []error
+	// transferFor hands attempt n its own row: its own layer set, its own bytes,
+	// and a record of which store served it. The first attempt reuses the row
+	// plan() already published, so a job that never falls back looks exactly as
+	// it did before.
+	transferFor := func(b sourceBinding) *Transfer {
+		if len(errs) == 0 {
+			return job.Transfers[0]
+		}
+		t := &Transfer{Store: d.Name(), Kind: d.Kind(), Source: b.store.Name, Ref: b.pullRef, State: "pending"}
+		w.store.Update(job.ID, func(j *Job) { j.Transfers = append(j.Transfers, t) })
+		return t
+	}
+
+	waited := false
+	for i := 0; i < len(ex.bindings); i++ {
+		b := ex.bindings[i]
+		if i > 0 {
+			from := ex.bindings[i-1].store.Name
+			w.metrics.fallback.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("from", from), attribute.String("to", b.store.Name)))
+			cause := errs[len(errs)-1].Error()
+			log.From(ctx).Warn("engine pull falling back to another source",
+				slog.String("job", job.ID), slog.String("ref", job.Ref),
+				slog.String("from", from), slog.String("to", b.store.Name),
+				slog.String("error", cause))
+			if w.rec != nil {
+				w.rec.JobFellBack(job.ID, job.Ref, from, b.store.Name, cause)
+			}
+		}
+		for {
+			err := w.pullFrom(ctx, job, ex, d, b, transferFor(b))
+			if err == nil {
+				return nil
+			}
+			errs = append(errs, z.Err(err, "from %s", b.store.Name))
+			if !sourceFallbackWorthy(ctx, err) {
+				return errors.Join(errs...)
+			}
+			// The planned source gets a second chance, but only against a job
+			// that was filling it while this attempt ran — otherwise nothing has
+			// changed and retrying is pure waste.
+			if i > 0 || waited || !w.waitForFill(ctx, job, ex) {
+				break
+			}
+			waited = true
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// waitForFill blocks until an active job that is filling this job's source with
+// exactly this image finishes, and reports whether it is worth re-attempting
+// that source. It runs only after a real miss, so a source that can already
+// serve the image is never delayed by it.
+//
+// The wait holds a worker, so it takes one of a bounded number of slots: with
+// every worker parked on a fill, nothing would be left to run the fills
+// themselves. A job that cannot take a slot goes straight on to the fallback.
+func (w *Copier) waitForFill(ctx context.Context, job *Job, ex *jobExec) bool {
+	limit := time.Duration(w.wc.SourceWait)
+	if limit <= 0 || ex.fillWant == "" {
+		return false
+	}
+	done, ok := w.store.Filling(ex.fillWant)
+	if !ok {
+		return false
+	}
+	select {
+	case w.waitSlots <- struct{}{}:
+		defer func() { <-w.waitSlots }()
+	default:
+		log.From(ctx).Info("not waiting for an in-flight fill: no wait slot free",
+			slog.String("job", job.ID), slog.String("ref", ex.fillWant))
+		w.metrics.srcWait.Record(ctx, 0, metric.WithAttributes(attribute.String("outcome", "skipped")))
+		return false
+	}
+
+	l := log.From(ctx)
+	l.Info("waiting for an in-flight fill of this job's source",
+		slog.String("job", job.ID), slog.String("ref", ex.fillWant), slog.Duration("limit", limit))
+	start := time.Now()
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	record := func(outcome string) {
+		w.metrics.srcWait.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributes(attribute.String("outcome", outcome)))
+	}
+	select {
+	case <-done:
+		// The fill finished — it may have failed, in which case the retry costs
+		// one cheap miss and the fallback follows. Retrying is still right: only
+		// the source itself can say whether it now holds the image.
+		l.Info("in-flight fill finished; re-attempting the source",
+			slog.String("job", job.ID), slog.Duration("waited", time.Since(start)))
+		record("served")
+		return true
+	case <-timer.C:
+		l.Warn("gave up waiting for an in-flight fill",
+			slog.String("job", job.ID), slog.String("ref", ex.fillWant), slog.Duration("waited", time.Since(start)))
+		record("timeout")
+		return false
+	case <-ctx.Done():
+		record("canceled")
+		return false
+	}
+}
+
+// sourceFallbackWorthy reports whether err is worth re-attempting against a
+// different source. Cancellation is the job ending, not a source fault, and an
+// engine capability gap fails identically wherever the bytes come from.
+// Everything else — an unreachable host, a missing manifest, even a platform
+// this source's copy of the index lacks — is a property of the source, and the
+// origin may well not share it.
+func sourceFallbackWorthy(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return !errors.Is(err, down.ErrEngine)
+}
+
+// pullFrom runs one attempt: it sizes the transfer from b's manifest, fetches
+// any digest `as` anchor from b, and has the daemon pull. The transfer total is
+// estimated upfront (best-effort) and refined by the daemon's own progress
+// reports as they arrive.
+func (w *Copier) pullFrom(ctx context.Context, job *Job, ex *jobExec, d puller, b sourceBinding, t *Transfer) error {
 	// Anchor the pull when the source is digest-pinned (a verified job, or a
 	// digest ref): the daemon pulls repo@digest and tags it as the ref.
 	digest := ""
-	if dg, ok := ex.srcRef.(name.Digest); ok {
+	if dg, ok := b.ref.(name.Digest); ok {
 		digest = dg.DigestStr()
 	}
 	w.store.Update(job.ID, func(*Job) {
@@ -686,26 +1012,29 @@ func (w *Copier) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 
 	// Size estimate from the source manifest; the daemon's layer reports replace
 	// it with actual figures as they arrive.
-	if plan, err := upstreamPlan(ctx, ex.source, ex.srcRef, []string{ex.platform}); err == nil {
+	if plan, err := upstreamPlan(ctx, b.store, b.ref, []string{ex.platform}); err == nil {
 		w.store.Update(job.ID, func(*Job) { t.BytesTotal = plan.Total })
 	} else {
 		log.From(ctx).Debug("pull size estimate unavailable",
-			slog.String("ref", ex.srcRef.Name()), slog.String("error", err.Error()))
+			slog.String("ref", b.ref.Name()), slog.String("error", err.Error()))
 	}
 
 	// Digest-named `as` references are backed by the anchor manifest's raw
-	// bytes, fetched from the job's SOURCE (the cache) — the origin registry is
-	// never contacted. Fetched before the pull so a cache that cannot resolve
-	// the digest fails the job before any bytes move; the engine registers the
-	// names only after its pull succeeded (a name registered over absent
-	// content would send `docker run` back to the registry in the name).
+	// bytes, fetched from the store this attempt pulls from — normally the
+	// job's source (the cache), so the origin registry is never contacted; on a
+	// fallback attempt the anchor comes from the origin along with the content,
+	// which is the point of the fallback. Fetched before the pull so a source
+	// that cannot resolve the digest fails the attempt before any bytes move;
+	// the engine registers the names only after its pull succeeded (a name
+	// registered over absent content would send `docker run` back to the
+	// registry in the name).
 	var anchor *down.AnchorBlob
 	if ex.asDigest {
-		dg, ok := ex.srcRef.(name.Digest)
+		dg, ok := b.ref.(name.Digest)
 		if !ok {
 			return w.failTransfer(job, t, fmt.Errorf("digest `as` names require an anchored pull"))
 		}
-		a, err := fetchAnchor(ctx, ex.source, dg)
+		a, err := fetchAnchor(ctx, b.store, dg)
 		if err != nil {
 			return w.failTransfer(job, t, err)
 		}
@@ -713,7 +1042,7 @@ func (w *Copier) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 	}
 
 	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
-	recorded, err := d.pull(ctx, ex.pullRef, digest, ex.platform, ex.as, anchor, sink)
+	recorded, err := d.pull(ctx, b.pullRef, digest, ex.platform, ex.as, anchor, sink)
 	if err != nil {
 		return w.failTransfer(job, t, err)
 	}
@@ -739,14 +1068,15 @@ func (w *Copier) runPull(ctx context.Context, job *Job, ex *jobExec, d puller) e
 		// does not resolve (which would leave the image reaped as untagged).
 		names := recorded
 		if len(names) == 0 {
-			names = []string{ex.pullRef}
+			names = []string{b.pullRef}
 		}
 		for _, n := range names {
 			w.pullHook(d.Name(), n)
 		}
 	}
 	log.From(ctx).Info("engine pulled",
-		slog.String("store", d.Name()), slog.String("ref", ex.pullRef), slog.String("platform", ex.platform))
+		slog.String("store", d.Name()), slog.String("source", b.store.Name),
+		slog.String("ref", b.pullRef), slog.String("platform", ex.platform))
 	return nil
 }
 

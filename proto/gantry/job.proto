@@ -129,9 +129,11 @@ message Job {
   // source), digest references carrying the pinned digest: those are
   // registered over the pulled content so the upstream digest name (e.g.
   // "cr.example.com/app@sha256:...") resolves locally without touching its
-  // registry (containerd image store only; a classic docker graph-driver
-  // store rejects the job before pulling). Non-empty replaces the
-  // pull-reference name entirely — include it in the list to keep it.
+  // registry — unless the job falls back to that registry, which is the one
+  // case the anchor comes from the origin (containerd image store only; a
+  // classic docker graph-driver store rejects the job before pulling).
+  // Non-empty replaces the pull-reference name entirely — include it in the
+  // list to keep it.
   repeated string as = 12 [(orm.field) = {immutable: true}];
 
   google.protobuf.Timestamp date_ended = 13;
@@ -153,6 +155,27 @@ message Job {
   // Copy source referrer artifacts (signatures) along with the image.
   // Absent = server default (on when the job is verified).
   bool copy_referrers = 20 [
+    features.field_presence = EXPLICIT,
+    (orm.field) = {immutable: true}
+  ];
+
+  // Engine target only: when `source` cannot serve the image, pull it from the
+  // registry named in `ref` (the origin) instead of failing — a cache is then
+  // an optimization rather than a dependency. Whether the cache is empty
+  // because its fill job failed, has not run yet, or is unreachable is one
+  // indistinguishable fact from the pull's side, and none of them need fail the
+  // job. The failed attempt stays on the record as a failed `transfers` entry
+  // of a job that nevertheless completed. A digest-pinned job (a digest ref, or
+  // a verified source) falls back to that same digest, so the origin cannot
+  // serve different bytes; an unpinned job resolves its tag at the origin,
+  // which is that tag's authority. Absent = server default
+  // (worker.fallback_to_origin). Rejected for a registry target; a fallback that
+  // cannot be expressed — an engine whose pull_host collapses both sources onto
+  // one host, or an origin that resolves to no store — is an error only when the
+  // request set this field explicitly, and otherwise just does not apply to that
+  // job. On a job record this is the EFFECTIVE decision: false whenever the job
+  // has no second source to reach, whatever the request said.
+  bool fallback_to_origin = 21 [
     features.field_presence = EXPLICIT,
     (orm.field) = {immutable: true}
   ];

@@ -109,11 +109,14 @@ func upstreamPlan(ctx context.Context, source config.StoreConfig, ref name.Refer
 }
 
 // fetchAnchor fetches the raw manifest/index bytes the digest reference names
-// from the source store — the cache for an engine job, keeping the two-hop
-// promise: the origin registry is never contacted. The bytes are hashed here
-// against the reference's digest rather than trusting the transport (ggcr
-// skips content verification for some legacy media types), because they are
-// about to be registered on a node under that digest's name.
+// from the store the attempt is pulling from — normally the job's source (the
+// cache), keeping the two-hop promise that the origin registry is never
+// contacted; a fallback attempt passes the origin here, which is the point of
+// falling back. The bytes are hashed here against the reference's digest rather
+// than trusting the transport (ggcr skips content verification for some legacy
+// media types), because they are about to be registered on a node under that
+// digest's name — so an anchor is only ever as trustworthy as its digest, never
+// as the host that served it.
 func fetchAnchor(ctx context.Context, source config.StoreConfig, ref name.Digest) (*down.AnchorBlob, error) {
 	rt, err := xport.Transport(source)
 	if err != nil {

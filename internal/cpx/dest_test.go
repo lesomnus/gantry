@@ -12,6 +12,16 @@ import (
 	"github.com/lesomnus/gantry/internal/down"
 )
 
+// pullCall is one Pull the fake engine was asked for; a job with a fallback
+// source makes more than one, and their order is the attempt order.
+type pullCall struct {
+	ref      string
+	digest   string
+	platform string
+	as       []string
+	anchor   *down.AnchorBlob
+}
+
 // fakePullEngine is an engine daemon double: it records what it was told to
 // pull, reports canned layer progress, and can fail like a daemon that lacks
 // the requested platform.
@@ -24,10 +34,21 @@ type fakePullEngine struct {
 	digest   string
 	as       []string
 	anchor   *down.AnchorBlob
-	pulled   string   // platform the pull asked for
-	recorded []string // canned Pull return (nil = echo the requested names)
+	pulled   string     // platform the pull asked for
+	calls    []pullCall // every attempt, in order
+	recorded []string   // canned Pull return (nil = echo the requested names)
 	pullErr  error
+	// failFor fails only some references, so one source can be broken while
+	// another serves the same image. Consulted after pullErr.
+	failFor  func(ref string) error
 	reported []down.LayerUpdate
+}
+
+// pulls returns the attempts made so far.
+func (f *fakePullEngine) pulls() []pullCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pullCall(nil), f.calls...)
 }
 
 func (f *fakePullEngine) Name() string                { return f.name }
@@ -43,10 +64,17 @@ func (f *fakePullEngine) Platform(context.Context) (string, error) {
 func (f *fakePullEngine) Pull(_ context.Context, ref, digest, platform string, as []string, anchor *down.AnchorBlob, sink down.Sink) ([]string, error) {
 	f.mu.Lock()
 	f.ref, f.digest, f.pulled, f.as, f.anchor = ref, digest, platform, as, anchor
+	f.calls = append(f.calls, pullCall{ref: ref, digest: digest, platform: platform, as: as, anchor: anchor})
 	reports := f.reported
 	err := f.pullErr
+	failFor := f.failFor
 	recorded := f.recorded
 	f.mu.Unlock()
+	// Outside the lock: a test may block here to hold the pull open while it
+	// does something to the job.
+	if err == nil && failFor != nil {
+		err = failFor(ref)
+	}
 	for _, u := range reports {
 		sink.Layer(u)
 	}

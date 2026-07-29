@@ -129,6 +129,16 @@ worker:
   queue_size: 256
   # How long a finished job's record is kept before eviction.
   job_ttl: "30m"
+  # Default for a job that does not set `fallback_to_origin`: when an engine
+  # pull's source cannot serve the image, pull it from the registry named in
+  # the job's ref instead of failing — a cache becomes an optimization rather
+  # than a dependency. See docs/stores.md#falling-back-to-the-origin.
+  fallback_to_origin: false
+  # How long an engine pull that its source could not serve waits for an active
+  # job filling that source with exactly this image, before giving up on it.
+  # Costs nothing when the source can serve the image — the wait happens only
+  # after a real miss. 0 disables waiting.
+  source_wait: "0s"
 
 # Server configuration (used by the `serve` subcommand).
 serve:

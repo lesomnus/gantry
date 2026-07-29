@@ -40,10 +40,11 @@ service JobService {
 }
 
 // JobAddRequest submits a move. Add coalesces onto an identical in-flight job;
-// the dedup key is (ref, platforms, source, target, as). A tag is treated as
-// stable for the life of an active job, so a tag re-pushed mid-job does not
-// start a second move until the first finishes — and with digest pinning the
-// first job carries the digest resolved at admission (the pre-repush image).
+// the dedup key is (ref, platforms, source, target, as, fallback_to_origin). A
+// tag is treated as stable for the life of an active job, so a tag re-pushed
+// mid-job does not start a second move until the first finishes — and with
+// digest pinning the first job carries the digest resolved at admission (the
+// pre-repush image).
 message JobAddRequest {
   string id = 1;
   map<string, string> labels = 7;
@@ -60,6 +61,7 @@ message JobAddRequest {
   Verification verification = 18;
   repeated Transfer transfers = 19;
   bool copy_referrers = 20;
+  bool fallback_to_origin = 21;
 }
 
 message JobGetRequest {
@@ -89,6 +91,7 @@ message JobSelect {
   bool verification = 18;
   bool transfers = 19;
   bool copy_referrers = 20;
+  bool fallback_to_origin = 21;
 }
 
 message JobPatchRequest {
@@ -144,6 +147,9 @@ message JobPlanRequest {
   bool copy_referrers = 5;
   // Engine target only: names the image would be recorded under.
   repeated string as = 6;
+  // Engine target only: pull from the registry named in `ref` when `source`
+  // cannot serve the image; absent = server default.
+  bool fallback_to_origin = 7;
 }
 
 message JobPlanResponse {
@@ -167,4 +173,11 @@ message JobPlanResponse {
   string coalesces = 8;
   // Engine target: the (normalized) names the image is recorded under.
   repeated string as = 9;
+  // Effective value after the server default is applied.
+  bool fallback_to_origin = 10;
+  // Engine target: the ref the engine would be told to pull if `source` could
+  // not serve the image. Empty when the job has no fallback — the flag is off,
+  // `source` already is the origin, or the origin is not addressable from this
+  // engine.
+  string fallback_ref = 11;
 }

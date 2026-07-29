@@ -8,7 +8,7 @@ import (
 
 func mkJob(id, ref string, platforms []string) *Job {
 	j := NewJob(id, ref, platforms, time.Now())
-	j.dedup = dedupKey(ref, platforms, "", "", nil)
+	j.dedup = dedupKey(ref, platforms, "", "", nil, false)
 	return j
 }
 
@@ -59,7 +59,7 @@ func TestStoreActiveDedup(t *testing.T) {
 	s := NewMemStore()
 	a := mkJob("a", "img:1", []string{"linux/arm64", "linux/amd64"})
 	_ = s.Add(a)
-	key := dedupKey("img:1", []string{"linux/amd64", "linux/arm64"}, "", "", nil)
+	key := dedupKey("img:1", []string{"linux/amd64", "linux/arm64"}, "", "", nil, false)
 	if _, ok := s.Active(key); !ok {
 		t.Error("active job not found by dedup key")
 	}
@@ -339,5 +339,61 @@ func TestStoreConcurrentProgress(t *testing.T) {
 	snap, _ := s.Snapshot("a")
 	if snap.Transfers[0].BytesDone != 8000 || snap.Transfers[0].Layers[0].Done != 8000 {
 		t.Errorf("bytes_done = %d / layer = %d, want 8000", snap.Transfers[0].BytesDone, snap.Transfers[0].Layers[0].Done)
+	}
+}
+
+// Filling is what a stalled pull waits on, so it must only ever hand back a job
+// that can still produce the ref. Waiting on a finished, canceled, or
+// not-yet-queued job would burn the caller's whole timeout for nothing.
+func TestFillingSkipsJobsThatCannotDeliver(t *testing.T) {
+	const ref = "cache.local/lib/app:1"
+	s := NewMemStore()
+
+	live := NewJob("job_live", "lib/app:1", nil, time.Now())
+	live.Fills = ref
+	if err := s.Add(live); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Filling(ref); !ok {
+		t.Fatal("an active job filling the ref should be found")
+	}
+	if _, ok := s.Filling("cache.local/lib/other:1"); ok {
+		t.Error("a different ref must not match")
+	}
+	if _, ok := s.Filling(""); ok {
+		t.Error("an empty ref must never match; an engine job fills nothing")
+	}
+
+	for _, tc := range []struct {
+		name string
+		mut  func(*Job)
+	}{
+		{"terminal", func(j *Job) { j.State = JobDone }},
+		{"canceled", func(j *Job) { j.Cancel() }},
+		{"enqueuing", func(j *Job) { j.enqueuing = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewMemStore()
+			j := NewJob("job_x", "lib/app:1", nil, time.Now())
+			j.Fills = ref
+			if err := s.Add(j); err != nil {
+				t.Fatal(err)
+			}
+			s.Update(j.ID, tc.mut)
+			if _, ok := s.Filling(ref); ok {
+				t.Errorf("a %s job must not be offered to a waiter", tc.name)
+			}
+		})
+	}
+
+	// A record built outside NewJob has no completion channel, so waiting on it
+	// could only ever time out.
+	s2 := NewMemStore()
+	bare := &Job{ID: "job_bare", Ref: "lib/app:1", State: JobPending, Fills: ref}
+	if err := s2.Add(bare); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s2.Filling(ref); ok {
+		t.Error("a job with no completion channel must not be offered to a waiter")
 	}
 }

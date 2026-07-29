@@ -6,12 +6,21 @@ package down
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
 )
+
+// ErrEngine marks a failure that belongs to the engine rather than to the
+// registry it was told to pull from: a capability the daemon does not have (a
+// classic graph-driver store asked for digest-named `as` references), or a step
+// after the content already arrived (naming the pulled image). Pulling the same
+// image from somewhere else would fail identically, so a caller holding a
+// fallback source must not spend an attempt on it.
+var ErrEngine = errors.New("engine-side failure")
 
 // LayerUpdate is one progress report for a single blob the engine is pulling.
 // Engines report their own layer view (the daemon's layer IDs), not the source
@@ -40,10 +49,10 @@ type RemoveResult struct {
 
 // AnchorBlob is the raw manifest/index the digest-named `as` references point
 // at: the exact bytes whose sha256 is the pull's anchor digest, fetched from
-// the job's source (the cache) — never the origin registry. Engines that
-// register digest-named references out-of-band (docker with the containerd
-// image store) need the bytes; engines that only need the descriptor
-// (containerd) use the digest/size/media type.
+// whichever store served the pull — the job's source (the cache) unless the job
+// fell back to the origin. Engines that register digest-named references
+// out-of-band (docker with the containerd image store) need the bytes; engines
+// that only need the descriptor (containerd) use the digest/size/media type.
 type AnchorBlob struct {
 	MediaType string
 	Digest    string // "sha256:...", equals the pull's anchor digest

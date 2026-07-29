@@ -157,17 +157,19 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 	if _, digests := splitNames(as); len(digests) > 0 {
 		ok, err := e.containerdStore(ctx)
 		if err != nil {
-			return nil, z.Err(err, "probe image store")
+			return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "probe image store"))
 		}
 		if !ok {
-			return nil, fmt.Errorf("engine %q uses the classic (graph-driver) image store, which cannot register digest-named references %v; the containerd image store (driver-type io.containerd.snapshotter.v1) is required for digest `as` names", e.name, digests)
+			return nil, fmt.Errorf("%w: engine %q uses the classic (graph-driver) image store, which cannot register digest-named references %v; the containerd image store (driver-type io.containerd.snapshotter.v1) is required for digest `as` names", ErrEngine, e.name, digests)
 		}
 	}
 	pull_ref := ref
 	if digest != "" {
 		var err error
 		if pull_ref, err = anchoredRef(ref, digest); err != nil {
-			return nil, err
+			// A ref this engine cannot form is not the registry's fault; the
+			// same input fails identically wherever it would have pulled from.
+			return nil, fmt.Errorf("%w: %w", ErrEngine, err)
 		}
 	}
 	defer e.trackPull(pull_ref)()
@@ -229,7 +231,9 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		}
 		if err := e.cli.ImageTag(ctx, pull_ref, n); err != nil {
 			cleanup()
-			return nil, z.Err(err, "tag %q", n)
+			// Past this point the content is already on the daemon: what failed
+			// is naming it, which no other source can fix.
+			return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "tag %q", n))
 		}
 		recorded = append(recorded, n)
 	}
@@ -241,7 +245,7 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		// the pull, so the daemon here runs the containerd image store.
 		if err := e.loadDigestNames(ctx, digests, digest, anchor); err != nil {
 			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrEngine, err)
 		}
 		recorded = append(recorded, digests...)
 	}
@@ -253,7 +257,7 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		// and racing to tag it.
 		if e.pullCount(ref) == 1 {
 			if _, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{}); err != nil {
-				return nil, z.Err(err, "untag %q", ref)
+				return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "untag %q", ref))
 			}
 		}
 	}
