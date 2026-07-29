@@ -41,6 +41,8 @@ enum LayerState {
   LAYER_STATE_DONE = 3;
   LAYER_STATE_EXISTS = 4;
   LAYER_STATE_FAILED = 5;
+  // Moved by gantry into a registry, as opposed to fetched by a daemon.
+  LAYER_STATE_COPIED = 6;
 }
 
 // Admission-time signature verification audit record; absent when
@@ -68,7 +70,14 @@ message Layer {
   LayerState state = 5;
 }
 
-// One step of a job: a registry copy or an engine pull.
+// One attempt at one step of a job: a registry copy, or an engine pull.
+//
+// A job's `transfers` are its attempts in execution order. Rows carrying the same
+// `step` are ALTERNATIVES — the step needed any one of them to succeed, and a
+// failed row followed by a done row of the same step is a source that could not
+// serve the image followed by one that could. Rows carrying different `step`
+// values are a SEQUENCE: separate hops, each of which had to happen. Reading the
+// list without `step` cannot tell those apart.
 message Transfer {
   // Target store name (or registry host).
   string store = 1;
@@ -90,6 +99,11 @@ message Transfer {
   repeated Layer layers = 9;
   // Failure text, on a failed step.
   string error = 10;
+  // Which step of the job's plan this row belongs to. Rows sharing a step are
+  // alternative sources for one hop; differing steps are consecutive hops. Values
+  // are non-decreasing in list order but not necessarily 0..n-1: a step gantry
+  // planned and then did not need leaves no row at all.
+  uint32 step = 11;
 }
 
 // A move of one image from a source registry into a target store.
@@ -149,7 +163,8 @@ message Job {
   string error = 17;
   // Admission verification record; absent when verification was off.
   Verification verification = 18;
-  // The job's steps, in execution order.
+  // The job's attempts, in execution order — grouped into hops by
+  // Transfer.step. See Transfer.
   repeated Transfer transfers = 19;
 
   // Copy source referrer artifacts (signatures) along with the image.

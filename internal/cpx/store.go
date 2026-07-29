@@ -203,8 +203,10 @@ func (s *memStore) Filling(ref string) (<-chan struct{}, bool) {
 		if j.State.Terminal() || j.Canceled() || j.enqueuing || j.sealed || j.done == nil {
 			continue
 		}
-		if j.Fills == ref {
-			return j.done, true
+		for _, f := range j.Fills {
+			if f == ref {
+				return j.done, true
+			}
 		}
 	}
 	return nil, false

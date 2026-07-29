@@ -109,9 +109,12 @@ var transferStateToPB = map[string]pb.TransferState{
 var layerStateToPB = map[string]pb.LayerState{
 	"pending": pb.LayerState_LAYER_STATE_PENDING,
 	"pulling": pb.LayerState_LAYER_STATE_PULLING,
-	"done":    pb.LayerState_LAYER_STATE_DONE,
-	"exists":  pb.LayerState_LAYER_STATE_EXISTS,
-	"failed":  pb.LayerState_LAYER_STATE_FAILED,
+	// A registry copy reports "copied" for every blob it moved (source_copy.go);
+	// without this entry every one of them serialized as UNSPECIFIED.
+	"copied": pb.LayerState_LAYER_STATE_COPIED,
+	"done":   pb.LayerState_LAYER_STATE_DONE,
+	"exists": pb.LayerState_LAYER_STATE_EXISTS,
+	"failed": pb.LayerState_LAYER_STATE_FAILED,
 }
 
 var verifyModeToPB = map[string]pb.VerifyMode{
@@ -232,6 +235,7 @@ func jobToPB(snap cpx.JobSnapshot) *pb.Job {
 			}.Build())
 		}
 		transfers = append(transfers, pb.Transfer_builder{
+			Step:       uint32(t.Step),
 			Store:      t.Store,
 			Kind:       storeKindToPB[t.Kind],
 			Source:     t.Source,

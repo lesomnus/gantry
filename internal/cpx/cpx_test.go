@@ -256,12 +256,11 @@ func TestCopyLayersReportsLayerError(t *testing.T) {
 	}
 	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
 	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
-	ex := &jobExec{srcRef: src_ref, cacheRef: dst_ref}
 	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}, {Digest: "sha256:2"}, {Digest: "sha256:3"}}}
 
 	// The failing layer aborts its siblings while the dispatcher is still
 	// admitting layers; the returned error must be the layer error either way.
-	err := w.copyLayers(job.ctx, job, tr, failSource{}, plan, ex)
+	err := w.copyLayers(job.ctx, job, tr, failSource{}, plan, src_ref.Context(), dst_ref.Context())
 	if err == nil || errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the layer error", err)
 	}
@@ -387,13 +386,12 @@ func TestLayerFailureSealsTheJobOnTheEarlyReturn(t *testing.T) {
 	}
 	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
 	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
-	ex := &jobExec{srcRef: src_ref, cacheRef: dst_ref}
 	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}, {Digest: "sha256:2"}, {Digest: "sha256:3"}}}
 
 	if _, ok := js.Active("k"); !ok {
 		t.Fatal("the job should start out coalesceable")
 	}
-	if err := w.copyLayers(job.ctx, job, tr, failSource{}, plan, ex); err == nil {
+	if err := w.copyLayers(job.ctx, job, tr, failSource{}, plan, src_ref.Context(), dst_ref.Context()); err == nil {
 		t.Fatal("expected the layer error")
 	}
 	if _, ok := js.Active("k"); ok {

@@ -184,6 +184,8 @@ const (
 	LayerState_LAYER_STATE_DONE        LayerState = 3
 	LayerState_LAYER_STATE_EXISTS      LayerState = 4
 	LayerState_LAYER_STATE_FAILED      LayerState = 5
+	// Moved by gantry into a registry, as opposed to fetched by a daemon.
+	LayerState_LAYER_STATE_COPIED LayerState = 6
 )
 
 // Enum value maps for LayerState.
@@ -195,6 +197,7 @@ var (
 		3: "LAYER_STATE_DONE",
 		4: "LAYER_STATE_EXISTS",
 		5: "LAYER_STATE_FAILED",
+		6: "LAYER_STATE_COPIED",
 	}
 	LayerState_value = map[string]int32{
 		"LAYER_STATE_UNSPECIFIED": 0,
@@ -203,6 +206,7 @@ var (
 		"LAYER_STATE_DONE":        3,
 		"LAYER_STATE_EXISTS":      4,
 		"LAYER_STATE_FAILED":      5,
+		"LAYER_STATE_COPIED":      6,
 	}
 )
 
@@ -437,7 +441,14 @@ func (b0 Layer_builder) Build() *Layer {
 	return m0
 }
 
-// One step of a job: a registry copy or an engine pull.
+// One attempt at one step of a job: a registry copy, or an engine pull.
+//
+// A job's `transfers` are its attempts in execution order. Rows carrying the same
+// `step` are ALTERNATIVES — the step needed any one of them to succeed, and a
+// failed row followed by a done row of the same step is a source that could not
+// serve the image followed by one that could. Rows carrying different `step`
+// values are a SEQUENCE: separate hops, each of which had to happen. Reading the
+// list without `step` cannot tell those apart.
 type Transfer struct {
 	state                 protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Store      string                 `protobuf:"bytes,1,opt,name=store"`
@@ -450,6 +461,7 @@ type Transfer struct {
 	xxx_hidden_BytesDone  int64                  `protobuf:"varint,8,opt,name=bytes_done,json=bytesDone"`
 	xxx_hidden_Layers     *[]*Layer              `protobuf:"bytes,9,rep,name=layers"`
 	xxx_hidden_Error      string                 `protobuf:"bytes,10,opt,name=error"`
+	xxx_hidden_Step       uint32                 `protobuf:"varint,11,opt,name=step"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -551,6 +563,13 @@ func (x *Transfer) GetError() string {
 	return ""
 }
 
+func (x *Transfer) GetStep() uint32 {
+	if x != nil {
+		return x.xxx_hidden_Step
+	}
+	return 0
+}
+
 func (x *Transfer) SetStore(v string) {
 	x.xxx_hidden_Store = v
 }
@@ -591,6 +610,10 @@ func (x *Transfer) SetError(v string) {
 	x.xxx_hidden_Error = v
 }
 
+func (x *Transfer) SetStep(v uint32) {
+	x.xxx_hidden_Step = v
+}
+
 type Transfer_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -614,6 +637,11 @@ type Transfer_builder struct {
 	Layers []*Layer
 	// Failure text, on a failed step.
 	Error string
+	// Which step of the job's plan this row belongs to. Rows sharing a step are
+	// alternative sources for one hop; differing steps are consecutive hops. Values
+	// are non-decreasing in list order but not necessarily 0..n-1: a step gantry
+	// planned and then did not need leaves no row at all.
+	Step uint32
 }
 
 func (b0 Transfer_builder) Build() *Transfer {
@@ -630,6 +658,7 @@ func (b0 Transfer_builder) Build() *Transfer {
 	x.xxx_hidden_BytesDone = b.BytesDone
 	x.xxx_hidden_Layers = &b.Layers
 	x.xxx_hidden_Error = b.Error
+	x.xxx_hidden_Step = b.Step
 	return m0
 }
 
@@ -998,7 +1027,8 @@ type Job_builder struct {
 	Error string
 	// Admission verification record; absent when verification was off.
 	Verification *Verification
-	// The job's steps, in execution order.
+	// The job's attempts, in execution order — grouped into hops by
+	// Transfer.step. See Transfer.
 	Transfers []*Transfer
 	// Copy source referrer artifacts (signatures) along with the image.
 	// Absent = server default (on when the job is verified).
@@ -1065,7 +1095,7 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x14\n" +
 	"\x05total\x18\x03 \x01(\x03R\x05total\x12\x12\n" +
 	"\x04done\x18\x04 \x01(\x03R\x04done\x12(\n" +
-	"\x05state\x18\x05 \x01(\x0e2\x12.gantry.LayerStateR\x05state\"\xb3\x02\n" +
+	"\x05state\x18\x05 \x01(\x0e2\x12.gantry.LayerStateR\x05state\"\xc7\x02\n" +
 	"\bTransfer\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12%\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x11.gantry.StoreKindR\x04kind\x12\x16\n" +
@@ -1079,7 +1109,8 @@ const file_gantry_job_proto_rawDesc = "" +
 	"bytes_done\x18\b \x01(\x03R\tbytesDone\x12%\n" +
 	"\x06layers\x18\t \x03(\v2\r.gantry.LayerR\x06layers\x12\x14\n" +
 	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"\xa9\x06\n" +
+	" \x01(\tR\x05error\x12\x12\n" +
+	"\x04step\x18\v \x01(\rR\x04step\"\xa9\x06\n" +
 	"\x03Job\x12\x19\n" +
 	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12/\n" +
 	"\x06labels\x18\a \x03(\v2\x17.gantry.Job.LabelsEntryR\x06labels\x12\x18\n" +
@@ -1121,7 +1152,7 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\x16TRANSFER_STATE_RUNNING\x10\x02\x12\x17\n" +
 	"\x13TRANSFER_STATE_DONE\x10\x03\x12\x19\n" +
 	"\x15TRANSFER_STATE_EXISTS\x10\x04\x12\x19\n" +
-	"\x15TRANSFER_STATE_FAILED\x10\x05*\xa1\x01\n" +
+	"\x15TRANSFER_STATE_FAILED\x10\x05*\xb9\x01\n" +
 	"\n" +
 	"LayerState\x12\x1b\n" +
 	"\x17LAYER_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
@@ -1129,7 +1160,8 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\x13LAYER_STATE_PULLING\x10\x02\x12\x14\n" +
 	"\x10LAYER_STATE_DONE\x10\x03\x12\x16\n" +
 	"\x12LAYER_STATE_EXISTS\x10\x04\x12\x16\n" +
-	"\x12LAYER_STATE_FAILED\x10\x05B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
+	"\x12LAYER_STATE_FAILED\x10\x05\x12\x16\n" +
+	"\x12LAYER_STATE_COPIED\x10\x06B$Z\x1dgithub.com/lesomnus/gantry/pb\x92\x03\x02\b\x02b\beditionsp\xe8\a"
 
 var file_gantry_job_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_gantry_job_proto_msgTypes = make([]protoimpl.MessageInfo, 5)

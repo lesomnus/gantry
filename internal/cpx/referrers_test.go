@@ -191,7 +191,7 @@ func TestPlanCopyReferrersConflicts(t *testing.T) {
 
 func TestCopyReferrersDefault(t *testing.T) {
 	verified_hash := v1.Hash{Algorithm: "sha256", Hex: "0123456789012345678901234567890123456789012345678901234567890123"}
-	plan_exec := func(t *testing.T, verifier *fakeVerifier, req Request) *jobExec {
+	plan_exec := func(t *testing.T, verifier *fakeVerifier, req Request) *execPlan {
 		t.Helper()
 		w, _ := newCopier(t, []config.StoreConfig{
 			{Name: "cache", Kind: "oci", Host: "cache.local", Insecure: true, Mode: "copy"},
@@ -200,14 +200,18 @@ func TestCopyReferrersDefault(t *testing.T) {
 		if verifier != nil {
 			w.SetVerifier(verifier)
 		}
-		ex, _, platforms, err := w.plan(context.Background(), req)
+		p, err := w.plan(context.Background(), req)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ex.copyReferrers && platforms != nil {
+		if p.copyReferrers && p.platforms != nil {
 			t.Error("effective copy_referrers must widen to all platforms")
 		}
-		return ex
+		// The job property and the hop that acts on it must not drift apart.
+		if got := p.last().referrers; got != p.copyReferrers {
+			t.Errorf("step referrers = %v, want the job's %v", got, p.copyReferrers)
+		}
+		return p
 	}
 	base_req := Request{Ref: "a/x:1", Source: "r.io", Target: "cache"}
 	t.Run("on when verified and nothing narrowed", func(t *testing.T) {

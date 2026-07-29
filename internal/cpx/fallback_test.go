@@ -165,8 +165,9 @@ func TestEnginePullDoesNotFallBackOnEngineFailure(t *testing.T) {
 	}
 }
 
-// Cancellation is the job ending, not the source failing: it must not be
-// laundered into a fallback attempt, and the job stays canceled.
+// A source reporting a cancellation is not a reason to try another one — but
+// nobody withdrew this job, so it is recorded as a failure rather than as a
+// cancellation the caller never asked for.
 func TestEnginePullDoesNotFallBackOnCancel(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
 	w, js, origin, cache := fallbackCopier(t, eng)
@@ -185,11 +186,11 @@ func TestEnginePullDoesNotFallBackOnCancel(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 	done := waitTerminal(t, js, snap.ID)
-	if done.State != JobCanceled {
-		t.Fatalf("state = %q, want canceled", done.State)
+	if done.State != JobFailed {
+		t.Fatalf("state = %q, want failed: nothing withdrew this job", done.State)
 	}
 	if n := len(eng.pulls()); n != 1 {
-		t.Errorf("pull attempts = %d, want 1 — a canceled job does not try the origin", n)
+		t.Errorf("pull attempts = %d, want 1 — a reported cancellation is not retried elsewhere", n)
 	}
 }
 
@@ -367,7 +368,7 @@ func TestEnginePullWaitsForAnInFlightFill(t *testing.T) {
 
 	// A job that is putting exactly this image into the cache, still running.
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = mustRefName(t, cache+"/team/app:1")
+	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +430,7 @@ func TestEnginePullFallsBackWhenTheFillNeverFinishes(t *testing.T) {
 	pushImage(t, origin+"/team/app:1", 2)
 
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = mustRefName(t, cache+"/team/app:1")
+	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +469,7 @@ func TestEnginePullSkipsTheWaitWhenNoSlotIsFree(t *testing.T) {
 	pushImage(t, origin+"/team/app:1", 2)
 
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = mustRefName(t, cache+"/team/app:1")
+	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +511,7 @@ func TestEnginePullDoesNotWaitWhenSourceWaitIsUnset(t *testing.T) {
 	pushImage(t, origin+"/team/app:1", 2)
 
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = mustRefName(t, cache+"/team/app:1")
+	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}
@@ -544,27 +545,28 @@ func TestFillRefMatchesWhatAPullLooksFor(t *testing.T) {
 	w.base = context.Background()
 	pushImage(t, origin+"/team/app:1", 1)
 
-	fillExec, _, _, err := w.plan(context.Background(), Request{
+	fillPlan, err := w.plan(context.Background(), Request{
 		Ref: origin + "/team/app:1", Source: "origin", Target: "cache",
 	})
 	if err != nil {
 		t.Fatalf("plan fill: %v", err)
 	}
-	pullExec, _, _, err := w.plan(context.Background(), Request{
+	pullPlan, err := w.plan(context.Background(), Request{
 		Ref: origin + "/team/app:1", Source: "cache", Target: "node",
 	})
 	if err != nil {
 		t.Fatalf("plan pull: %v", err)
 	}
-	if fillExec.fills == "" {
-		t.Fatal("a registry-target job must advertise the ref it fills")
+	fills := fillPlan.fills()
+	if len(fills) != 1 {
+		t.Fatalf("a registry-target job must advertise the ref it fills, got %v", fills)
 	}
-	if fillExec.fills != pullExec.fillWant {
-		t.Errorf("fills = %q but a pull looks for %q; a wait would never match",
-			fillExec.fills, pullExec.fillWant)
+	want := pullPlan.last().attempts[0].waitFill
+	if fills[0] != want {
+		t.Errorf("fills = %q but a pull looks for %q; a wait would never match", fills[0], want)
 	}
-	if pullExec.fills != "" {
-		t.Errorf("an engine-target job fills nothing another job reads, got %q", pullExec.fills)
+	if got := pullPlan.fills(); len(got) != 0 {
+		t.Errorf("an engine-target job fills nothing another job reads, got %v", got)
 	}
 }
 
@@ -846,17 +848,17 @@ func TestFillWantIsCapturedBeforePinning(t *testing.T) {
 	}
 	w.SetVerifier(&fakeVerifier{dg: got.Digest})
 
-	ex, _, _, err := w.plan(context.Background(), Request{
+	p, err := w.plan(context.Background(), Request{
 		Ref: origin + "/team/app:1", Source: "cache", Target: "node",
 	})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	if _, pinned := ex.srcRef.(name.Digest); !pinned {
-		t.Fatal("the verifier should have pinned the source ref; the test proves nothing otherwise")
+	if p.digest() == "" {
+		t.Fatal("the verifier should have pinned the plan; the test proves nothing otherwise")
 	}
-	if want := mustRefName(t, cache+"/team/app:1"); ex.fillWant != want {
-		t.Errorf("fillWant = %q, want the pre-pinning tag ref %q", ex.fillWant, want)
+	if want := mustRefName(t, cache+"/team/app:1"); p.last().attempts[0].waitFill != want {
+		t.Errorf("waitFill = %q, want the pre-pinning tag ref %q", p.last().attempts[0].waitFill, want)
 	}
 }
 
@@ -876,21 +878,22 @@ func TestFallbackBindingUsesTheOriginStoresOptions(t *testing.T) {
 	w.srcOpts = nil // do not force every ref insecure, as the shared helper does
 	w.base = context.Background()
 
-	ex, _, _, err := w.plan(context.Background(), Request{
+	p, err := w.plan(context.Background(), Request{
 		Ref: "origin.example/team/app:1", Source: "cache", Target: "node",
 		FallbackToOrigin: boolp(true),
 	})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	if len(ex.bindings) != 2 {
-		t.Fatalf("bindings = %d, want the origin bound as a fallback", len(ex.bindings))
+	ats := p.last().attempts
+	if len(ats) != 2 {
+		t.Fatalf("attempts = %d, want the origin bound as an alternative", len(ats))
 	}
-	if got := ex.bindings[0].ref.Context().Scheme(); got != "http" {
-		t.Errorf("cache binding scheme = %q, want http (the store is insecure)", got)
+	if got := ats[0].ref.Context().Scheme(); got != "http" {
+		t.Errorf("cache attempt scheme = %q, want http (the store is insecure)", got)
 	}
-	if got := ex.bindings[1].ref.Context().Scheme(); got != "https" {
-		t.Errorf("origin binding scheme = %q, want https — it must not inherit the cache's", got)
+	if got := ats[1].ref.Context().Scheme(); got != "https" {
+		t.Errorf("origin attempt scheme = %q, want https — it must not inherit the cache's", got)
 	}
 }
 

@@ -1,6 +1,6 @@
 # Plan — routing a copy through a store's cache (A → A' → B)
 
-Status: **prerequisite landed; execution-model design in review** · follows `plan-source-fallback.md` (already landed on `feat/source-fallback`).
+Status: **Phase 1 landed** · Phase 2 next · follows `plan-source-fallback.md` (already landed on `feat/source-fallback`).
 
 ## 1. Goal
 
@@ -399,7 +399,12 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 | 0.3 | `Job.Source`/`Target` carried on the record, not derived from a transfer (§3.6) | ☑ | + `docs/api.md` section and an rpc test; one e2e assertion updated |
 | 0.4 | `StoreConfig.Cache` + cross-store validation | ☑ | declared, a registry, not itself, and not on an engine store; a store that is someone's cache may declare its own (routing is one level) |
 | 0.5 | Recon bugs in the prerequisite: seal on every exit, `Filling` skips sealed | ☑ | both pinned by tests |
-| — | **Phase 1 — steps** | ☐ | |
+| 0.6 | Execution-model verdict + 11 open decisions settled | ☑ | `execPlan` (steps × attempts) wins; 9 ideas grafted from the runner-up |
+| — | **Phase 1 — steps** | ☑ | behaviour-free: `-685/+310` lines, whole suite green unchanged apart from two documented semantics |
+| 1.0 | Free `copyLayers` from `jobExec` | ☑ | takes the two repositories; the last `jobExec` literal outside `plan()` is gone |
+| 1.1 | `Transfer.Step` + `LAYER_STATE_COPIED` (one proto regen) | ☑ | the enum gap was live: every registry copy reported `LAYER_STATE_UNSPECIFIED` per layer |
+| 1.2 | `execPlan`/`execStep`/`execAttempt` + `mover` | ☑ | `plan.go` / `move.go` / `run.go`; `jobExec`, `sourceBinding`, `runCopy`, `runPull`, `pullFrom`, `bindSources`, `sourceFallbackWorthy` all deleted |
+| 1.3 | `plan.validate()` + tests | ☑ | delivery-only-last, attempt bound, indices, runner present |
 | — | **Phase 2 — the route** | ☐ | |
 | — | **Phase 3 — `require_authority`** | ☐ | |
 
@@ -441,6 +446,119 @@ before anything else was built:
   recorded, and a test drives the early-return path specifically.
 - `memStore.Filling` did not exclude sealed jobs, so a waiter could park on a move that had
   already failed and burn its whole `source_wait`.
+
+### The execution model: `execPlan` = steps × attempts
+
+Two independent designs were written against the recon facts and judged. The winner models a
+job as **two axes**, so every shape gantry runs is a point in them rather than a branch:
+
+```
+execPlan
+ ├─ source, target, repo, authorityRef, platforms …   the request, resolved
+ └─ steps []*execStep            a SEQUENCE — every required one must succeed, in order
+     ├─ dst, ref, platforms, verbatim, referrers, fills, optional
+     └─ attempts []*execAttempt  ALTERNATIVES — the first that succeeds ends the step
+         └─ src, ref, pullRef, why, needs, waitFill
+```
+
+- A route prunes itself with `needs` — a static predicate over which earlier steps
+  *delivered*, evaluated at run time. The plan is never rewritten, which is what lets `Plan`
+  report the whole route before a byte moves.
+- `optional` marks a step gantry added for itself (a cache fill). Its failure is recorded and
+  tolerated; §3.3 falls out with no branch.
+- `why` (`planned` / `route` / `origin`) is authored on the attempt, so "left the caller's
+  source for the origin" and "abandoned a route gantry chose for itself" are different facts
+  in the metric and the audit event.
+- Today's single-hop job is one step with one attempt; the landed source fallback is one step
+  with two. Neither changes.
+
+The rejected alternative modelled a job as *alternative routes*, each a full sequence of
+hops. It loses on cost — a 3-hop route with a fallback per hop is 2³ duplicated hop lists —
+and on accounting: it resets the byte count at a route boundary, so a job that filled the
+cache and then fell back would report one image's worth of bytes when it moved two,
+including the cloud egress the whole feature exists to avoid.
+
+Grafted from it: a `mover` interface per (step, attempt) so `runStep` needs no kind switch
+and `pullHook` is structurally unreachable from a registry step; rows published when a step
+starts rather than all at admission (which removes the winner's one new liability, an
+insert-in-the-middle that could silently mis-order); breaking the `errors.Is` chain on a
+self-inflicted abort so it can never reach `finish()` as a cancellation; and a checked bound
+on total attempts per job, because each attempt can move a whole image.
+
+### Decisions the two designs left open
+
+1. **§3.5 was internally contradictory and is corrected.** "The same platform set at each
+   hop" cannot hold: a verbatim commit writes every child manifest, and a non-verbatim one
+   rebuilds the index so `A'` never holds the authority digest — which breaks both §2.4's
+   anchoring and §2.3's probe. So a **fill step is always `verbatim` and always copies every
+   platform**, whatever the job asked for. A narrowed routed copy therefore still fills the
+   cache completely; that is a cost, and for a shared site cache it is the desirable one. The
+   delivery hop keeps today's rule (verbatim iff its own target ref is a digest, or
+   `copy_referrers` forced it).
+2. **The fill step's target ref is the TAG form**, committed verbatim so the authority digest
+   resolves from it too. Deriving it from the pinned ref instead would leave `A'` holding an
+   untagged manifest — invisible to retention there and a probe miss for the next job.
+3. **`Transfer.step` is the plan index**, and rows are published when a step starts. The
+   documented contract is "in execution order, non-decreasing" — not `0..n-1`, because a
+   planned step that never runs leaves no row. (No shape in this plan does that: a warm cache
+   yields a one-step plan rather than a skipped step.)
+4. **A proxy-mode cache collapses, it is not rejected.** Reading through a pull-through cache
+   is what fills it, so routing becomes a single delivery step sourced at `A'` — no fill
+   step, no probe, no write access needed. The hard guard is the inverse: **never plan a fill
+   step whose target is proxy-mode**, because `proxySource.Fill` reads the whole image into
+   `io.Discard` and commits nothing.
+5. **The verification-vs-proxy refusal needs no extension.** It exists because a proxy
+   resolves a *tag* itself and could serve an image the verifier never saw. A routed read of
+   a verified job is digest-anchored by construction, and a proxy asked for `repo@digest` can
+   only answer with that digest. An unpinned job made no claim to protect.
+6. **`gantry.job.fallback`'s reason comes from the attempt's own `why`**, not from counting
+   rows: a wait-for-fill retry adds a row without consuming an attempt, so row-counting
+   desynchronises and would report "fallback" where the truth is "route".
+7. **`Job.Fills` stays job-level** (a list, released when the job ends) rather than
+   per-step-with-its-own-note. A waiter on `A'` is therefore released one hop later than
+   strictly necessary — bounded by the job it is already waiting for, and bounded again by
+   `source_wait`. Per-step notes are a follow-up, not a correctness matter.
+8. **`LAYER_STATE_COPIED` is added.** `source_copy.go` writes `"copied"` for every copied
+   blob and `layerStateToPB` has no entry, so **every registry copy currently reports
+   `LAYER_STATE_UNSPECIFIED` per layer** — a live bug, found by the design pass, fixed in the
+   one proto-regeneration window this work already needs.
+9. **The two reference-parsing paths stay distinct.** A source ref is parsed under its store's
+   options plus the Copier's test options; `dstRef` parses under the target store's own. They
+   are not unified: the only coverage that http-vs-https does not leak between stores depends
+   on that separation, and a third store makes it matter more, not less.
+10. **An abandoned route's already-pushed blobs are not cleaned up.** They are
+    content-addressed, so the next attempt and the direct route both reuse them; deleting
+    them would risk deleting content another job is using. A registry with aggressive
+    unreferenced-blob GC turns an abandonment into a re-transfer, which is documented rather
+    than defended against.
+11. **`Plan`'s route is advisory.** Coalescing is request-level (correctly: every route
+    delivers the same image to the same store, so the route is provably not identity-bearing),
+    so a submit can be served by an existing job that probed differently. Documented as a
+    caveat on `Plan`.
+
+### Two behaviours changed while landing Phase 1, both deliberate
+
+The refactor was meant to be behaviour-free and was, except for two things the old
+structure had been hiding:
+
+- **The planned attempt's pull ref.** The old code derived it before verification pinned the
+  source, which kept the tag by accident of ordering. Building attempts *after* pinning made
+  that ordering explicit — and revealed that the tag form is a requirement, not a
+  coincidence: the daemon is told to pull the tag and the digest anchors it separately. It is
+  now derived from the tag deliberately, in the same place the fill-wait reference is.
+- **A source that reports a cancellation.** Classification happens on the error as it came,
+  so "the source said it was cancelled" still means *do not try elsewhere*. But the error is
+  unwrapped where it leaves the job, so a job nobody withdrew is recorded as **failed**
+  rather than canceled. Previously it read as canceled, which was the old code's accident
+  and the wrong answer: `finish()` maps a cancellation to `JobCanceled`, and a self-inflicted
+  abort is a failure.
+
+### Mutation coverage after Phase 1
+
+`worthAnotherSource` is pinned. Three mutations survive — pruning by `needs`, tolerating an
+`optional` step's failure, and correcting a seeded row's source — because **no plan yet
+contains any of them**: they are exactly what Phase 2 introduces, and its tests are what will
+pin them. Noted here so a green suite is not mistaken for coverage of unbuilt behaviour.
 
 ### Log
 

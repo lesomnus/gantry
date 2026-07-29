@@ -350,7 +350,7 @@ func TestFillingSkipsJobsThatCannotDeliver(t *testing.T) {
 	s := NewMemStore()
 
 	live := NewJob("job_live", "lib/app:1", nil, time.Now())
-	live.Fills = ref
+	live.Fills = []string{ref}
 	if err := s.Add(live); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestFillingSkipsJobsThatCannotDeliver(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := NewMemStore()
 			j := NewJob("job_x", "lib/app:1", nil, time.Now())
-			j.Fills = ref
+			j.Fills = []string{ref}
 			if err := s.Add(j); err != nil {
 				t.Fatal(err)
 			}
@@ -390,7 +390,7 @@ func TestFillingSkipsJobsThatCannotDeliver(t *testing.T) {
 	// A record built outside NewJob has no completion channel, so waiting on it
 	// could only ever time out.
 	s2 := NewMemStore()
-	bare := &Job{ID: "job_bare", Ref: "lib/app:1", State: JobPending, Fills: ref}
+	bare := &Job{ID: "job_bare", Ref: "lib/app:1", State: JobPending, Fills: []string{ref}}
 	if err := s2.Add(bare); err != nil {
 		t.Fatal(err)
 	}

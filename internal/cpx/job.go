@@ -63,10 +63,12 @@ type Job struct {
 	// the server default): an engine pull its source could not serve is
 	// re-attempted against the registry named in Ref.
 	FallbackToOrigin bool
-	// Fills is the target-side reference this job puts into its target store,
-	// for a registry target — the one thing another job could be waiting on.
-	// Empty for an engine target, which fills nothing another job reads.
-	Fills string
+	// Fills are the target-side references this job's steps publish into their
+	// stores — the things another job's read could be waiting on. Empty for a job
+	// whose only step is an engine pull, which publishes nothing another job reads.
+	// Released together when the job ends, so a waiter on an intermediate is freed
+	// one hop later than strictly necessary.
+	Fills []string
 	// Source and Target are the stores the job was ADMITTED for: what the caller
 	// asked, resolved to store names. They are deliberately not derived from the
 	// transfers. A transfer says where some bytes actually came from, and there can
@@ -93,7 +95,7 @@ type Job struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	dedup    string
-	exec     *jobExec
+	exec     *execPlan
 	req      Request     // the original request, for Retry's fresh re-plan
 	canceled atomic.Bool // Cancel was requested; Active must not coalesce onto it
 	// sealed marks a still-running execution that has already failed and is only
@@ -178,9 +180,16 @@ func dedupKey(ref string, platforms []string, source, target string, as []string
 	}, "\x00")
 }
 
-// Transfer is one step of a job: moving an image into a store. A registry copy
-// (gantry-driven) and an engine pull (daemon-driven) share this shape.
+// Transfer is one ATTEMPT at one step of a job: moving an image into a store. A
+// registry copy (gantry-driven) and an engine pull (daemon-driven) share this
+// shape.
+//
+// Rows sharing a Step are alternatives — the step needed any one of them — so a
+// failed row followed by a done row of the same step is one source that could not
+// serve the image followed by one that could. Rows with different Steps are
+// consecutive hops, each of which had to happen.
 type Transfer struct {
+	Step   int    // which step of the job's plan this row belongs to
 	Store  string // target store name (or host)
 	Kind   string // oci | docker | containerd
 	Source string // source store/host
@@ -244,6 +253,7 @@ type JobSnapshot struct {
 }
 
 type TransferSnapshot struct {
+	Step       int             `json:"step"` // hop this attempt belongs to; see Transfer
 	Store      string          `json:"store"`
 	Kind       string          `json:"kind" enums:"oci,docker,containerd"` // which store kind ran this step
 	Source     string          `json:"source"`
@@ -286,6 +296,7 @@ func (j *Job) snapshot() JobSnapshot {
 	}
 	for _, t := range j.Transfers {
 		ts := TransferSnapshot{
+			Step:       t.Step,
 			Store:      t.Store,
 			Kind:       t.Kind,
 			Source:     t.Source,
