@@ -63,6 +63,9 @@ type Job struct {
 	// the server default): an engine pull its source could not serve is
 	// re-attempted against the registry named in Ref.
 	FallbackToOrigin bool
+	// RequireAuthority is the effective decision for this job: refuse rather than
+	// read a nearer cache of a source that could not confirm the reference.
+	RequireAuthority bool
 	// Fills are the target-side references this job's steps publish into their
 	// stores — the things another job's read could be waiting on. Empty for a job
 	// whose only step is an engine pull, which publishes nothing another job reads.
@@ -165,18 +168,25 @@ func (j *Job) Canceled() bool { return j.canceled.Load() }
 
 func (j *Job) DedupKey() string { return j.dedup }
 
-// dedupKey collapses identical moves (same image, platforms, route) onto one
-// job — an interchangeable move. fallback is part of it because
-// it changes where the bytes may come from: a submit that refused the origin
-// must not be handed a job that is allowed to pull from it (nor the reverse,
-// which would silently drop the fallback the caller asked for).
-func dedupKey(ref string, platforms []string, source, target string, as []string, fallback bool) string {
+// dedupKey collapses identical moves (same image, platforms, route) onto one job —
+// an interchangeable move. What a caller may be SERVED is part of it, not just what
+// is moved: `fallback` because a submit that refused the origin must not be handed
+// a job allowed to read from it (nor the reverse, which would silently drop the
+// fallback the caller asked for), and `strictAuthority` because a submit that
+// refused unconfirmed content must not be handed a job that read a cache the
+// authority never vouched for.
+//
+// The route itself is deliberately NOT in the key: every route delivers the same
+// image to the same store, so it is not identity-bearing, and two submits that
+// probed differently are still interchangeable.
+func dedupKey(ref string, platforms []string, source, target string, as []string, fallback, strictAuthority bool) string {
 	ps := append([]string(nil), platforms...)
 	sort.Strings(ps)
 	ns := append([]string(nil), as...)
 	sort.Strings(ns)
 	return strings.Join([]string{
-		ref, strings.Join(ps, ","), source, target, strings.Join(ns, ","), strconv.FormatBool(fallback),
+		ref, strings.Join(ps, ","), source, target, strings.Join(ns, ","),
+		strconv.FormatBool(fallback), strconv.FormatBool(strictAuthority),
 	}, "\x00")
 }
 
@@ -240,8 +250,10 @@ type JobSnapshot struct {
 	// not whichever transfer served it.
 	Source string `json:"source,omitempty"`
 	Target string `json:"target,omitempty"`
-	// FallbackToOrigin is the effective decision this job ran under.
+	// FallbackToOrigin and RequireAuthority are the effective decisions this job
+	// ran under.
 	FallbackToOrigin bool                  `json:"fallback_to_origin"`
+	RequireAuthority bool                  `json:"require_authority"`
 	Labels           map[string]string     `json:"labels,omitempty"`
 	State            JobState              `json:"state"`
 	Err              string                `json:"error"`
@@ -283,6 +295,7 @@ func (j *Job) snapshot() JobSnapshot {
 		Source:           j.Source,
 		Target:           j.Target,
 		FallbackToOrigin: j.FallbackToOrigin,
+		RequireAuthority: j.RequireAuthority,
 		Labels:           j.Labels,
 		State:            j.State,
 		Err:              j.Err,
@@ -358,8 +371,10 @@ type Store interface {
 	// other job wants to read it from. The returned channel closes when that
 	// execution finishes, whatever its outcome; ok=false when nothing is filling
 	// ref. Used to wait out a cache that is merely not filled YET rather than
-	// treating it as a miss.
-	Filling(ref string) (done <-chan struct{}, ok bool)
+	// treating it as a miss. exclude is the asking job's own id: a routed job
+	// publishes the very reference its own later hop reads, and waiting for itself
+	// could only ever time out.
+	Filling(ref string, exclude string) (done <-chan struct{}, ok bool)
 	Update(id string, fn func(*Job)) bool
 	// RetrySource returns the request to resubmit for a handle and that
 	// handle's effective (per-caller) state, so a retry honors the caller's own

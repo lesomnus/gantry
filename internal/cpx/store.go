@@ -189,13 +189,18 @@ func (s *memStore) Active(key string) (JobSnapshot, bool) {
 	return JobSnapshot{}, false
 }
 
-func (s *memStore) Filling(ref string) (<-chan struct{}, bool) {
+func (s *memStore) Filling(ref string, exclude string) (<-chan struct{}, bool) {
 	if ref == "" {
 		return nil, false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, j := range s.jobs {
+		if j.ID == exclude {
+			// A routed job publishes the reference its own later hop reads. Waiting
+			// for itself could only ever burn the whole bound.
+			continue
+		}
 		// Same exclusions as coalescing: a terminal, canceled or already-failing
 		// job will never produce the ref, and an enqueuing one is not yet
 		// guaranteed to run, so waiting on any of them would only burn the

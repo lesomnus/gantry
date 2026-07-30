@@ -2,14 +2,22 @@ package cpx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/z"
 )
+
+// ErrUnconfirmed is returned when require_authority refuses a job because the
+// store named as its source could not confirm what the reference means. Like a
+// verification rejection it is a precondition on the environment rather than a
+// fault in the request, so the API reports it as FAILED_PRECONDITION.
+var ErrUnconfirmed = errors.New("the authority could not confirm the reference")
 
 // maxAttempts bounds how many attempts one job may make in total. Every attempt
 // can move a whole image, so this is a cost bound rather than a loop guard: a
@@ -127,6 +135,10 @@ type execPlan struct {
 	// express is an error the caller hears about while an inherited server default
 	// simply does not apply to this job.
 	fallbackAsked bool
+	// strictAuthority is the effective require_authority decision. It is part of
+	// the dedup key: a caller that refused content the authority never confirmed
+	// must not be handed a job that accepted it.
+	strictAuthority bool
 
 	steps []*execStep
 }
@@ -275,6 +287,10 @@ func (w *Copier) plan(ctx context.Context, req Request) (*execPlan, error) {
 		}
 	} else if req.FallbackToOrigin != nil && *req.FallbackToOrigin {
 		return nil, fmt.Errorf("fallback_to_origin applies to an engine target; store %q is a registry", p.target.Name())
+	}
+	p.strictAuthority = w.wc.RequireAuthority
+	if req.RequireAuthority != nil {
+		p.strictAuthority = *req.RequireAuthority
 	}
 
 	// The delivery step, built from the requested (tag) form: a registry target's
@@ -559,12 +575,31 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	// it makes the nearer copy provably the same content, and it is what the probe
 	// asks about. One manifest request against bytes that would otherwise move in
 	// full.
+	// The two requests below are the only I/O admission does. Bound them together,
+	// so an unresponsive registry costs one submit its timeout rather than holding
+	// the caller open for as long as the store cares to stay silent.
+	if limit := time.Duration(w.wc.AdmissionTimeout); limit > 0 {
+		var stop context.CancelFunc
+		ctx, stop = context.WithTimeout(ctx, limit)
+		defer stop()
+	}
+
 	digest, derr := resolveDigest(ctx, p.source, p.authorityRef)
+	if errors.Is(derr, ErrNoSuchImage) {
+		// The authority ANSWERED: it does not have this reference. That is the most
+		// definite answer there is, and reading a cache of it instead would serve
+		// content the authority never had — under a tag the caller believes points
+		// at the authority's image. Do not route; let the job read the source it
+		// named and fail there, as an unrouted job would.
+		l.Debug("not routing: the authority does not have this reference",
+			slog.String("ref", p.authorityRef.Name()), slog.String("source", p.source.Name))
+		return nil
+	}
 	if derr != nil {
-		// The authority is unreachable. Reading the cache by tag is then the useful
-		// answer — the site registry keeps working while the cloud one does not —
-		// and it is the one case where the caller can receive content the authority
-		// never confirmed, so require_authority governs it.
+		// The authority could not answer at all. Reading the cache by tag is then
+		// the useful answer — the site registry keeps working while the cloud one
+		// does not — and it is the one case where the caller can receive content the
+		// authority never confirmed, so require_authority governs it.
 		if aerr := w.requireAuthority(p, req, true); aerr != nil {
 			// Both halves matter: that it is fatal, and why the authority went quiet.
 			return fmt.Errorf("%w: %w", aerr, derr)
@@ -580,6 +615,17 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	}
 	if err := w.requireAuthority(p, req, false); err != nil {
 		return err
+	}
+
+	// Can the delivery hop even read the cache? Settled before anything is filled:
+	// an engine whose pull_host collapses every source onto one host reads the same
+	// place whichever store gantry names, and a proxy TARGET ignores its source
+	// entirely and fetches from its own upstream. Either way the cache would be
+	// filled and then never read — a whole image copied for nothing.
+	if why, ok := w.unreadableCache(p, deliver, cacheCfg); !ok {
+		l.Debug("not routing: the cache could not be read by this job",
+			slog.String("cache", cacheName), slog.String("reason", why))
+		return nil
 	}
 
 	// A pull-through cache fills itself when it is read, so reading it IS the fill:
@@ -607,6 +653,15 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		return nil
 	}
 	if warm {
+		if p.copyReferrers && !w.cacheHasReferrers(ctx, cacheCfg, dg) {
+			// The cache holds the image but not its referrers — filled before, by a
+			// job that did not need them. Reading it would satisfy the pull and drop
+			// the signature, so read the authority instead. The image is already
+			// there, so nothing is re-transferred by declining.
+			l.Info("not routing: the cache holds the image but not its referrers",
+				slog.String("cache", cacheName), slog.String("digest", digest))
+			return nil
+		}
 		l.Debug("routing through a cache that already holds the image",
 			slog.String("cache", cacheName), slog.String("digest", digest))
 		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
@@ -626,6 +681,11 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		platforms: nil,  // a verbatim commit writes every child manifest
 		fills:     tagRef.Name(),
 		optional:  true, // gantry added this step for itself
+		// The referrers must travel on THIS hop, from the authority that has them.
+		// Without it the delivery hop asks the cache for referrers it was never
+		// given, finds none — an empty list is not an error — and the job completes
+		// having silently dropped the signature the caller asked to propagate.
+		referrers: p.copyReferrers,
 	}
 	fill.newMover = newCopyMover(fill)
 	src, err := w.planAttemptRef(p, p.source)
@@ -643,6 +703,46 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	return w.addRouteAttempt(ctx, p, deliver, cacheCfg, []int{fill.idx})
 }
 
+// cacheHasReferrers reports whether a store can supply the referrers of a digest
+// it holds. Only asked when the job propagates them, since it costs a listing.
+func (w *Copier) cacheHasReferrers(ctx context.Context, cache config.StoreConfig, dg name.Digest) bool {
+	n, err := countReferrers(ctx, cache, dg)
+	if err != nil {
+		log.From(ctx).Debug("could not list the cache's referrers",
+			slog.String("cache", cache.Name), slog.String("error", err.Error()))
+		return false
+	}
+	return n > 0
+}
+
+// unreadableCache reports whether a read of cache would actually reach it from the
+// delivery step, and why not when it would not.
+func (w *Copier) unreadableCache(p *execPlan, st *execStep, cache config.StoreConfig) (string, bool) {
+	if rd, ok := st.dst.(*registryDest); ok && rd.isProxy() {
+		// A proxy destination reads THROUGH itself from its own upstream, ignoring
+		// whatever source gantry hands it, so naming the cache changes nothing.
+		return "the target is a pull-through cache and fetches from its own upstream", false
+	}
+	pd, ok := st.dst.(puller)
+	if !ok {
+		return "", true
+	}
+	tagRef, err := name.ParseReference(cache.Host+"/"+p.repo+p.id, w.refOpts(cache)...)
+	if err != nil {
+		return err.Error(), false
+	}
+	via, err := pd.pullRef(tagRef, cache)
+	if err != nil {
+		return err.Error(), false
+	}
+	for _, other := range st.attempts {
+		if other.pullRef == via {
+			return "the engine reaches every source by one host (pull_host / downstream_host)", false
+		}
+	}
+	return "", true
+}
+
 // addRouteAttempt puts a read of the cache at the front of the delivery step's
 // attempts, ahead of the source the caller named.
 func (w *Copier) addRouteAttempt(ctx context.Context, p *execPlan, st *execStep, cache config.StoreConfig, needs []int) error {
@@ -657,18 +757,9 @@ func (w *Copier) addRouteAttempt(ctx context.Context, p *execPlan, st *execStep,
 	if tagRef, err := name.ParseReference(cache.Host+"/"+p.repo+p.id, w.refOpts(cache)...); err == nil {
 		at.waitFill = tagRef.Name()
 		if pd, ok := st.dst.(puller); ok {
+			// Reachability was settled by unreadableCache before anything was filled.
 			if at.pullRef, err = pd.pullRef(tagRef, cache); err != nil {
 				return err
-			}
-			for _, other := range st.attempts {
-				if other.pullRef == at.pullRef {
-					// pull_host collapses every source onto one host as far as the
-					// daemon is concerned, so this attempt would read the same place
-					// twice. Not an error — nobody asked for the route.
-					log.From(ctx).Debug("not routing: the engine reaches every source by one host",
-						slog.String("engine", st.dst.Name()), slog.String("ref", at.pullRef))
-					return nil
-				}
 			}
 		}
 	}
@@ -699,12 +790,9 @@ func (w *Copier) requireAuthority(p *execPlan, req Request, unconfirmed bool) er
 	if !unconfirmed {
 		return nil
 	}
-	strict := w.wc.RequireAuthority
-	if req.RequireAuthority != nil {
-		strict = *req.RequireAuthority
-	}
-	if strict {
-		return fmt.Errorf("require_authority: %q could not confirm what %q means", p.source.Name, p.repo+p.id)
+	if p.strictAuthority {
+		return fmt.Errorf("%w: require_authority: %q could not confirm what %q means",
+			ErrUnconfirmed, p.source.Name, p.repo+p.id)
 	}
 	return nil
 }

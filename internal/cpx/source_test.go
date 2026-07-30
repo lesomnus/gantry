@@ -242,3 +242,23 @@ func startReadOnlyRegistry(t *testing.T) string {
 	}
 	return u.Host
 }
+
+// startStatusRegistry answers every manifest request with one status and the OCI
+// error envelope, like a registry refusing rather than reporting.
+func startStatusRegistry(t *testing.T, status int) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"DENIED","message":"nope"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
+}

@@ -110,11 +110,35 @@ func upstreamPlan(ctx context.Context, source config.StoreConfig, ref name.Refer
 	return resolvePlan(ctx, ref, platforms, baseOpts(ctx, registryAuth(source), rt))
 }
 
+// ErrNoSuchImage means a registry ANSWERED, and its answer was that it does not
+// have the reference. It is the opposite of not being able to ask: a store that
+// says "no" has told the truth about itself, while a store that could not be
+// reached has told nothing.
+var ErrNoSuchImage = errors.New("the registry does not have this reference")
+
+// absent reports whether err is a registry's own definitive "no". Only 404 and
+// 403 qualify: some registries hide the existence of a repository behind a
+// forbidden rather than a not-found. Everything else — 401, 429, 5xx, a TLS
+// failure, a timeout — is the registry failing to answer, which says nothing
+// about what it holds and must never be read as "no".
+func absent(err error) bool {
+	var te *transport.Error
+	if !errors.As(err, &te) {
+		return false
+	}
+	return te.StatusCode == http.StatusNotFound || te.StatusCode == http.StatusForbidden
+}
+
 // resolveDigest asks a store what a reference means right now, returning the
 // manifest/index digest. Used to settle a tag at the AUTHORITY before gantry
 // considers reading the image from somewhere nearer: one manifest request against
 // bytes that would otherwise be transferred in full, and it is what makes a
 // nearer copy provably the same content rather than merely the same tag.
+//
+// A store that answers "I do not have it" returns ErrNoSuchImage, which callers
+// must NOT treat as "the authority is unavailable": the authority saying the
+// reference does not exist is the most definite answer there is, and reading a
+// cache of it instead would serve content the authority never had.
 func resolveDigest(ctx context.Context, store config.StoreConfig, ref name.Reference) (string, error) {
 	if dg, ok := ref.(name.Digest); ok {
 		return dg.DigestStr(), nil // already settled
@@ -125,6 +149,9 @@ func resolveDigest(ctx context.Context, store config.StoreConfig, ref name.Refer
 	}
 	desc, err := remote.Head(ref, baseOpts(ctx, registryAuth(store), rt)...)
 	if err != nil {
+		if absent(err) {
+			return "", fmt.Errorf("%w: %q at %q", ErrNoSuchImage, ref.Name(), store.Name)
+		}
 		return "", z.Err(err, "resolve %q at %q", ref.Name(), store.Name)
 	}
 	return desc.Digest.String(), nil
@@ -134,15 +161,19 @@ func resolveDigest(ctx context.Context, store config.StoreConfig, ref name.Refer
 // by digest rather than by tag is the point: it answers "does this store hold the
 // content the authority just named", with no question of which image its tag
 // happens to point at.
+//
+// Only a definitive "no" is reported as absent. A registry that refuses to answer
+// — unauthorized, rate-limited, broken, unreachable — is an error, because
+// treating it as absent would copy a whole image into a store that already has it
+// and may well reject the push for the same reason it refused the probe.
 func holdsDigest(ctx context.Context, store config.StoreConfig, ref name.Digest) (bool, error) {
 	rt, err := xport.Transport(store)
 	if err != nil {
 		return false, err
 	}
 	if _, err := remote.Head(ref, baseOpts(ctx, registryAuth(store), rt)...); err != nil {
-		var te *transport.Error
-		if errors.As(err, &te) && (te.StatusCode == http.StatusNotFound || len(te.Errors) > 0) {
-			return false, nil // a registry answering "no" is not a failure
+		if absent(err) {
+			return false, nil
 		}
 		return false, err
 	}

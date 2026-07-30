@@ -100,9 +100,11 @@ message Transfer {
   // Failure text, on a failed step.
   string error = 10;
   // Which step of the job's plan this row belongs to. Rows sharing a step are
-  // alternative sources for one hop; differing steps are consecutive hops. Values
-  // are non-decreasing in list order but not necessarily 0..n-1: a step gantry
-  // planned and then did not need leaves no row at all.
+  // alternative sources for one hop; differing steps are consecutive hops. One
+  // pending row is published per planned step before the job runs — so the route
+  // is visible up front — and attempts then claim and append to it. Values are
+  // therefore non-decreasing in list order, and every planned step has at least
+  // one row: a step that never ran keeps its pending one.
   uint32 step = 11;
 }
 
@@ -190,20 +192,22 @@ message Job {
   // request set this field explicitly, and otherwise just does not apply to that
   // job. On a job record this is the EFFECTIVE decision: false whenever the job
   // has no second source to reach, whatever the request said.
+  bool fallback_to_origin = 21 [
+    features.field_presence = EXPLICIT,
+    (orm.field) = {immutable: true}
+  ];
+
   // Refuse this job when the store named as `source` could not confirm what
   // `ref` means, instead of reading a nearer cache of that store on faith. It is
   // only ever consulted for a job gantry routed through such a cache (see the
   // store `cache` field): for an unrouted job the source the caller named IS the
   // authority, and for an already digest-pinned job there is nothing to confirm.
-  // Absent = server default (worker.require_authority), which is false — a cache
-  // that keeps working while the registry behind it does not is usually the point
-  // of having one.
+  // A source that ANSWERS "I do not have it" is not this case — that is the most
+  // definite answer there is, and such a job is simply not routed. Absent =
+  // server default (worker.require_authority), which is false: a cache that keeps
+  // working while the registry behind it does not is usually the point of having
+  // one. On a job record this is the effective decision.
   bool require_authority = 22 [
-    features.field_presence = EXPLICIT,
-    (orm.field) = {immutable: true}
-  ];
-
-  bool fallback_to_origin = 21 [
     features.field_presence = EXPLICIT,
     (orm.field) = {immutable: true}
   ];

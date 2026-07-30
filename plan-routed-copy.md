@@ -1,6 +1,6 @@
 # Plan — routing a copy through a store's cache (A → A' → B)
 
-Status: **all phases landed** · follows `plan-source-fallback.md` (already landed on `feat/source-fallback`).
+Status: **all phases landed and reviewed** · follows `plan-source-fallback.md` (already landed on `feat/source-fallback`).
 
 ## 1. Goal
 
@@ -395,7 +395,7 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 | - | ---- | ----- | ----- |
 | 0 | This plan | ☑ | |
 | 0.1 | Scope the layer abort to the fan-out (§7a) | ☑ | `Job.sealed` replaces the coalescing side effect; mutation-checked |
-| 0.2 | Execution-model redesign: recon + two independent designs + judge | ◐ | recon in; two designs and the judge still running |
+| 0.2 | Execution-model redesign: recon + two independent designs + judge | ☑ | recon in; two designs and the judge still running |
 | 0.3 | `Job.Source`/`Target` carried on the record, not derived from a transfer (§3.6) | ☑ | + `docs/api.md` section and an rpc test; one e2e assertion updated |
 | 0.4 | `StoreConfig.Cache` + cross-store validation | ☑ | declared, a registry, not itself, and not on an engine store; a store that is someone's cache may declare its own (routing is one level) |
 | 0.5 | Recon bugs in the prerequisite: seal on every exit, `Filling` skips sealed | ☑ | both pinned by tests |
@@ -411,6 +411,7 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 | 2.3 | `PlanResult.Steps` + `JobPlanResponse.steps` | ☑ | the resolved route, visible before submitting |
 | 2.4 | Docs | ☑ | `stores.md` (new section), `api.md` (transfers-as-hops contract, Plan), `observability.md`, `README.md`, `gantry.yaml` |
 | — | **Phase 3 — `require_authority`** | ☑ | |
+| — | **Adversarial review** | ☑ | 5 lenses × refuters; 2 serious defects and 8 more, all fixed and mutation-checked |
 | 3.1 | `Job.require_authority` = 22 + `worker.require_authority` | ☑ | one regen with the Plan route messages |
 | 3.2 | Enforcement + RPC plumbing + tests | ☑ | explicit request beats the server default; no-op without a route |
 
@@ -584,6 +585,74 @@ Two gaps stated plainly rather than papered over:
   index round-trips byte-identically — and "a registry rejects an index whose children are
   missing" is a validation the fake does not perform. Hence the plan-level assertion, with the
   reasoning written next to it.
+
+### The adversarial review, and what it found
+
+Five lenses × independent refuters, 79 agents. Several lenses found the same defects
+independently. Everything below is fixed, with a test that a mutation reverting the fix fails.
+
+**Two of them were serious.**
+
+1. **A routed copy silently dropped referrer propagation** — reproduced twice, independently.
+   The fill hop never set `referrers`, so it copied the image without the signatures over it;
+   the delivery hop then asked the *cache* for referrers it had never been given, found none —
+   an empty list is not an error — and the job completed `done` having dropped exactly what
+   `copy_referrers` exists to propagate. It needed no flag: for a verified source
+   `copy_referrers` defaults on, so declaring `cache` on a verified store silently stopped
+   signatures reaching every target. It also outlived the fill: a cache warmed by an earlier
+   job that did not need referrers stays referrer-less, so every later job inherited the drop.
+   §3.4 asserted the opposite behaviour and §9 listed a test for it that was never written.
+
+   Fixed on both halves: the fill carries the job's `copy_referrers`, and a warm cache that
+   holds the image but *not* its referrers is declined rather than read — the image is already
+   cached, so declining costs only the bytes the job was going to move anyway.
+
+2. **`resolveDigest` read a definitive answer as silence.** A 404 from the authority — "I do
+   not have this reference" — was treated the same as an unreachable authority, so the job fell
+   into the read-the-cache-by-tag branch and served content the authority never had, under a
+   tag the caller believes points at the authority's image. `holdsDigest` was worse: its
+   predicate accepted *any* error carrying an OCI error envelope, so 401/403/429/5xx all read
+   as "the cache is cold" and triggered a pointless full fill into a store that already had it
+   and would refuse the push for the same reason it refused the probe.
+
+   Fixed by naming the distinction: `ErrNoSuchImage` for a registry's own definitive no (404,
+   and 403 because some registries hide existence behind it), everything else an error. A
+   definite no now means the job is simply not routed; only genuine silence reaches
+   `require_authority`.
+
+**And these:**
+
+- **`require_authority` was missing from the dedup key**, so a strict submit could be served by
+  an active job that read a cache unconfirmed — the same class of bug already fixed for
+  `fallback_to_origin`. The key is now about what a caller may be *served*, and the doc says so.
+- **A routed job waited out `source_wait` on its own fill.** `Filling` had no self-exclusion,
+  and a routed job publishes the very reference its own later hop reads.
+- **`pull_host` left an orphan fill hop**: the collapse check ran when the route *attempt* was
+  added, after the fill step had already been inserted, so gantry copied a whole image into the
+  cache and then never read it. Reachability is now settled before anything is filled — which
+  also covers a proxy-mode *target*, which ignores whatever source it is handed and fetches
+  from its own upstream.
+- **An abandoned route announced nothing.** `recordLeaving` only fired between two attempts
+  that both ran, so a route attempt *pruned* by `needs` — the common case — emitted no counter
+  and no audit event, and the reason came from the attempt taken up rather than the one given
+  up, making the documented `reason=route` unreachable. Now `recordGivingUp` fires for a
+  skipped attempt too and names what was given up.
+- **A layer failure sealed a job permanently.** The seal is meant to stop new callers joining a
+  move that is winding down; a job that recovers via another attempt or hop is not winding down,
+  so it is now lifted when an attempt succeeds.
+- **Admission had unbounded I/O.** The two new registry requests are bounded together by
+  `worker.admission_timeout` (default 10s), so an unresponsive registry costs one submit its
+  timeout instead of holding the caller open.
+- **`Job.require_authority` was never populated**, and a refusal returned `INVALID_ARGUMENT`
+  where the documented class for "the environment could not satisfy a precondition" is
+  `FAILED_PRECONDITION`. Both fixed.
+- **Docs**: field 21's entire doc comment had been absorbed into field 22, leaving
+  `fallback_to_origin` undocumented in the proto; `Transfer.step`'s "a step gantry planned and
+  then did not need leaves no row" was false, since one row is seeded per planned step;
+  `docs/stores.md` still carried the pre-`cdfb30c` rule about a job's reported source; the
+  README described a `transfers` entry as a hop when it is an attempt; and the routing section
+  omitted the retention consequence — a routed engine job leaves the node holding the *cache's*
+  host name, so host-keyed rules written for the origin stop matching.
 
 ### Log
 

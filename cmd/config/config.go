@@ -95,6 +95,7 @@ func (c *Config) Evaluate() error {
 	z.FallbackP(&c.Worker.MaxConcurrentLayers, 4)
 	z.FallbackP(&c.Worker.QueueSize, 256)
 	z.FallbackP((*time.Duration)(&c.Worker.JobTTL), 30*time.Minute)
+	z.FallbackP((*time.Duration)(&c.Worker.AdmissionTimeout), 10*time.Second)
 
 	for name, s := range c.Stores {
 		if name == "" {

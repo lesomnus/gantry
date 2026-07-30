@@ -37,9 +37,9 @@ JobService.Get  ·  JobService.Watch (server stream)
   [docs/stores.md](docs/stores.md).
 - A registry can declare that another one caches it (`cache: <store>`); gantry may
   then satisfy a copy from it by going through that one — filling it first if
-  needed — so the origin is read once rather than once per destination. One job,
-  one hop per `transfers` entry; the caller never names the cache. See
-  [docs/stores.md](docs/stores.md).
+  needed — so the origin is read once rather than once per destination. It stays
+  one job, whose `transfers` are its attempts grouped into hops; the caller never
+  names the cache. See [docs/stores.md](docs/stores.md).
 - `fallback_to_origin` lets an engine pull that its `source` could not serve
   re-attempt against the registry named in `ref`, so a cache is an optimization
   rather than a dependency; the failed attempt stays on the record as a failed

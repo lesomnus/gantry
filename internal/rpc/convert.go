@@ -271,6 +271,7 @@ func jobToPB(snap cpx.JobSnapshot) *pb.Job {
 		// leave its source from one that was not — the failed first transfer
 		// alone does not say whether the fallback was permitted or merely absent.
 		FallbackToOrigin: proto.Bool(snap.FallbackToOrigin),
+		RequireAuthority: proto.Bool(snap.RequireAuthority),
 	}
 	// The job's stores are what it was admitted for, carried on the record — not
 	// read out of a transfer. A transfer says where some bytes came from, and a

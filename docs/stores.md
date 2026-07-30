@@ -409,6 +409,20 @@ there the source the caller named *is* the authority.
 - **`JobService.Plan` reports the resolved route** (`steps`), so the shape is
   visible before submitting. It is advisory: coalescing is request-level, so a
   submit can be served by an active job that probed differently.
+- **A routed engine job leaves the node holding the CACHE's host name**, because
+  the daemon was told to pull from there and retention is stamped with what the
+  daemon actually holds. A job that named the origin as its source and expected the
+  origin's name on the node will not get it, and host-qualified retention rules
+  written for the origin will not match the image. Use `as` to give it a name
+  independent of which store served it — the same remedy as for
+  [the source fallback](#falling-back-to-the-origin).
+- **Referrers travel on every hop.** A job propagating them fills the cache with
+  them too, and a cache that holds the image but not its referrers — filled earlier
+  by a job that did not need them — is declined rather than read, so a signature is
+  never silently dropped. That costs a referrer listing per routed job that
+  propagates them.
+- **Admission does two registry requests** (settle the tag at the authority, probe
+  the cache), bounded together by `worker.admission_timeout` (default `10s`).
 
 ## Falling back to the origin
 
@@ -434,10 +448,9 @@ JobService.Add {ref: "cr.example.com/app:1", source: cache, target: node,
 binding needs no new input — it is the binding the job would have had with
 `source` unset. Each attempt is its own `transfers` entry, so the failed one
 stays on the record (with its error) while the job itself completes: **a cache
-miss reads as a miss, not an outage.** The job's reported `source` is the attempt
-that actually served it — or, when nothing did, the source the job was pointed
-at, since naming the fallback on a wholly failed job would read as though the
-operator had asked for it.
+miss reads as a miss, not an outage.** The job's own `source`/`target` stay what
+was asked for — see [api.md](api.md#what-a-jobs-source--target-mean) — and the
+attempt rows say where the bytes came from.
 
 Absent from the request, the value is the server default
 `worker.fallback_to_origin` (default `false` — a deployment that has not opted in

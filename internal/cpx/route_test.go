@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // routedCopier builds the shape routing is about: a cloud registry that holds the
@@ -299,12 +301,48 @@ func TestRoutedCopyIsAnchoredToTheAuthoritysDigest(t *testing.T) {
 	}
 }
 
-// When the authority cannot say what a tag means, reading the cache by tag is the
-// useful answer — and the only case a caller can receive content the authority
-// never confirmed, so require_authority refuses it.
-func TestRequireAuthorityGovernsAnUnreachableAuthority(t *testing.T) {
+// An authority that ANSWERS "I do not have it" is the most definite answer there
+// is. Reading a cache of it instead would serve content the authority never had,
+// under a tag the caller believes points at the authority's image — so the job is
+// not routed at all and reads the source it named.
+func TestRouteSkipsAnAuthorityThatSaysNo(t *testing.T) {
 	w, _, cloud, _, _ := routedCopier(t)
-	// Nothing was pushed, so the cloud cannot resolve the tag.
+	// Nothing was pushed, so the cloud answers 404 for the tag.
+	res, err := w.Plan(context.Background(), Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local",
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(res.Steps) != 1 {
+		t.Fatalf("plan steps = %+v, want an unrouted single hop", res.Steps)
+	}
+	if got := res.Steps[0].Sources; len(got) != 1 || got[0].Store != "cloud" {
+		t.Errorf("sources = %+v, want only the source the caller named", got)
+	}
+
+	// Strictness has nothing to add: the authority was not unavailable, it answered.
+	yes := true
+	if _, err := w.Plan(context.Background(), Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", RequireAuthority: &yes,
+	}); err != nil {
+		t.Errorf("a definite answer is not a require_authority failure: %v", err)
+	}
+}
+
+// An authority that cannot answer at all is different: reading the cache by tag is
+// then the useful answer — the site registry keeps working while the cloud one does
+// not — and it is the only case a caller can receive content the authority never
+// confirmed, so require_authority refuses it.
+func TestRequireAuthorityGovernsAnUnreachableAuthority(t *testing.T) {
+	cloud, site, local := startRegistry(t), startRegistry(t), startRegistry(t)
+	// The cloud store's transport cannot be built, so it cannot be asked anything.
+	w, _ := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site",
+			CACert: filepath.Join(t.TempDir(), "no-such-ca.pem")},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+	}, false)
 	req := Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local"}
 
 	res, err := w.Plan(context.Background(), req)
@@ -523,5 +561,379 @@ func TestRoutedFillHopSettings(t *testing.T) {
 	// And its cache read is conditional on the fill having delivered.
 	if got := deliver.attempts[0]; got.why != whyRoute || len(got.needs) != 1 || got.needs[0] != fill.idx {
 		t.Errorf("delivery's first attempt = {why:%s needs:%v}, want the cache gated on the fill", got.why, got.needs)
+	}
+}
+
+// Referrers must travel on the FILL hop, from the authority that has them. Without
+// that, the delivery hop asks the cache for signatures it was never given, finds
+// none — an empty list is not an error — and the job completes having silently
+// dropped exactly what copy_referrers exists to propagate.
+func TestRoutedCopyCarriesReferrersOnEveryHop(t *testing.T) {
+	w, js, cloud, site, local := routedCopier(t)
+	src := pushImage(t, cloud+"/team/app:1", 2)
+	desc, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloudCfg, _ := w.stores.Config("cloud")
+	attachReferrer(t, cloudCfg, src.Context(), desc)
+	if n := len(listReferrers(t, cloudCfg, src.Context(), desc.Digest)); n != 1 {
+		t.Fatalf("the authority holds %d referrers, want 1", n)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	yes := true
+	snap, _, err := w.Submit(Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", CopyReferrers: &yes,
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	if done.State != JobDone {
+		t.Fatalf("state = %q (err=%q)", done.State, done.Err)
+	}
+	if len(done.Transfers) != 2 {
+		t.Fatalf("transfers = %+v, want a fill and a delivery", done.Transfers)
+	}
+
+	siteCfg, _ := w.stores.Config("site")
+	siteRepo, err := name.NewRepository(site+"/team/app", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(listReferrers(t, siteCfg, siteRepo, desc.Digest)); n != 1 {
+		t.Errorf("the cache holds %d referrers, want the fill to have carried it", n)
+	}
+	localCfg, _ := w.stores.Config("local")
+	localRepo, err := name.NewRepository(local+"/team/app", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(listReferrers(t, localCfg, localRepo, desc.Digest)); n != 1 {
+		t.Errorf("the target holds %d referrers, want the signature to have reached it", n)
+	}
+}
+
+// A cache filled by an earlier job that did not need referrers holds the image but
+// not the signatures over it. Reading it would satisfy the copy and drop them, so a
+// job that propagates referrers reads the authority instead — the image is already
+// cached, so declining costs nothing but the bytes it was going to move anyway.
+func TestRoutedCopyDeclinesAReferrerlessWarmCache(t *testing.T) {
+	w, js, cloud, _, _ := routedCopier(t)
+	src := pushImage(t, cloud+"/team/app:1", 2)
+	desc, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	// A first job with no referrers to propagate warms the cache.
+	no := false
+	first, _, err := w.Submit(Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", CopyReferrers: &no,
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := waitTerminal(t, js, first.ID); got.State != JobDone {
+		t.Fatalf("first job state = %q (err=%q)", got.State, got.Err)
+	}
+
+	// The signature appears at the authority afterwards.
+	cloudCfg, _ := w.stores.Config("cloud")
+	attachReferrer(t, cloudCfg, src.Context(), desc)
+
+	// A job that wants it must not be served from the referrer-less cache.
+	yes := true
+	res, err := w.Plan(context.Background(), Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "site", CopyReferrers: &yes,
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	_ = res
+	res2, err := w.Plan(context.Background(), Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", CopyReferrers: &yes,
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(res2.Steps) != 1 || res2.Steps[0].Sources[0].Store != "cloud" {
+		t.Errorf("plan = %+v, want an unrouted read of the authority", res2.Steps)
+	}
+}
+
+// A registry that refuses to answer has said nothing about what it holds. Reading
+// that as "absent" would copy a whole image into a store that already has it — and
+// most likely fail the push for the same reason the probe was refused.
+func TestProbeOnlyTreatsADefiniteNoAsAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		absent  bool
+		wantErr bool
+	}{
+		{"not found", 404, true, false},
+		{"forbidden hides existence", 403, true, false},
+		{"unauthorized", 401, false, true},
+		{"rate limited", 429, false, true},
+		{"broken", 500, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := startStatusRegistry(t, tc.status)
+			store := config.StoreConfig{Name: "probe", Kind: "oci", Host: host, Insecure: true}
+			dg, err := name.NewDigest(host+"/team/app@sha256:"+strings.Repeat("c", 64), name.Insecure)
+			if err != nil {
+				t.Fatal(err)
+			}
+			held, err := holdsDigest(context.Background(), store, dg)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("held=%v err=nil, want an error: %d says nothing about what the store holds", held, tc.status)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if held != !tc.absent {
+				t.Errorf("held = %v, want %v", held, !tc.absent)
+			}
+		})
+	}
+}
+
+// The same rule settles whether the AUTHORITY answered or failed to: only a
+// definite no is ErrNoSuchImage, and only that stops the job being routed.
+func TestAuthorityAnswerIsDistinguishedFromSilence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		noSuchImg bool
+	}{
+		{"not found", 404, true},
+		{"forbidden", 403, true},
+		{"unauthorized", 401, false},
+		{"broken", 500, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := startStatusRegistry(t, tc.status)
+			store := config.StoreConfig{Name: "authority", Kind: "oci", Host: host, Insecure: true}
+			ref, err := name.ParseReference(host+"/team/app:1", name.Insecure)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = resolveDigest(context.Background(), store, ref)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if got := errors.Is(err, ErrNoSuchImage); got != tc.noSuchImg {
+				t.Errorf("ErrNoSuchImage = %v, want %v (status %d)", got, tc.noSuchImg, tc.status)
+			}
+		})
+	}
+}
+
+// A route the delivery hop could not read must not be filled: copying a whole image
+// into a cache that will then be ignored is the most expensive way to do nothing.
+func TestRouteIsNotFilledWhenItCannotBeRead(t *testing.T) {
+	t.Run("an engine reaching every source by one host", func(t *testing.T) {
+		eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
+		cloud, site := startRegistry(t), startRegistry(t)
+		w, _ := newCopier(t, []config.StoreConfig{
+			{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+			{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		}, false)
+		w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker", PullHost: "mirror.local"}, eng)
+		pushImage(t, cloud+"/team/app:1", 1)
+
+		res, err := w.Plan(context.Background(), Request{
+			Ref: cloud + "/team/app:1", Source: "cloud", Target: "node",
+		})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if len(res.Steps) != 1 {
+			t.Fatalf("plan steps = %+v, want no fill: the daemon reads one host whatever gantry names", res.Steps)
+		}
+	})
+	t.Run("a pull-through target fetching from its own upstream", func(t *testing.T) {
+		cloud, site, local := startRegistry(t), startRegistry(t), startRegistry(t)
+		w, _ := newCopier(t, []config.StoreConfig{
+			{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+			{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+			{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "proxy"},
+		}, false)
+		pushImage(t, cloud+"/team/app:1", 1)
+
+		res, err := w.Plan(context.Background(), Request{
+			Ref: cloud + "/team/app:1", Source: "cloud", Target: "local",
+		})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if len(res.Steps) != 1 {
+			t.Fatalf("plan steps = %+v, want no fill: a proxy target ignores the source it is handed", res.Steps)
+		}
+	})
+}
+
+// Giving up on a source gantry chose for itself is the signal that the cache is not
+// earning its keep, so it must be reported — including when the attempt was skipped
+// rather than tried, because a route that never ran is as unused as one that failed.
+func TestAbandonedRouteIsReported(t *testing.T) {
+	cloud, local := startRegistry(t), startRegistry(t)
+	site := startReadOnlyRegistry(t) // probeable, not fillable
+	w, js := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+	}, false)
+	rec := &recordingRecorder{}
+	w.SetRecorder(rec)
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	mctx, reader := otxContext(t)
+	ctx, cancel := context.WithCancel(mctx)
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if done := waitTerminal(t, js, snap.ID); done.State != JobDone {
+		t.Fatalf("state = %q (err=%q)", done.State, done.Err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatal(err)
+	}
+	// The reason names what was given up: a cache gantry chose, not the source the
+	// caller named.
+	if got, ok := counterValue(t, rm, "gantry.job.fallback", "reason", "route"); !ok || got < 1 {
+		t.Errorf("gantry.job.fallback{reason=route} = %d (found=%v), want at least 1", got, ok)
+	}
+	if got, ok := counterValue(t, rm, "gantry.job.fallback", "from", "site"); !ok || got < 1 {
+		t.Errorf("gantry.job.fallback{from=site} = %d (found=%v), want the abandoned cache named", got, ok)
+	}
+	if calls, _ := rec.snapshot(); len(calls) == 0 {
+		t.Error("an abandoned route must leave a durable audit record")
+	}
+}
+
+// A job that recovers is not failing, so it must go back to attracting callers: an
+// identical submit should join work already in progress rather than start a second
+// copy of it.
+func TestRecoveredAttemptUnsealsTheJob(t *testing.T) {
+	w, js, origin, cache := fallbackCopier(t, &fakePullEngine{name: "node", platform: "linux/amd64"})
+	pushImage(t, origin+"/team/app:1", 1)
+	_ = cache
+
+	job := NewJob("job_r", "a/b:1", nil, time.Now())
+	job.dedup = "k"
+	job.ctx = context.Background()
+	tr := &Transfer{}
+	job.Transfers = []*Transfer{tr}
+	if err := js.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	js.Update(job.ID, func(j *Job) { j.sealed = true })
+	if _, ok := js.Active("k"); ok {
+		t.Fatal("a sealed job should not be a coalescing target")
+	}
+
+	st := &execStep{dst: stubDest{"x"}, newMover: func(*Copier, *execAttempt) (mover, error) {
+		return okMover{}, nil
+	}}
+	if err := w.runAttempt(context.Background(), job, st, &execAttempt{}); err != nil {
+		t.Fatalf("attempt: %v", err)
+	}
+	if _, ok := js.Active("k"); !ok {
+		t.Error("a job whose attempt succeeded must attract callers again")
+	}
+}
+
+type okMover struct{}
+
+func (okMover) run(context.Context, *Job, *Transfer) error { return nil }
+
+// A routed job publishes the very reference its own later hop reads. When that read
+// misses, the wait must skip the asking job — waiting for a fill it performed itself
+// could only ever burn the whole bound and the only wait slot.
+//
+// The fill has to SUCCEED for this to be reachable: a failed fill prunes the cache
+// read instead, so nothing waits. Hence an engine target, whose pull can be made to
+// fail against the cache after the cache was filled.
+func TestRoutedJobDoesNotWaitForItsOwnFill(t *testing.T) {
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
+	cloud, site := startRegistry(t), startRegistry(t)
+	w, js := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+	}, false)
+	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker"}, eng)
+	w.wc.SourceWait = config.Duration(30 * time.Second) // would hang the test if taken
+	eng.failFor = failHost(site, errors.New("MANIFEST_UNKNOWN: manifest unknown"))
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	start := time.Now()
+	yes := true
+	snap, _, err := w.Submit(Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "node", FallbackToOrigin: &yes,
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	if done.State != JobDone {
+		t.Fatalf("state = %q (err=%q)", done.State, done.Err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("job took %s — it waited for the fill it was performing itself", took)
+	}
+	// The fill happened, the read of it missed, and the daemon was sent to the cloud.
+	calls := eng.pulls()
+	if len(calls) != 2 {
+		t.Fatalf("pull attempts = %+v, want the cache then the cloud", calls)
+	}
+	if !strings.HasPrefix(calls[0].ref, site+"/") || !strings.HasPrefix(calls[1].ref, cloud+"/") {
+		t.Errorf("pull refs = %q then %q, want the cache then the cloud", calls[0].ref, calls[1].ref)
+	}
+}
+
+// require_authority changes what a caller may be served, so it splits the dedup
+// key: a submit that refused content its source never confirmed must not be handed
+// a job that accepted it.
+func TestRequireAuthoritySplitsTheDedupKey(t *testing.T) {
+	w, _, cloud, _, _ := routedCopier(t)
+	w.base = context.Background() // enqueue without workers; jobs stay active
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	yes, no := true, false
+	req := Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", RequireAuthority: &no}
+	if _, created, err := w.Submit(req); err != nil || !created {
+		t.Fatalf("first submit: created=%v err=%v", created, err)
+	}
+	same := req
+	if _, created, err := w.Submit(same); err != nil || created {
+		t.Fatalf("an identical submit should coalesce: created=%v err=%v", created, err)
+	}
+	strict := req
+	strict.RequireAuthority = &yes
+	if _, created, err := w.Submit(strict); err != nil || !created {
+		t.Fatalf("a stricter submit must not coalesce onto a lenient job: created=%v err=%v", created, err)
 	}
 }

@@ -39,12 +39,12 @@ service JobService {
   rpc Retry(JobRef) returns (Job);
 }
 
-// JobAddRequest submits a move. Add coalesces onto an identical in-flight job;
-// the dedup key is (ref, platforms, source, target, as, fallback_to_origin). A
-// tag is treated as stable for the life of an active job, so a tag re-pushed
-// mid-job does not start a second move until the first finishes — and with
-// digest pinning the first job carries the digest resolved at admission (the
-// pre-repush image).
+// JobAddRequest submits a move. Add coalesces onto an identical in-flight job; the
+// dedup key is (ref, platforms, source, target, as, fallback_to_origin,
+// require_authority) — what may be SERVED, not only what is moved. A tag is
+// treated as stable for the life of an active job, so a tag re-pushed mid-job does
+// not start a second move until the first finishes — and with digest pinning the
+// first job carries the digest resolved at admission (the pre-repush image).
 message JobAddRequest {
   string id = 1;
   map<string, string> labels = 7;
@@ -61,8 +61,8 @@ message JobAddRequest {
   Verification verification = 18;
   repeated Transfer transfers = 19;
   bool copy_referrers = 20;
-  bool require_authority = 22;
   bool fallback_to_origin = 21;
+  bool require_authority = 22;
 }
 
 message JobGetRequest {
@@ -92,8 +92,8 @@ message JobSelect {
   bool verification = 18;
   bool transfers = 19;
   bool copy_referrers = 20;
-  bool require_authority = 22;
   bool fallback_to_origin = 21;
+  bool require_authority = 22;
 }
 
 message JobPatchRequest {

@@ -524,4 +524,10 @@ type WorkerConfig struct {
 	// the point of having it. Only ever consulted for a job gantry routed; for an
 	// unrouted job the source the caller named IS the authority.
 	RequireAuthority bool `yaml:"require_authority"`
+	// AdmissionTimeout bounds the registry requests admission makes before a job is
+	// created — settling a tag at its authority and probing a cache for the digest.
+	// It exists so an unresponsive registry delays one submit rather than holding it
+	// open indefinitely; on expiry the job is planned as if the store had not
+	// answered. Default 10s.
+	AdmissionTimeout Duration `yaml:"admission_timeout"`
 }

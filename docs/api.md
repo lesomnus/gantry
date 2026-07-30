@@ -127,11 +127,20 @@ client retry (network blip, restart) safe without double-moving an image.
 ## Dedup key and mutable-tag stability
 
 Coalescing (and idempotency's "identical move" notion) keys on the tuple
-**(`ref`, `platforms`, `source`, `target`, `as`, `fallback_to_origin`)**. Two
-submits that differ in any of those six run as separate jobs; two that match an
-active job coalesce. `fallback_to_origin` is in the key because it changes where
-the bytes may come from: a submit that refused the origin must not be handed a
-job allowed to pull from it, nor the reverse.
+**(`ref`, `platforms`, `source`, `target`, `as`, `fallback_to_origin`,
+`require_authority`)**. Two submits that differ in any of those seven run as
+separate jobs; two that match an active job coalesce.
+
+The last two are in the key because they change what a caller may be **served**,
+not only what is moved: a submit that refused the origin must not be handed a job
+allowed to read from it (nor the reverse, which would silently drop the fallback it
+asked for), and a submit that refused content its source never confirmed must not
+be handed a job that accepted it.
+
+The *route* is deliberately not in the key. Every route delivers the same image to
+the same store, so it is not identity-bearing, and two submits that probed a cache
+differently are still interchangeable — which is why `Plan`'s reported `steps` are
+advisory.
 
 A **tag is treated as stable for the life of an active job**: a tag re-pushed
 mid-job does *not* start a second copy until the first finishes — the second
@@ -168,7 +177,10 @@ returns the resolved plan:
   different route.
 - `require_authority` is accepted on the request: refuse the job when its source
   could not confirm what the reference means, rather than reading a nearer cache of
-  it on faith.
+  it on faith. A refusal is `FAILED_PRECONDITION` — the store could not answer,
+  which is a property of the environment rather than a fault in the request. A
+  source that *answers* "I do not have it" is not this case: that is the most
+  definite answer there is, so the job is simply not routed.
 - `fallback_ref` — the ref the engine would be told to pull if `source` could
   not serve the image; empty when the job has no fallback (see
   [stores.md](stores.md#falling-back-to-the-origin)).
@@ -191,8 +203,10 @@ them, so a failed row followed by a done row of the same step is one source that
 serve the image followed by one that could
 ([stores.md](stores.md#falling-back-to-the-origin)). Rows with **different** steps are
 consecutive hops, each of which had to happen
-([stores.md](stores.md#routing-a-copy-through-a-cache)). Steps are non-decreasing in list
-order but not necessarily `0..n-1`: a hop gantry planned and then did not need leaves no row.
+([stores.md](stores.md#routing-a-copy-through-a-cache)). One pending row is published per
+planned hop before the job runs, so the route is visible up front; attempts then claim and
+append to it. Steps are therefore non-decreasing in list order, and every planned hop has at
+least one row — a hop that never ran keeps its pending one.
 
 No single row answers "what was this job for" — and for a routed move the first row's target
 is an intermediate store, not the job's target at all.

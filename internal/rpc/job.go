@@ -50,6 +50,10 @@ func submitErr(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, verify.ErrUnsigned), errors.Is(err, verify.ErrUntrusted):
 		return status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, cpx.ErrUnconfirmed):
+		// A precondition on the environment — the store could not answer — rather
+		// than a fault in the request, like a verification rejection.
+		return status.Error(codes.FailedPrecondition, err.Error())
 	default:
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -224,7 +228,8 @@ func (v *jobService) Plan(ctx context.Context, req *pb.JobPlanRequest) (*pb.JobP
 	}
 	res, err := v.s.copier.Plan(ctx, r)
 	if err != nil {
-		if errors.Is(err, verify.ErrUnsigned) || errors.Is(err, verify.ErrUntrusted) {
+		if errors.Is(err, verify.ErrUnsigned) || errors.Is(err, verify.ErrUntrusted) ||
+			errors.Is(err, cpx.ErrUnconfirmed) {
 			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		}
 		return nil, status.Error(codes.InvalidArgument, err.Error())

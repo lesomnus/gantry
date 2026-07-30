@@ -60,14 +60,17 @@ func (w *Copier) runStep(ctx context.Context, job *Job, p *execPlan, st *execSte
 
 	for _, at := range st.attempts {
 		if !satisfied(at.needs, delivered) {
-			// The route this attempt reads from was not filled, so reading it would
-			// only fail. Not an error: the next attempt is the alternative.
-			log.From(ctx).Debug("skipping an attempt whose route did not run",
+			// The route this attempt would have read was not filled, so reading it
+			// would only fail. Not an error — the next attempt is the alternative —
+			// but it is exactly the fact "a cache gantry chose is not being used",
+			// which is what the counter and the audit event exist to surface.
+			log.From(ctx).Info("giving up on a source whose route did not run",
 				slog.String("job", job.ID), slog.Int("step", st.idx), slog.String("source", at.src.Name))
+			w.recordGivingUp(ctx, job, at, next(st.attempts, at), fmt.Errorf("the hop that would have filled %s did not deliver", at.src.Name))
 			continue
 		}
 		if prev != nil {
-			w.recordLeaving(ctx, job, prev, at, errs[len(errs)-1])
+			w.recordGivingUp(ctx, job, prev, at, errs[len(errs)-1])
 		}
 		for {
 			err := w.runAttempt(ctx, job, st, at)
@@ -107,7 +110,13 @@ func (w *Copier) runAttempt(ctx context.Context, job *Job, st *execStep, at *exe
 	if err := m.run(ctx, job, t); err != nil {
 		return w.failTransfer(job, t, err)
 	}
-	w.store.Update(job.ID, func(*Job) { t.State = "done" })
+	w.store.Update(job.ID, func(j *Job) {
+		t.State = "done"
+		// A failed attempt may have sealed the job against new callers while it was
+		// winding down. It recovered, so lift that: an identical submit should join
+		// this move rather than start a second copy of work already done.
+		j.sealed = false
+	})
 	return nil
 }
 
@@ -146,22 +155,42 @@ func satisfied(needs []int, delivered map[int]bool) bool {
 	return true
 }
 
-// recordLeaving reports that a step is moving on from one source to another. The
-// reason comes from the attempt being taken up, not from counting rows: a
-// wait-for-fill retry adds a row without consuming an attempt, so counting would
-// desynchronise and report the wrong reason.
-func (w *Copier) recordLeaving(ctx context.Context, job *Job, from, to *execAttempt, cause error) {
-	reason := string(to.why)
+// next is the attempt after at, or nil when it is the last.
+func next(attempts []*execAttempt, at *execAttempt) *execAttempt {
+	for i, c := range attempts {
+		if c == at && i+1 < len(attempts) {
+			return attempts[i+1]
+		}
+	}
+	return nil
+}
+
+// recordGivingUp reports that a source gantry meant to use is not being used. The
+// reason names WHAT WAS GIVEN UP, not what is being taken up: abandoning a cache
+// gantry chose for itself (`route`) is a different operational fact from leaving
+// the source the caller named for the origin (`origin`), and it is the former that
+// says "the cache is not earning its keep".
+//
+// It is deliberately not derived from counting rows — a wait-for-fill retry adds a
+// row without consuming an attempt, so counting desynchronises — and it fires for
+// an attempt gantry skipped as well as one that failed, because a route that never
+// ran is exactly as unused as one that failed.
+func (w *Copier) recordGivingUp(ctx context.Context, job *Job, from, to *execAttempt, cause error) {
+	reason := string(from.why)
+	toName := "(none)"
+	if to != nil {
+		toName = to.src.Name
+	}
 	w.metrics.fallback.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("from", from.src.Name),
-		attribute.String("to", to.src.Name),
+		attribute.String("to", toName),
 		attribute.String("reason", reason)))
 	msg := cause.Error()
-	log.From(ctx).Warn("trying another source",
+	log.From(ctx).Warn("giving up on a source",
 		slog.String("job", job.ID), slog.String("ref", job.Ref),
-		slog.String("from", from.src.Name), slog.String("to", to.src.Name),
+		slog.String("from", from.src.Name), slog.String("to", toName),
 		slog.String("reason", reason), slog.String("error", msg))
 	if w.rec != nil {
-		w.rec.JobFellBack(job.ID, job.Ref, from.src.Name, to.src.Name, msg)
+		w.rec.JobFellBack(job.ID, job.Ref, from.src.Name, toName, msg)
 	}
 }
