@@ -3,6 +3,7 @@ package cpx
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/xport"
@@ -106,6 +108,45 @@ func upstreamPlan(ctx context.Context, source config.StoreConfig, ref name.Refer
 		return nil, err
 	}
 	return resolvePlan(ctx, ref, platforms, baseOpts(ctx, registryAuth(source), rt))
+}
+
+// resolveDigest asks a store what a reference means right now, returning the
+// manifest/index digest. Used to settle a tag at the AUTHORITY before gantry
+// considers reading the image from somewhere nearer: one manifest request against
+// bytes that would otherwise be transferred in full, and it is what makes a
+// nearer copy provably the same content rather than merely the same tag.
+func resolveDigest(ctx context.Context, store config.StoreConfig, ref name.Reference) (string, error) {
+	if dg, ok := ref.(name.Digest); ok {
+		return dg.DigestStr(), nil // already settled
+	}
+	rt, err := xport.Transport(store)
+	if err != nil {
+		return "", err
+	}
+	desc, err := remote.Head(ref, baseOpts(ctx, registryAuth(store), rt)...)
+	if err != nil {
+		return "", z.Err(err, "resolve %q at %q", ref.Name(), store.Name)
+	}
+	return desc.Digest.String(), nil
+}
+
+// holdsDigest reports whether a store already serves this exact manifest. Probing
+// by digest rather than by tag is the point: it answers "does this store hold the
+// content the authority just named", with no question of which image its tag
+// happens to point at.
+func holdsDigest(ctx context.Context, store config.StoreConfig, ref name.Digest) (bool, error) {
+	rt, err := xport.Transport(store)
+	if err != nil {
+		return false, err
+	}
+	if _, err := remote.Head(ref, baseOpts(ctx, registryAuth(store), rt)...); err != nil {
+		var te *transport.Error
+		if errors.As(err, &te) && (te.StatusCode == http.StatusNotFound || len(te.Errors) > 0) {
+			return false, nil // a registry answering "no" is not a failure
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // fetchAnchor fetches the raw manifest/index bytes the digest reference names

@@ -422,6 +422,12 @@ func (w *Copier) plan(ctx context.Context, req Request) (*execPlan, error) {
 	if err := w.bindDelivery(ctx, p, deliver, base.Context().RegistryStr()); err != nil {
 		return nil, err
 	}
+	// Routing last: it reads the authority to settle the tag, which re-anchors
+	// every attempt built above, and it prepends its own read of the cache ahead
+	// of the source the caller named.
+	if err := w.route(ctx, p, req); err != nil {
+		return nil, err
+	}
 	if err := p.validate(); err != nil {
 		return nil, z.Err(err, "plan")
 	}
@@ -503,5 +509,202 @@ func (w *Copier) bindDelivery(ctx context.Context, p *execPlan, st *execStep, or
 		}
 	}
 	st.attempts = append(st.attempts, at)
+	return nil
+}
+
+// route inserts a nearer copy of the source into the plan, when the source
+// declares one. It is gantry's own optimization: the caller neither named the
+// cache nor sees a different result, so nothing here may change what the job
+// delivers — only how many times the authority is read.
+//
+// The shape depends on one probe:
+//
+//	warm cache   step 0: target ◀── [cache, source]
+//	cold cache   step 0: cache  ◀── [source]                 (optional)
+//	             step 1: target ◀── [cache needs:0, source]
+//
+// Either way the source the caller asked for stays in the list, so a route that
+// does not work is not a failure — it costs one abandoned attempt.
+func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
+	l := log.From(ctx)
+	deliver := p.last()
+	cacheName := p.source.Cache
+	if cacheName == "" {
+		return w.requireAuthority(p, req, false)
+	}
+	// Degenerate shapes. None of them is a misconfiguration: an operator declares
+	// the cache once on the origin, and jobs that happen to name either end of the
+	// route are ordinary.
+	switch {
+	case cacheName == p.target.Name():
+		// Filling the cache IS the copy the caller asked for.
+		return w.requireAuthority(p, req, false)
+	case cacheName == p.source.Name:
+		return w.requireAuthority(p, req, false)
+	}
+	cacheDest, err := resolveDest(w.stores, cacheName)
+	if err != nil {
+		// Validated at config load, so this is a store that stopped resolving.
+		l.Warn("not routing: the cache store does not resolve",
+			slog.String("cache", cacheName), slog.String("error", err.Error()))
+		return w.requireAuthority(p, req, false)
+	}
+	if _, ok := cacheDest.(pusher); !ok {
+		l.Warn("not routing: the cache store cannot hold an image", slog.String("cache", cacheName))
+		return w.requireAuthority(p, req, false)
+	}
+	cacheCfg, _ := w.stores.Config(cacheName)
+
+	// Settle the tag at the authority. Everything downstream is anchored to this:
+	// it makes the nearer copy provably the same content, and it is what the probe
+	// asks about. One manifest request against bytes that would otherwise move in
+	// full.
+	digest, derr := resolveDigest(ctx, p.source, p.authorityRef)
+	if derr != nil {
+		// The authority is unreachable. Reading the cache by tag is then the useful
+		// answer — the site registry keeps working while the cloud one does not —
+		// and it is the one case where the caller can receive content the authority
+		// never confirmed, so require_authority governs it.
+		if aerr := w.requireAuthority(p, req, true); aerr != nil {
+			// Both halves matter: that it is fatal, and why the authority went quiet.
+			return fmt.Errorf("%w: %w", aerr, derr)
+		}
+		l.Warn("the authority could not confirm the reference; reading the cache by tag",
+			slog.String("ref", p.authorityRef.Name()), slog.String("cache", cacheName),
+			slog.String("error", derr.Error()))
+		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+	}
+	p.pin(digest)
+	if err := w.repin(p, deliver); err != nil {
+		return err
+	}
+	if err := w.requireAuthority(p, req, false); err != nil {
+		return err
+	}
+
+	// A pull-through cache fills itself when it is read, so reading it IS the fill:
+	// no step, no probe, and no write access to it required. The inverse is a hard
+	// guard — a fill step targeting a proxy would read the whole image into
+	// io.Discard and commit nothing.
+	if rd, isRegistry := cacheDest.(*registryDest); isRegistry && rd.isProxy() {
+		l.Debug("routing through a pull-through cache: reading it is what fills it",
+			slog.String("cache", cacheName))
+		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+	}
+
+	cacheRef, err := w.planAttemptRef(p, cacheCfg)
+	if err != nil {
+		return err
+	}
+	dg, ok := cacheRef.(name.Digest)
+	if !ok {
+		return fmt.Errorf("routing needs a digest-anchored reference at %q", cacheName)
+	}
+	warm, perr := holdsDigest(ctx, cacheCfg, dg)
+	if perr != nil {
+		l.Warn("not routing: the cache could not be probed",
+			slog.String("cache", cacheName), slog.String("error", perr.Error()))
+		return nil
+	}
+	if warm {
+		l.Debug("routing through a cache that already holds the image",
+			slog.String("cache", cacheName), slog.String("digest", digest))
+		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+	}
+
+	// Cold: fill it first. The fill lands under the TAG, committed verbatim, so the
+	// authority's digest resolves from the cache too — which is what the next job's
+	// probe asks about, and what anchors every later hop. A rebuilt
+	// (platform-filtered) index would have a different digest and satisfy neither.
+	tagRef, err := name.ParseReference(cacheCfg.Host+"/"+p.repo+p.id, w.refOpts(cacheCfg)...)
+	if err != nil {
+		return z.Err(err, "cache ref at %q", cacheName)
+	}
+	fill := &execStep{
+		dst: cacheDest, ref: tagRef,
+		verbatim:  true, // so the authority's digest resolves from the cache
+		platforms: nil,  // a verbatim commit writes every child manifest
+		fills:     tagRef.Name(),
+		optional:  true, // gantry added this step for itself
+	}
+	fill.newMover = newCopyMover(fill)
+	src, err := w.planAttemptRef(p, p.source)
+	if err != nil {
+		return err
+	}
+	fill.attempts = []*execAttempt{{src: p.source, ref: src, why: whyPlanned}}
+
+	p.steps = []*execStep{fill, deliver}
+	for i, st := range p.steps {
+		st.idx = i
+	}
+	l.Debug("routing through a cache that must be filled first",
+		slog.String("cache", cacheName), slog.String("digest", digest))
+	return w.addRouteAttempt(ctx, p, deliver, cacheCfg, []int{fill.idx})
+}
+
+// addRouteAttempt puts a read of the cache at the front of the delivery step's
+// attempts, ahead of the source the caller named.
+func (w *Copier) addRouteAttempt(ctx context.Context, p *execPlan, st *execStep, cache config.StoreConfig, needs []int) error {
+	at := &execAttempt{src: cache, why: whyRoute, needs: needs}
+	ref, err := w.planAttemptRef(p, cache)
+	if err != nil {
+		return err
+	}
+	at.ref = ref
+	// The reference a fill of the cache publishes, so a read of it that misses can
+	// wait for a job filling it right now.
+	if tagRef, err := name.ParseReference(cache.Host+"/"+p.repo+p.id, w.refOpts(cache)...); err == nil {
+		at.waitFill = tagRef.Name()
+		if pd, ok := st.dst.(puller); ok {
+			if at.pullRef, err = pd.pullRef(tagRef, cache); err != nil {
+				return err
+			}
+			for _, other := range st.attempts {
+				if other.pullRef == at.pullRef {
+					// pull_host collapses every source onto one host as far as the
+					// daemon is concerned, so this attempt would read the same place
+					// twice. Not an error — nobody asked for the route.
+					log.From(ctx).Debug("not routing: the engine reaches every source by one host",
+						slog.String("engine", st.dst.Name()), slog.String("ref", at.pullRef))
+					return nil
+				}
+			}
+		}
+	}
+	st.attempts = append([]*execAttempt{at}, st.attempts...)
+	return nil
+}
+
+// repin re-derives everything that was built from the authority reference before
+// the authority settled its tag. Only the delivery step's own attempts exist at
+// this point; its in-store ref is deliberately left on the tag.
+func (w *Copier) repin(p *execPlan, st *execStep) error {
+	for _, at := range st.attempts {
+		ref, err := w.planAttemptRef(p, at.src)
+		if err != nil {
+			return err
+		}
+		at.ref = ref
+	}
+	return nil
+}
+
+// requireAuthority enforces the job's require_authority decision. unconfirmed
+// says the authority could not settle what the reference means, which is the only
+// case where a caller can receive content it never confirmed — so it is the only
+// case this refuses. It is a no-op for a job that is not routed, since there the
+// source the caller named IS the authority.
+func (w *Copier) requireAuthority(p *execPlan, req Request, unconfirmed bool) error {
+	if !unconfirmed {
+		return nil
+	}
+	strict := w.wc.RequireAuthority
+	if req.RequireAuthority != nil {
+		strict = *req.RequireAuthority
+	}
+	if strict {
+		return fmt.Errorf("require_authority: %q could not confirm what %q means", p.source.Name, p.repo+p.id)
+	}
 	return nil
 }

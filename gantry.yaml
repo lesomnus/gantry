@@ -54,6 +54,16 @@ stores:
   #     key: "/etc/gantry/client.key"   # private key, PEM (PKCS#8 / EC / RSA)
   #   ca_cert: "/etc/gantry/ca.crt"
 
+  # A registry that holds copies of another one's content — a site registry in
+  # front of a cloud one. Declared on the store being cached, so it is stated once
+  # per origin rather than repeated per destination. gantry may then satisfy a job
+  # that reads from `docker.io` by going through `site` instead, filling it first
+  # if it does not already hold the image: the origin is read once rather than
+  # once per destination. The caller neither names `site` nor sees a different
+  # result. See docs/stores.md#routing-a-copy-through-a-cache.
+  #   docker.io: { kind: "oci", cache: "site" }
+  # site: { kind: "oci", host: "registry.corp.internal", username: gantry, password: "..." }
+
   # Cache registry gantry fills and engines pull from.
   cache:
     kind: "oci"
@@ -139,6 +149,12 @@ worker:
   # Costs nothing when the source can serve the image — the wait happens only
   # after a real miss. 0 disables waiting.
   source_wait: "0s"
+  # Default for a job that does not set `require_authority`: refuse a job whose
+  # source could not confirm what its tag means, instead of reading a nearer cache
+  # of that store on faith. Only consulted for a job gantry routed through such a
+  # cache. Default false — a cache that keeps working while the registry behind it
+  # does not is usually the point of having one.
+  require_authority: false
 
 # Server configuration (used by the `serve` subcommand).
 serve:

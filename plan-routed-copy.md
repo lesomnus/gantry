@@ -1,6 +1,6 @@
 # Plan — routing a copy through a store's cache (A → A' → B)
 
-Status: **Phase 1 landed** · Phase 2 next · follows `plan-source-fallback.md` (already landed on `feat/source-fallback`).
+Status: **all phases landed** · follows `plan-source-fallback.md` (already landed on `feat/source-fallback`).
 
 ## 1. Goal
 
@@ -405,8 +405,14 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 | 1.1 | `Transfer.Step` + `LAYER_STATE_COPIED` (one proto regen) | ☑ | the enum gap was live: every registry copy reported `LAYER_STATE_UNSPECIFIED` per layer |
 | 1.2 | `execPlan`/`execStep`/`execAttempt` + `mover` | ☑ | `plan.go` / `move.go` / `run.go`; `jobExec`, `sourceBinding`, `runCopy`, `runPull`, `pullFrom`, `bindSources`, `sourceFallbackWorthy` all deleted |
 | 1.3 | `plan.validate()` + tests | ☑ | delivery-only-last, attempt bound, indices, runner present |
-| — | **Phase 2 — the route** | ☐ | |
-| — | **Phase 3 — `require_authority`** | ☐ | |
+| — | **Phase 2 — the route** | ☑ | |
+| 2.1 | `resolveDigest` / `holdsDigest` source helpers | ☑ | one manifest request at the authority, one digest probe at the cache |
+| 2.2 | `route()`: probe, fill step, route attempt, degenerate rules | ☑ | 14 unit cases + 2 L1 e2e |
+| 2.3 | `PlanResult.Steps` + `JobPlanResponse.steps` | ☑ | the resolved route, visible before submitting |
+| 2.4 | Docs | ☑ | `stores.md` (new section), `api.md` (transfers-as-hops contract, Plan), `observability.md`, `README.md`, `gantry.yaml` |
+| — | **Phase 3 — `require_authority`** | ☑ | |
+| 3.1 | `Job.require_authority` = 22 + `worker.require_authority` | ☑ | one regen with the Plan route messages |
+| 3.2 | Enforcement + RPC plumbing + tests | ☑ | explicit request beats the server default; no-op without a route |
 
 ### Findings from the recon pass (folded into the design, not yet implemented)
 
@@ -559,6 +565,25 @@ structure had been hiding:
 `optional` step's failure, and correcting a seeded row's source — because **no plan yet
 contains any of them**: they are exactly what Phase 2 introduces, and its tests are what will
 pin them. Noted here so a green suite is not mistaken for coverage of unbuilt behaviour.
+
+### Mutation coverage after Phases 2–3
+
+Everything Phase 1 left unpinned is now caught: pruning by `needs`, tolerating an `optional`
+hop's failure, correcting a seeded row's source, and collapsing a proxy cache to one hop. The
+fill hop's own settings (`verbatim`, un-narrowed `platforms`, `optional`, the tag it publishes)
+are pinned on the plan.
+
+Two gaps stated plainly rather than papered over:
+
+- **`plan.validate()`'s call site is unpinned.** The function is unit-tested directly, but no
+  plan `plan()` currently builds violates an invariant, so deleting the call changes nothing.
+  It is a construction guard; it earns its keep the next time a step is added.
+- **The fill's `verbatim` cannot be caught end to end with an in-memory registry.** Both of
+  its reasons are properties of a real one: a rebuilt index differs only when the source index
+  has something the rebuild drops (annotations, attestation children) — a plain two-platform
+  index round-trips byte-identically — and "a registry rejects an index whose children are
+  missing" is a validation the fake does not perform. Hence the plan-level assertion, with the
+  reasoning written next to it.
 
 ### Log
 

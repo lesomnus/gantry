@@ -680,6 +680,7 @@ type Job struct {
 	xxx_hidden_Verification     *Verification          `protobuf:"bytes,18,opt,name=verification"`
 	xxx_hidden_Transfers        *[]*Transfer           `protobuf:"bytes,19,rep,name=transfers"`
 	xxx_hidden_CopyReferrers    bool                   `protobuf:"varint,20,opt,name=copy_referrers,json=copyReferrers"`
+	xxx_hidden_RequireAuthority bool                   `protobuf:"varint,22,opt,name=require_authority,json=requireAuthority"`
 	xxx_hidden_FallbackToOrigin bool                   `protobuf:"varint,21,opt,name=fallback_to_origin,json=fallbackToOrigin"`
 	XXX_raceDetectHookData      protoimpl.RaceDetectHookData
 	XXX_presence                [1]uint32
@@ -819,6 +820,13 @@ func (x *Job) GetCopyReferrers() bool {
 	return false
 }
 
+func (x *Job) GetRequireAuthority() bool {
+	if x != nil {
+		return x.xxx_hidden_RequireAuthority
+	}
+	return false
+}
+
 func (x *Job) GetFallbackToOrigin() bool {
 	if x != nil {
 		return x.xxx_hidden_FallbackToOrigin
@@ -884,12 +892,17 @@ func (x *Job) SetTransfers(v []*Transfer) {
 
 func (x *Job) SetCopyReferrers(v bool) {
 	x.xxx_hidden_CopyReferrers = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 16)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 17)
+}
+
+func (x *Job) SetRequireAuthority(v bool) {
+	x.xxx_hidden_RequireAuthority = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 15, 17)
 }
 
 func (x *Job) SetFallbackToOrigin(v bool) {
 	x.xxx_hidden_FallbackToOrigin = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 15, 16)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 16, 17)
 }
 
 func (x *Job) HasSource() bool {
@@ -941,11 +954,18 @@ func (x *Job) HasCopyReferrers() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 14)
 }
 
-func (x *Job) HasFallbackToOrigin() bool {
+func (x *Job) HasRequireAuthority() bool {
 	if x == nil {
 		return false
 	}
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 15)
+}
+
+func (x *Job) HasFallbackToOrigin() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 16)
 }
 
 func (x *Job) ClearSource() {
@@ -977,8 +997,13 @@ func (x *Job) ClearCopyReferrers() {
 	x.xxx_hidden_CopyReferrers = false
 }
 
-func (x *Job) ClearFallbackToOrigin() {
+func (x *Job) ClearRequireAuthority() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 15)
+	x.xxx_hidden_RequireAuthority = false
+}
+
+func (x *Job) ClearFallbackToOrigin() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 16)
 	x.xxx_hidden_FallbackToOrigin = false
 }
 
@@ -1049,6 +1074,15 @@ type Job_builder struct {
 	// request set this field explicitly, and otherwise just does not apply to that
 	// job. On a job record this is the EFFECTIVE decision: false whenever the job
 	// has no second source to reach, whatever the request said.
+	// Refuse this job when the store named as `source` could not confirm what
+	// `ref` means, instead of reading a nearer cache of that store on faith. It is
+	// only ever consulted for a job gantry routed through such a cache (see the
+	// store `cache` field): for an unrouted job the source the caller named IS the
+	// authority, and for an already digest-pinned job there is nothing to confirm.
+	// Absent = server default (worker.require_authority), which is false — a cache
+	// that keeps working while the registry behind it does not is usually the point
+	// of having one.
+	RequireAuthority *bool
 	FallbackToOrigin *bool
 }
 
@@ -1071,11 +1105,15 @@ func (b0 Job_builder) Build() *Job {
 	x.xxx_hidden_Verification = b.Verification
 	x.xxx_hidden_Transfers = &b.Transfers
 	if b.CopyReferrers != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 16)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 17)
 		x.xxx_hidden_CopyReferrers = *b.CopyReferrers
 	}
+	if b.RequireAuthority != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 15, 17)
+		x.xxx_hidden_RequireAuthority = *b.RequireAuthority
+	}
 	if b.FallbackToOrigin != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 15, 16)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 16, 17)
 		x.xxx_hidden_FallbackToOrigin = *b.FallbackToOrigin
 	}
 	return m0
@@ -1110,7 +1148,7 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\x06layers\x18\t \x03(\v2\r.gantry.LayerR\x06layers\x12\x14\n" +
 	"\x05error\x18\n" +
 	" \x01(\tR\x05error\x12\x12\n" +
-	"\x04step\x18\v \x01(\rR\x04step\"\xa9\x06\n" +
+	"\x04step\x18\v \x01(\rR\x04step\"\xe3\x06\n" +
 	"\x03Job\x12\x19\n" +
 	"\x02id\x18\x01 \x01(\tB\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x02id\x12/\n" +
 	"\x06labels\x18\a \x03(\v2\x17.gantry.Job.LabelsEntryR\x06labels\x12\x18\n" +
@@ -1128,7 +1166,8 @@ const file_gantry_job_proto_rawDesc = "" +
 	"\x05error\x18\x11 \x01(\tR\x05error\x128\n" +
 	"\fverification\x18\x12 \x01(\v2\x14.gantry.VerificationR\fverification\x12.\n" +
 	"\ttransfers\x18\x13 \x03(\v2\x10.gantry.TransferR\ttransfers\x122\n" +
-	"\x0ecopy_referrers\x18\x14 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x129\n" +
+	"\x0ecopy_referrers\x18\x14 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\rcopyReferrers\x128\n" +
+	"\x11require_authority\x18\x16 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\x10requireAuthority\x129\n" +
 	"\x12fallback_to_origin\x18\x15 \x01(\bB\v\xea\x82\x16\x02@\x01\xaa\x01\x02\b\x01R\x10fallbackToOrigin\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

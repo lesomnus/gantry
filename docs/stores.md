@@ -284,6 +284,132 @@ The net effect: a jobspec pinned to `repo@sha256:INDEX` resolves locally after
 the move — `docker image inspect` hits, and a `force_pull=false` deployment pulls
 nothing.
 
+## Routing a copy through a cache
+
+A registry can declare that another one holds copies of its content:
+
+```yaml
+stores:
+  "cr.example.com":
+    kind: oci
+    cache: "site"        # reading from me may go through this store
+
+  site:
+    kind: oci
+    host: registry.corp.internal
+```
+
+gantry may then satisfy `local ◀── cr.example.com` by going through `site`, so the
+cloud registry is read **once** rather than once per destination. The caller neither
+names `site` nor sees a different result — this is gantry's own cost optimization,
+not a change to what the job means.
+
+`cache` is declared on the store being cached: once per origin rather than repeated
+per destination, and where the cost being avoided actually lives. It must name a
+declared registry, cannot name the store itself, and is rejected on an engine store
+(an engine is never a job's source).
+
+### One job, two hops
+
+A routed move is **one job** whose `transfers` are its hops, distinguished by
+`Transfer.step`:
+
+```
+Add {ref: "cr.example.com/app:1", source: "cr.example.com", target: local}
+
+  transfers[0]  step 0   site  ◀── cr.example.com   done      ← the fill
+  transfers[1]  step 1   local ◀── site             done      ← the delivery
+  job           done     source: cr.example.com  target: local
+```
+
+One job id, one `Watch` stream carrying both hops' per-layer progress, ordering
+guaranteed by construction. The job's own `source`/`target` stay what the caller
+asked for; the hops say what happened.
+
+### The authority settles the tag
+
+Before routing, gantry asks the **source** — the authority — what the reference
+means right now, and anchors every hop to the digest it answers with. That is one
+manifest request against bytes that would otherwise move in full, and it is what
+makes a nearer copy provably the *same content* rather than merely the same tag.
+
+The cache is then probed for that digest, which decides the shape:
+
+| probe | plan |
+| ----- | ---- |
+| the cache holds it | one hop: `target ◀── [cache, source]` |
+| it does not | two hops: `cache ◀── source`, then `target ◀── [cache, source]` |
+
+Either way the source the caller named stays in the list, so **a route that does
+not work is not a failure** — it costs one abandoned attempt and the direct copy
+runs. That is why there is no switch for "may gantry write to the cache": the
+answer is whether it works.
+
+### The fill copies everything, verbatim
+
+The fill hop commits the authority's manifest **byte for byte** and copies **every
+platform**, whatever the job asked for. Both are required rather than chosen:
+
+- A rebuilt (platform-filtered) index is a *different digest for the same tag*, so
+  the cache would never satisfy the probe and would never be read.
+- A verbatim commit references every child manifest, and a registry rejects an
+  index whose children are missing.
+
+So a narrowed routed copy still fills the cache completely. The caller's own hop
+keeps the narrowing; only the shared cache is filled whole, which for a shared
+cache is the desirable trade.
+
+The fill lands under the **tag**, so both the tag and the authority's digest resolve
+from the cache afterwards — the digest is what the next job probes for.
+
+### When it does not route
+
+None of these is a misconfiguration; an operator declares the cache once and jobs
+that touch either end of the route are ordinary:
+
+- The job's **target is the cache** — filling it already *is* the requested copy.
+- The job's **source is the cache** — nothing to route through.
+- The cache is **`mode: proxy`** — reading a pull-through cache is what fills it, so
+  routing collapses to a single hop sourced at the cache: no fill hop, no probe, no
+  write access needed. (gantry never *pushes* into a proxy store: that would read
+  the whole image and commit nothing.)
+- The cache **cannot be probed** — without an answer there is nothing to decide
+  with, so the job runs unrouted.
+- An engine target whose **`pull_host`** collapses every source onto one host, so
+  the daemon would read the same place twice.
+
+A hop gantry generates is never itself routed, even if its own source declares a
+cache. One level, so no graph is walked and no cycle can form.
+
+### When the authority cannot be reached
+
+Then there is no digest and no probe, and gantry reads the cache **by tag** — the
+site registry keeps working while the cloud one does not. It is also the only case
+where a caller can receive content the authority never confirmed, so it is opt-out:
+
+```
+require_authority: bool     # per job; server default worker.require_authority
+```
+
+`true` refuses such a job instead. It is a no-op for a job that is not routed, since
+there the source the caller named *is* the authority.
+
+### Consequences worth knowing
+
+- **A routed job moves the image twice**, so `gantry.bytes` and the `job_done`
+  audit record report roughly twice its size. That is honest — the bytes did move —
+  but worth knowing when reading a routed job's numbers.
+- **`gantry.job.fallback` counts a route being abandoned as well as a source
+  fallback**, distinguished by its `reason` attribute (`route` vs `origin`). A route
+  that never works shows up there rather than as failing jobs.
+- **An abandoned route's already-pushed blobs are left in the cache.** They are
+  content-addressed, so the next attempt and the direct copy both reuse them; a
+  registry with aggressive unreferenced-blob GC turns an abandonment into a
+  re-transfer.
+- **`JobService.Plan` reports the resolved route** (`steps`), so the shape is
+  visible before submitting. It is advisory: coalescing is request-level, so a
+  submit can be served by an active job that probed differently.
+
 ## Falling back to the origin
 
 The `remote → cache → engine` flow is two jobs, and nothing links them: there is

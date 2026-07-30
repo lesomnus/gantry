@@ -58,7 +58,8 @@ type harnessCfg struct {
 	rules       []config.RetentionRule
 	verify      *config.VerifyConfig
 	storeVerify map[string]*config.StoreVerify
-	enforce     bool // enable serve.enforce (quarantine) + a verdict cache on `edge`
+	enforce     bool   // enable serve.enforce (quarantine) + a verdict cache on `edge`
+	remoteCache string // declare this store as `remote`'s cache, so copies route through it
 }
 
 func withCacheMode(m string) harnessOpt { return func(c *harnessCfg) { c.cacheMode = m } }
@@ -68,6 +69,12 @@ func withRules(r ...config.RetentionRule) harnessOpt {
 	return func(c *harnessCfg) { c.rules = r }
 }
 func withVerify(v config.VerifyConfig) harnessOpt { return func(c *harnessCfg) { c.verify = &v } }
+
+// withRemoteCache declares a store as `remote`'s cache, so a copy that reads from
+// the remote may be routed through it.
+func withRemoteCache(store string) harnessOpt {
+	return func(c *harnessCfg) { c.remoteCache = store }
+}
 
 // withEnforce turns on runtime enforcement (quarantine) for the `edge` engine
 // store and a verdict cache. Combine with withVerify to supply the trust store.
@@ -117,7 +124,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		cacheStore.Host = cacheHost
 		cacheStore.Insecure = true
 	}
-	remoteStore := config.StoreConfig{Kind: "oci", Host: remoteHost, Insecure: true}
+	remoteStore := config.StoreConfig{Kind: "oci", Host: remoteHost, Insecure: true, Cache: hc.remoteCache}
 	if hc.storeVerify != nil {
 		if v := hc.storeVerify["remote"]; v != nil {
 			remoteStore.Verify = v

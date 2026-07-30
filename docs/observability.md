@@ -66,10 +66,10 @@ no-ops until the `meter` provider has an exporter.
 
 | Instrument | Kind | Unit | Attributes | Meaning |
 |---|---|---|---|---|
-| `gantry.bytes` | counter | `By` | — | Bytes moved between stores, summed once per finished job. |
+| `gantry.bytes` | counter | `By` | — | Bytes moved between stores, summed once per finished job — across every hop and every attempt, so a routed job reports roughly twice its image size and an abandoned attempt's partial transfer counts too. |
 | `gantry.job.duration` | histogram | `s` | `state` (`done`/`failed`/`canceled`) | Wall-clock duration of each job, labelled by its terminal state. |
 | `gantry.jobs.active` | up-down counter | — | — | Jobs currently executing (in flight). |
-| `gantry.job.fallback` | counter | — | `from`, `to` (store names) | An engine pull was re-attempted against another source because `from` could not serve it. Non-zero means images are reaching nodes from somewhere other than where the operator pointed them — a cache quietly not being used looks like success everywhere else. See [stores.md](stores.md#falling-back-to-the-origin). |
+| `gantry.job.fallback` | counter | — | `from`, `to` (store names), `reason` (`origin`/`route`) | A hop was re-attempted against another source because `from` could not serve it. `reason=origin` is a source fallback; `reason=route` is gantry abandoning a cache it chose to read through. Non-zero means images are reaching nodes from somewhere other than where the operator pointed them — a cache quietly not being used looks like success everywhere else. See [stores.md](stores.md#falling-back-to-the-origin). |
 | `gantry.job.source_wait` | histogram | `s` | `outcome` (`served`/`timeout`/`canceled`/`skipped`) | Time an engine pull spent waiting for an in-flight job filling its source (`worker.source_wait`). `served` means the wait paid off; a lot of `timeout` means the bound is too short or the fills are too slow; `skipped` means no wait slot was free. |
 | `gantry.jobs` | observable gauge | — | `state` (`pending`/`running`/`done`/`failed`/`canceled`) | Count of in-memory job records by state — the live registry the `job_ttl` sweeper trims. |
 | `gantry.queue.depth` | observable gauge | — | — | Jobs waiting in the pending-job queue (visible before a full queue starts rejecting with `RESOURCE_EXHAUSTED`). |

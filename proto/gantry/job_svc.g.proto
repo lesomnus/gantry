@@ -61,6 +61,7 @@ message JobAddRequest {
   Verification verification = 18;
   repeated Transfer transfers = 19;
   bool copy_referrers = 20;
+  bool require_authority = 22;
   bool fallback_to_origin = 21;
 }
 
@@ -91,6 +92,7 @@ message JobSelect {
   bool verification = 18;
   bool transfers = 19;
   bool copy_referrers = 20;
+  bool require_authority = 22;
   bool fallback_to_origin = 21;
 }
 
@@ -150,6 +152,9 @@ message JobPlanRequest {
   // Engine target only: pull from the registry named in `ref` when `source`
   // cannot serve the image; absent = server default.
   bool fallback_to_origin = 7;
+  // Refuse the job when `source` could not confirm what `ref` means, rather
+  // than reading a nearer cache of it on faith; absent = server default.
+  bool require_authority = 8;
 }
 
 message JobPlanResponse {
@@ -180,4 +185,43 @@ message JobPlanResponse {
   // `source` already is the origin, or the origin is not addressable from this
   // engine.
   string fallback_ref = 11;
+  // The route the job would run: one entry per hop, in order, each listing the
+  // sources that hop would try. A single hop with one source is the ordinary
+  // move. Advisory — coalescing is request-level, so a submit can be served by
+  // an active job that resolved a different route.
+  repeated PlanStep steps = 12;
+}
+
+// PlanStep is one hop of a planned route. Stores are named rather than embedded:
+// this is preflight output, and StoreService.Get answers everything else about
+// them.
+message PlanStep {
+  // The store this hop fills.
+  string store = 1;
+  // The reference this hop lands in that store; empty for an engine hop, whose
+  // per-source pull reference is the only reference there is.
+  string ref = 2;
+  // Where this hop would read from, in the order it would try them.
+  repeated PlanSource sources = 3;
+  // Set on a hop gantry added for its own benefit, whose failure the job
+  // tolerates.
+  bool optional = 4;
+}
+
+// PlanSource is one place a hop would read from.
+message PlanSource {
+  string store = 1;
+  string ref = 2;
+  // Why this source is in the list.
+  PlanSourceWhy why = 3;
+}
+
+enum PlanSourceWhy {
+  PLAN_SOURCE_WHY_UNSPECIFIED = 0;
+  // The source the caller named.
+  PLAN_SOURCE_WHY_PLANNED = 1;
+  // A nearer copy gantry chose to read through.
+  PLAN_SOURCE_WHY_ROUTE = 2;
+  // The registry named in the job's own ref.
+  PLAN_SOURCE_WHY_ORIGIN = 3;
 }

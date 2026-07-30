@@ -2,6 +2,7 @@ package cpx
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
@@ -218,4 +219,26 @@ func TestNewSourceUnknownMode(t *testing.T) {
 	if _, err := NewSource(config.StoreConfig{}, config.StoreConfig{Name: "target", Kind: "oci", Mode: "bogus"}); err == nil {
 		t.Error("expected error for unknown mode")
 	}
+}
+
+// startReadOnlyRegistry serves reads normally and refuses every write, like a
+// shared registry gantry has pull access to and no push access.
+func startReadOnlyRegistry(t *testing.T) string {
+	t.Helper()
+	inner := registry.New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead:
+			inner.ServeHTTP(w, r)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"errors":[{"code":"DENIED","message":"push access denied"}]}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
 }

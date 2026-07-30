@@ -162,6 +162,12 @@ var eventTypeFromPB = map[pb.EventType]event.Type{
 	pb.EventType_EVENT_TYPE_UNPINNED:      event.Unpinned,
 }
 
+var planWhyToPB = map[string]pb.PlanSourceWhy{
+	"planned": pb.PlanSourceWhy_PLAN_SOURCE_WHY_PLANNED,
+	"route":   pb.PlanSourceWhy_PLAN_SOURCE_WHY_ROUTE,
+	"origin":  pb.PlanSourceWhy_PLAN_SOURCE_WHY_ORIGIN,
+}
+
 var gcDeleteReasonToPB = map[string]pb.GcDeleteReason{
 	"age_exceeded":   pb.GcDeleteReason_GC_DELETE_REASON_AGE_EXCEEDED,
 	"max_n_exceeded": pb.GcDeleteReason_GC_DELETE_REASON_MAX_N_EXCEEDED,
@@ -444,6 +450,21 @@ func planToPB(res cpx.PlanResult) *pb.JobPlanResponse {
 	b.FallbackToOrigin = proto.Bool(res.FallbackToOrigin)
 	if res.FallbackRef != "" {
 		b.FallbackRef = proto.String(res.FallbackRef)
+	}
+	for _, st := range res.Steps {
+		sources := make([]*pb.PlanSource, 0, len(st.Sources))
+		for _, src := range st.Sources {
+			why := planWhyToPB[src.Why]
+			sources = append(sources, pb.PlanSource_builder{
+				Store: proto.String(src.Store), Ref: proto.String(src.Ref), Why: &why,
+			}.Build())
+		}
+		b.Steps = append(b.Steps, pb.PlanStep_builder{
+			Store:    proto.String(st.Store),
+			Ref:      proto.String(st.Ref),
+			Sources:  sources,
+			Optional: proto.Bool(st.Optional),
+		}.Build())
 	}
 	if res.Coalesces != "" {
 		b.Coalesces = proto.String(res.Coalesces)

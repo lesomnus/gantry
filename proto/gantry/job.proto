@@ -190,6 +190,19 @@ message Job {
   // request set this field explicitly, and otherwise just does not apply to that
   // job. On a job record this is the EFFECTIVE decision: false whenever the job
   // has no second source to reach, whatever the request said.
+  // Refuse this job when the store named as `source` could not confirm what
+  // `ref` means, instead of reading a nearer cache of that store on faith. It is
+  // only ever consulted for a job gantry routed through such a cache (see the
+  // store `cache` field): for an unrouted job the source the caller named IS the
+  // authority, and for an already digest-pinned job there is nothing to confirm.
+  // Absent = server default (worker.require_authority), which is false — a cache
+  // that keeps working while the registry behind it does not is usually the point
+  // of having one.
+  bool require_authority = 22 [
+    features.field_presence = EXPLICIT,
+    (orm.field) = {immutable: true}
+  ];
+
   bool fallback_to_origin = 21 [
     features.field_presence = EXPLICIT,
     (orm.field) = {immutable: true}

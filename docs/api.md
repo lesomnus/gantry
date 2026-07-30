@@ -159,6 +159,16 @@ returns the resolved plan:
   narrowed).
 - `fallback_to_origin` — the effective value after the server default is
   applied.
+- `steps` — the route the job would run: one entry per hop, in order, each listing
+  the sources that hop would try and why each is there (`planned` / `route` /
+  `origin`). A single hop with one source is the ordinary move; more than one hop
+  means gantry routed the copy through a cache
+  ([stores.md](stores.md#routing-a-copy-through-a-cache)). Advisory — coalescing is
+  request-level, so a submit can be served by an active job that resolved a
+  different route.
+- `require_authority` is accepted on the request: refuse the job when its source
+  could not confirm what the reference means, rather than reading a nearer cache of
+  it on faith.
 - `fallback_ref` — the ref the engine would be told to pull if `source` could
   not serve the image; empty when the job has no fallback (see
   [stores.md](stores.md#falling-back-to-the-origin)).
@@ -175,11 +185,17 @@ admissibility.
 A `Job`'s `source` and `target` are the stores it was **admitted for** — the caller's
 request, resolved to store names. They are not derived from its `transfers`.
 
-`transfers` says where bytes actually moved, and one job can have several rows: alternatives,
-when the planned source could not serve the image and another was attempted
-([stores.md](stores.md#falling-back-to-the-origin)); and one row per step, when gantry routes
-a move through another store. No single row answers "what was this job for" — and for a
-routed move the first row's target is an intermediate store, not the job's target at all.
+`transfers` says where bytes actually moved, and one job can have several rows, grouped into
+hops by `Transfer.step`. Rows **sharing** a step are alternatives — the hop needed any one of
+them, so a failed row followed by a done row of the same step is one source that could not
+serve the image followed by one that could
+([stores.md](stores.md#falling-back-to-the-origin)). Rows with **different** steps are
+consecutive hops, each of which had to happen
+([stores.md](stores.md#routing-a-copy-through-a-cache)). Steps are non-decreasing in list
+order but not necessarily `0..n-1`: a hop gantry planned and then did not need leaves no row.
+
+No single row answers "what was this job for" — and for a routed move the first row's target
+is an intermediate store, not the job's target at all.
 
 So read `source`/`target` for intent and `transfers[]` for what happened. A job that was
 served by somewhere other than its `source` is flagged by `gantry.job.fallback` and the

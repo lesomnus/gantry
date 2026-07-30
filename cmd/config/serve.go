@@ -516,4 +516,12 @@ type WorkerConfig struct {
 	// the pipeline is serial and nothing can be filling anything while the pull
 	// runs, so a wait only spends its bound before moving on: leave this at 0.
 	SourceWait Duration `yaml:"source_wait"`
+	// RequireAuthority is the default for a job that does not set
+	// require_authority: refuse a job whose authority — the store the caller named
+	// as its source — could not confirm what its tag means, instead of serving
+	// whatever a nearer cache of that store happens to hold. Default false: the
+	// cache keeps working while the registry behind it does not, which is usually
+	// the point of having it. Only ever consulted for a job gantry routed; for an
+	// unrouted job the source the caller named IS the authority.
+	RequireAuthority bool `yaml:"require_authority"`
 }

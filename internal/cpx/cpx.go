@@ -98,6 +98,12 @@ type Request struct {
 	// the job. nil takes the server default (worker.fallback_to_origin).
 	// Engine targets only.
 	FallbackToOrigin *bool
+	// RequireAuthority refuses the job when the store named as its source could
+	// not confirm what the reference means, rather than reading a nearer cache of
+	// that store on faith. nil takes the server default
+	// (worker.require_authority). Only consulted for a job gantry routed through a
+	// cache: an unrouted job reads the authority itself.
+	RequireAuthority *bool
 	// Labels is caller metadata attached to the job for List filtering; it does
 	// not affect the move or coalescing. Each coalesced caller keeps its own.
 	Labels map[string]string
@@ -368,8 +374,7 @@ type PlanResult struct {
 // PlanStep is one hop of a planned route.
 type PlanStep struct {
 	Store string `json:"store"` // the store this hop fills
-	Kind  string `json:"kind" enums:"oci,docker,containerd"`
-	Ref   string `json:"ref"` // the reference this hop lands in that store
+	Ref   string `json:"ref"`   // the reference this hop lands in that store
 	// Sources are the places this hop would read from, in the order they would be
 	// tried.
 	Sources []PlanSource `json:"sources"`
@@ -407,7 +412,7 @@ func (w *Copier) Plan(ctx context.Context, req Request) (PlanResult, error) {
 		FallbackToOrigin: p.fallback,
 	}
 	for _, st := range p.steps {
-		ps := PlanStep{Store: st.dst.Name(), Kind: st.dst.Kind(), Optional: st.optional}
+		ps := PlanStep{Store: st.dst.Name(), Optional: st.optional}
 		if st.ref != nil {
 			ps.Ref = st.ref.Name()
 		}
