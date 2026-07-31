@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/down"
+	"github.com/lesomnus/z"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
@@ -363,12 +364,12 @@ func TestPlanReportsTheFallbackBinding(t *testing.T) {
 func TestEnginePullWaitsForAnInFlightFill(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
 	w, js, origin, cache := fallbackCopier(t, eng)
-	w.wc.SourceWait = config.Duration(10 * time.Second)
+	w.wc.SourceWait = z.Ptr(config.Duration(10 * time.Second))
 	pushImage(t, origin+"/team/app:1", 2)
 
 	// A job that is putting exactly this image into the cache, still running.
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
+	fill.setFills([]string{mustRefName(t, cache+"/team/app:1")})
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}
@@ -425,12 +426,12 @@ func TestEnginePullWaitsForAnInFlightFill(t *testing.T) {
 func TestEnginePullFallsBackWhenTheFillNeverFinishes(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
 	w, js, origin, cache := fallbackCopier(t, eng)
-	w.wc.SourceWait = config.Duration(50 * time.Millisecond)
+	w.wc.SourceWait = z.Ptr(config.Duration(50 * time.Millisecond))
 	eng.failFor = failHost(cache, errors.New("MANIFEST_UNKNOWN: manifest unknown"))
 	pushImage(t, origin+"/team/app:1", 2)
 
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
+	fill.setFills([]string{mustRefName(t, cache+"/team/app:1")})
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}
@@ -464,12 +465,12 @@ func TestEnginePullFallsBackWhenTheFillNeverFinishes(t *testing.T) {
 func TestEnginePullSkipsTheWaitWhenNoSlotIsFree(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
 	w, js, origin, cache := fallbackCopier(t, eng)
-	w.wc.SourceWait = config.Duration(30 * time.Second) // would hang the test if taken
+	w.wc.SourceWait = z.Ptr(config.Duration(30 * time.Second)) // would hang the test if taken
 	eng.failFor = failHost(cache, errors.New("MANIFEST_UNKNOWN: manifest unknown"))
 	pushImage(t, origin+"/team/app:1", 2)
 
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
+	fill.setFills([]string{mustRefName(t, cache+"/team/app:1")})
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}
@@ -502,16 +503,19 @@ func TestEnginePullSkipsTheWaitWhenNoSlotIsFree(t *testing.T) {
 	}
 }
 
-// Waiting is off unless configured: with source_wait unset an in-flight fill is
-// invisible and the pull goes straight to the fallback.
-func TestEnginePullDoesNotWaitWhenSourceWaitIsUnset(t *testing.T) {
+// Waiting is on by default, so turning it OFF has to be expressible: an explicit
+// source_wait of 0 makes an in-flight fill invisible and sends the pull straight
+// to the fallback. (Unset is 30s — that is what collapses a burst — so the two
+// cases must not be the same value.)
+func TestEnginePullDoesNotWaitWhenSourceWaitIsDisabled(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
 	w, js, origin, cache := fallbackCopier(t, eng)
+	w.wc.SourceWait = z.Ptr(config.Duration(0)) // explicitly off, not merely unset
 	eng.failFor = failHost(cache, errors.New("MANIFEST_UNKNOWN: manifest unknown"))
 	pushImage(t, origin+"/team/app:1", 2)
 
 	fill := NewJob("job_fill", origin+"/team/app:1", nil, time.Now())
-	fill.Fills = []string{mustRefName(t, cache+"/team/app:1")}
+	fill.setFills([]string{mustRefName(t, cache+"/team/app:1")})
 	if err := js.Add(fill); err != nil {
 		t.Fatal(err)
 	}

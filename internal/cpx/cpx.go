@@ -39,6 +39,7 @@ type metrics struct {
 	active   metric.Int64UpDownCounter
 	fallback metric.Int64Counter     // engine pulls re-attempted against another source
 	srcWait  metric.Float64Histogram // time spent waiting for an in-flight fill
+	route    metric.Int64Counter     // routing decisions, for jobs whose source declares a cache
 	gauges   metric.Registration     // queue depth/capacity + jobs-by-state observer
 }
 
@@ -59,7 +60,14 @@ func newMetrics(ctx context.Context) *metrics {
 	// not a design one: the outcome label answers it per deployment.
 	srcWait, _ := m.Float64Histogram("gantry.job.source_wait", metric.WithUnit("s"),
 		metric.WithDescription("time an engine pull spent waiting for an in-flight fill of its source"))
-	return &metrics{bytes: bytes, duration: duration, active: active, fallback: fallback, srcWait: srcWait}
+	// A route declined at ADMISSION leaves no other trace: the job is done, the
+	// node has the image, and the only difference is how many times the origin was
+	// read. gantry.job.fallback cannot cover it — that counts a route abandoned at
+	// RUN time — so a permanently dead route would otherwise look exactly like a
+	// healthy one.
+	route, _ := m.Int64Counter("gantry.job.route",
+		metric.WithDescription("routing decisions for jobs whose source declares a cache"))
+	return &metrics{bytes: bytes, duration: duration, active: active, fallback: fallback, srcWait: srcWait, route: route}
 }
 
 // Request is a job submission: move Ref from store Source into store Target.
@@ -102,7 +110,9 @@ type Request struct {
 	// not confirm what the reference means, rather than reading a nearer cache of
 	// that store on faith. nil takes the server default
 	// (worker.require_authority). Only consulted for a job gantry routed through a
-	// cache: an unrouted job reads the authority itself.
+	// cache: an unrouted job reads the authority itself. A source that declares no
+	// cache can never be routed, so the flag is dropped for such a job rather than
+	// splitting it off from an identical one.
 	RequireAuthority *bool
 	// Labels is caller metadata attached to the job for List filtering; it does
 	// not affect the move or coalescing. Each coalesced caller keeps its own.
@@ -291,7 +301,7 @@ func (w *Copier) Submit(req Request) (snap JobSnapshot, created bool, err error)
 	job.As = p.as
 	job.FallbackToOrigin = p.fallback
 	job.RequireAuthority = p.strictAuthority
-	job.Fills = p.fills()
+	job.setFills(p.fills())
 	job.Source, job.Target = p.source.Name, p.target.Name()
 	job.Labels = req.Labels
 	job.Verification = p.verification
@@ -504,7 +514,7 @@ func (w *Copier) run(job *Job) {
 // every worker parked on a fill, nothing would be left to run the fills
 // themselves. A job that cannot take a slot goes straight on to the fallback.
 func (w *Copier) waitForFill(ctx context.Context, job *Job, want string) bool {
-	limit := time.Duration(w.wc.SourceWait)
+	limit := w.wc.SourceWaitOr()
 	if limit <= 0 || want == "" {
 		return false
 	}

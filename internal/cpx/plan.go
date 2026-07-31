@@ -11,6 +11,8 @@ import (
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/z"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // ErrUnconfirmed is returned when require_authority refuses a job because the
@@ -22,6 +24,11 @@ var ErrUnconfirmed = errors.New("the authority could not confirm the reference")
 // maxAttempts bounds how many attempts one job may make in total. Every attempt
 // can move a whole image, so this is a cost bound rather than a loop guard: a
 // plan that would exceed it is rejected at admission, where it is still cheap.
+//
+// It is headroom, not a live constraint: the largest plan plan() can currently
+// build makes FOUR attempts — a fill hop (one) plus a delivery hop whose sources
+// are the route, the caller's own, and the origin (three). The number is written
+// down so the gap is visible; a change that closes it should be deliberate.
 const maxAttempts = 6
 
 // attemptWhy records why an attempt exists. It is not decoration: leaving the
@@ -143,6 +150,11 @@ type execPlan struct {
 	// express is an error the caller hears about while an inherited server default
 	// simply does not apply to this job.
 	fallbackAsked bool
+	// cache is the store this job would be routed through: the first route the
+	// source declares whose scope covers this job's target and repository, or ""
+	// when none does. Resolved once, at admission, because two things need it —
+	// the dedup key's narrowing of strictAuthority, and route() itself.
+	cache string
 	// strictAuthority is the effective require_authority decision. It is part of
 	// the dedup key: a caller that refused content the authority never confirmed
 	// must not be handed a job that accepted it.
@@ -296,10 +308,19 @@ func (w *Copier) plan(ctx context.Context, req Request) (*execPlan, error) {
 	} else if req.FallbackToOrigin != nil && *req.FallbackToOrigin {
 		return nil, fmt.Errorf("fallback_to_origin applies to an engine target; store %q is a registry", p.target.Name())
 	}
+	// Narrowed to sources that declare a cache, the same way the fallback is
+	// narrowed to jobs that actually bound an origin attempt: require_authority is
+	// only ever consulted for a job gantry routed, and only a source with a cache
+	// can be routed — so for every other source the flag is provably inert. Being
+	// the effective value it is what the dedup key uses, so two submits that differ
+	// only in a flag that cannot affect either of them still coalesce instead of
+	// running the same image copy twice.
+	p.cache = p.source.CacheFor(p.target.Name(), p.repo)
 	p.strictAuthority = w.wc.RequireAuthority
 	if req.RequireAuthority != nil {
 		p.strictAuthority = *req.RequireAuthority
 	}
+	p.strictAuthority = p.strictAuthority && p.cache != ""
 
 	// The delivery step, built from the requested (tag) form: a registry target's
 	// in-store ref stays tag-named, and an engine's pull ref is derived from it
@@ -557,33 +578,70 @@ func (w *Copier) bindDelivery(ctx context.Context, p *execPlan, st *execStep, or
 //
 // Either way the source the caller asked for stays in the list, so a route that
 // does not work is not a failure — it costs one abandoned attempt.
+//
+// Every exit reports what it decided. A route that is declined at admission is
+// otherwise invisible — the job is done, the node has the image, and the only
+// difference is the bill — so "gantry is not using the cache you configured" has
+// to be a number an operator can alert on, not a log line nobody reads.
 func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
-	l := log.From(ctx)
-	deliver := p.last()
-	cacheName := p.source.Cache
-	if cacheName == "" {
+	if p.cache == "" {
+		// Either the source declares no route, or none of the ones it declares
+		// covers this job. Not a routing decision, so not counted: the metric's
+		// denominator must stay "jobs that could have been routed".
 		return w.requireAuthority(p, req, false)
 	}
+	decision, reason, err := w.routeDecision(ctx, p, req)
+	if err != nil {
+		decision = routeRejected // whatever else it decided, the job is not being admitted
+	}
+	attrs := []attribute.KeyValue{
+		attribute.String("decision", decision),
+		attribute.String("source", p.source.Name),
+		attribute.String("cache", p.cache),
+	}
+	if reason != "" {
+		attrs = append(attrs, attribute.String("reason", reason))
+	}
+	w.metrics.route.Add(ctx, 1, metric.WithAttributes(attrs...))
+	return err
+}
+
+// Route decisions, as reported by gantry.job.route.
+const (
+	routeFilled   = "filled"   // the cache was cold; this job fills it and then reads it
+	routeWarm     = "warm"     // the cache already held the image; read it
+	routeProxy    = "proxy"    // a pull-through cache; reading it is what fills it
+	routeJoined   = "joined"   // another job is filling it; read it and wait that fill out
+	routeDeclined = "declined" // gantry chose not to route (see reason)
+	routeRejected = "rejected" // the job was refused (require_authority, or a planning error)
+)
+
+// routeDecision resolves the route and reports what it decided, so route() has a
+// single place to record it.
+func (w *Copier) routeDecision(ctx context.Context, p *execPlan, req Request) (decision, reason string, err error) {
+	l := log.From(ctx)
+	deliver := p.last()
+	cacheName := p.cache
 	// Degenerate shapes. None of them is a misconfiguration: an operator declares
 	// the cache once on the origin, and jobs that happen to name either end of the
 	// route are ordinary.
 	switch {
 	case cacheName == p.target.Name():
 		// Filling the cache IS the copy the caller asked for.
-		return w.requireAuthority(p, req, false)
+		return routeDeclined, "target_is_cache", w.requireAuthority(p, req, false)
 	case cacheName == p.source.Name:
-		return w.requireAuthority(p, req, false)
+		return routeDeclined, "source_is_cache", w.requireAuthority(p, req, false)
 	}
 	cacheDest, err := resolveDest(w.stores, cacheName)
 	if err != nil {
 		// Validated at config load, so this is a store that stopped resolving.
 		l.Warn("not routing: the cache store does not resolve",
 			slog.String("cache", cacheName), slog.String("error", err.Error()))
-		return w.requireAuthority(p, req, false)
+		return routeDeclined, "cache_unresolved", w.requireAuthority(p, req, false)
 	}
 	if _, ok := cacheDest.(pusher); !ok {
 		l.Warn("not routing: the cache store cannot hold an image", slog.String("cache", cacheName))
-		return w.requireAuthority(p, req, false)
+		return routeDeclined, "cache_not_a_registry", w.requireAuthority(p, req, false)
 	}
 	cacheCfg, declared := w.stores.Config(cacheName)
 	if !declared {
@@ -591,7 +649,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		// A zero StoreConfig has no host, which would route the job at whatever
 		// `/repo:tag` parses to — never that.
 		l.Warn("not routing: the cache store is not declared", slog.String("cache", cacheName))
-		return w.requireAuthority(p, req, false)
+		return routeDeclined, "cache_undeclared", w.requireAuthority(p, req, false)
 	}
 
 	// Settle the tag at the authority. Everything downstream is anchored to this:
@@ -616,7 +674,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		// named and fail there, as an unrouted job would.
 		l.Debug("not routing: the authority does not have this reference",
 			slog.String("ref", p.authorityRef.Name()), slog.String("source", p.source.Name))
-		return nil
+		return routeDeclined, "no_such_image", nil
 	}
 	if derr != nil {
 		// The authority could not answer at all. Reading the cache by tag is then
@@ -632,7 +690,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		if why, ok := w.unreadableCache(p, deliver, cacheCfg); !ok {
 			l.Debug("not routing: the cache could not be read by this job",
 				slog.String("cache", cacheName), slog.String("reason", why))
-			return nil
+			return routeDeclined, "cache_unreadable", nil
 		}
 		if p.needReferrers {
 			// Without a digest the cache cannot be asked whether it holds the
@@ -642,23 +700,23 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 			// unreachable.
 			l.Info("not routing: the authority could not confirm the reference and this job needs its referrers",
 				slog.String("ref", p.authorityRef.Name()), slog.String("cache", cacheName))
-			return nil
+			return routeDeclined, "referrers_unverifiable", nil
 		}
 		if aerr := w.requireAuthority(p, req, true); aerr != nil {
 			// Both halves matter: that it is fatal, and why the authority went quiet.
-			return fmt.Errorf("%w: %w", aerr, derr)
+			return routeRejected, "unconfirmed", fmt.Errorf("%w: %w", aerr, derr)
 		}
 		l.Warn("the authority could not confirm the reference; reading the cache by tag",
 			slog.String("ref", p.authorityRef.Name()), slog.String("cache", cacheName),
 			slog.String("error", derr.Error()))
-		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+		return routeWarm, "unconfirmed", w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
 	}
 	p.pin(digest)
 	if err := w.repin(p, deliver); err != nil {
-		return err
+		return routeRejected, "plan", err
 	}
 	if err := w.requireAuthority(p, req, false); err != nil {
-		return err
+		return routeRejected, "unconfirmed", err
 	}
 
 	// Can the delivery hop even read the cache? Settled before anything is filled:
@@ -669,7 +727,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	if why, ok := w.unreadableCache(p, deliver, cacheCfg); !ok {
 		l.Debug("not routing: the cache could not be read by this job",
 			slog.String("cache", cacheName), slog.String("reason", why))
-		return nil
+		return routeDeclined, "cache_unreadable", nil
 	}
 
 	// A pull-through cache fills itself when it is read, so reading it IS the fill:
@@ -685,26 +743,26 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 			// authority, which certainly has them.
 			l.Info("not routing: a pull-through cache cannot be relied on for referrers",
 				slog.String("cache", cacheName))
-			return nil
+			return routeDeclined, "referrers_unverifiable", nil
 		}
 		l.Debug("routing through a pull-through cache: reading it is what fills it",
 			slog.String("cache", cacheName))
-		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+		return routeProxy, "", w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
 	}
 
 	cacheRef, err := w.planAttemptRef(p, cacheCfg)
 	if err != nil {
-		return err
+		return routeRejected, "plan", err
 	}
 	dg, ok := cacheRef.(name.Digest)
 	if !ok {
-		return fmt.Errorf("routing needs a digest-anchored reference at %q", cacheName)
+		return routeRejected, "plan", fmt.Errorf("routing needs a digest-anchored reference at %q", cacheName)
 	}
 	warm, perr := holdsDigest(ctx, cacheCfg, dg)
 	if perr != nil {
 		l.Warn("not routing: the cache could not be probed",
 			slog.String("cache", cacheName), slog.String("error", perr.Error()))
-		return nil
+		return routeDeclined, "probe_failed", nil
 	}
 	if warm {
 		if p.needReferrers && !w.cacheServesReferrers(ctx, p, cacheCfg, dg) {
@@ -714,11 +772,11 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 			// The image is already there, so nothing is re-transferred by declining.
 			l.Info("not routing: the cache does not hold every referrer the authority has",
 				slog.String("cache", cacheName), slog.String("digest", digest))
-			return nil
+			return routeDeclined, "referrers_incomplete", nil
 		}
 		l.Debug("routing through a cache that already holds the image",
 			slog.String("cache", cacheName), slog.String("digest", digest))
-		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+		return routeWarm, "", w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
 	}
 
 	// Cold: fill it first. The fill lands under the TAG, committed verbatim, so the
@@ -727,7 +785,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	// (platform-filtered) index would have a different digest and satisfy neither.
 	tagRef, err := name.ParseReference(cacheCfg.Host+"/"+p.repo+p.id, w.refOpts(cacheCfg)...)
 	if err != nil {
-		return z.Err(err, "cache ref at %q", cacheName)
+		return routeRejected, "plan", z.Err(err, "cache ref at %q", cacheName)
 	}
 	// Unless somebody is already filling it. A second fill would stream the whole
 	// image out of the authority again — the egress this feature exists to spend
@@ -739,7 +797,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	if _, filling := w.store.Filling(tagRef.Name(), ""); filling {
 		l.Debug("not filling: another job is already filling this cache",
 			slog.String("cache", cacheName), slog.String("ref", tagRef.Name()))
-		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+		return routeJoined, "", w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
 	}
 	fill := &execStep{
 		dst: cacheDest, ref: tagRef,
@@ -758,7 +816,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	fill.newMover = newCopyMover(fill)
 	src, err := w.planAttemptRef(p, p.source)
 	if err != nil {
-		return err
+		return routeRejected, "plan", err
 	}
 	fill.attempts = []*execAttempt{{src: p.source, ref: src, why: whyPlanned}}
 
@@ -768,7 +826,7 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	}
 	l.Debug("routing through a cache that must be filled first",
 		slog.String("cache", cacheName), slog.String("digest", digest))
-	return w.addRouteAttempt(ctx, p, deliver, cacheCfg, []int{fill.idx})
+	return routeFilled, "", w.addRouteAttempt(ctx, p, deliver, cacheCfg, []int{fill.idx})
 }
 
 // cacheServesReferrers reports whether reading the cache instead of the authority

@@ -63,6 +63,21 @@ stores:
   # result. See docs/stores.md#routing-a-copy-through-a-cache.
   #   docker.io: { kind: "oci", cache: "site" }
   # site: { kind: "oci", host: "registry.corp.internal", username: gantry, password: "..." }
+  #
+  # `cache: site` is the shorthand for a single unscoped route. The long form is a
+  # list, first match wins, and it is how a topology one-cache-per-source cannot
+  # express is written — routing is ONE LEVEL deep, so a per-rack setup is several
+  # scoped routes on the same origin, never a chain:
+  #   docker.io:
+  #     kind: "oci"
+  #     caches:
+  #       - store: "rack1"
+  #         for_targets: ["node1a", "node1b"]   # store names this job may deliver to
+  #       - store: "site"
+  #         for_repos: ["team/**"]              # repository PATH patterns; no host
+  #       # A route with neither scope is the default and must come last: anything
+  #       # after it is unreachable, which the loader rejects.
+  # A job no route covers reads its source directly.
 
   # Cache registry gantry fills and engines pull from.
   cache:
@@ -144,11 +159,14 @@ worker:
   # the job's ref instead of failing — a cache becomes an optimization rather
   # than a dependency. See docs/stores.md#falling-back-to-the-origin.
   fallback_to_origin: false
-  # How long an engine pull that its source could not serve waits for an active
-  # job filling that source with exactly this image, before giving up on it.
-  # Costs nothing when the source can serve the image — the wait happens only
-  # after a real miss. 0 disables waiting.
-  source_wait: "0s"
+  # How long a move that its source could not serve waits for an active job
+  # filling that source with exactly this image, before giving up on it. Costs
+  # nothing when the source can serve the image — the wait happens only after a
+  # real miss. It is what collapses a burst of destinations submitted together
+  # for a cold image onto one read of the origin. Default 30s (forced to 0 when
+  # max_concurrent_jobs is 1, where the pipeline is serial); set it explicitly
+  # to "0s" to disable waiting.
+  source_wait: "30s"
   # Default for a job that does not set `require_authority`: refuse a job whose
   # source could not confirm what its tag means, instead of reading a nearer cache
   # of that store on faith. Only consulted for a job gantry routed through such a

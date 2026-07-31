@@ -1,7 +1,9 @@
 package config
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -380,6 +382,16 @@ type StoreConfig struct {
 	// the cache nor sees a different result. Empty (the default) means jobs read
 	// from this store directly. See docs/stores.md.
 	Cache string `yaml:"cache"`
+	// Caches is the scoped form of Cache: an ordered list of routes, the first
+	// matching one of which is used. A route with no scope matches every job, so
+	// `cache: site` is exactly `caches: [{store: site}]` — Evaluate normalizes the
+	// shorthand into this field, and everything downstream reads only this one.
+	// Setting both is an error rather than a merge.
+	//
+	// Scoping is what expresses a topology one cache per source cannot: a per-rack
+	// cache is several routes on the SAME origin, each scoped to the targets it
+	// serves, rather than a chain (routing is one level deep — see docs/stores.md).
+	Caches []CacheRoute `yaml:"caches"`
 
 	// Retention configures per-repo image GC for this store (engine stores only).
 	// nil disables GC for the store. See StoreRetention.
@@ -505,17 +517,22 @@ type WorkerConfig struct {
 	// optimization rather than a dependency. Default false — the behavior of a
 	// deployment that has not opted in does not change.
 	FallbackToOrigin bool `yaml:"fallback_to_origin"`
-	// SourceWait is how long an engine pull that its source could not serve
-	// waits for an active job that is filling that source with exactly this
-	// image, before giving up on it. It costs nothing when the source can serve
-	// the image — the wait happens only after a real miss — so it does not slow
-	// a warm cache down. 0 (default) disables waiting.
+	// SourceWait is how long a move that its source could not serve waits for an
+	// active job that is filling that source with exactly this image, before
+	// giving up on it. It costs nothing when the source can serve the image — the
+	// wait happens only after a real miss — so it does not slow a warm source
+	// down.
 	//
-	// Waiters are capped at MaxConcurrentJobs-1 (minimum one) so a pool of two or
-	// more always keeps a worker free to run the fills. With MaxConcurrentJobs 1
-	// the pipeline is serial and nothing can be filling anything while the pull
-	// runs, so a wait only spends its bound before moving on: leave this at 0.
-	SourceWait Duration `yaml:"source_wait"`
+	// It is what collapses a burst onto one origin read: N destinations submitted
+	// together for a cold image all see the same fill in flight, and waiting for
+	// it is the difference between one transfer out of the origin and N. Default
+	// 30s; set it explicitly to 0 to disable waiting entirely.
+	//
+	// Waiters are capped at MaxConcurrentJobs-1 so a pool of two or more always
+	// keeps a worker free to run the fills. With MaxConcurrentJobs 1 the pipeline
+	// is serial and nothing can be filling anything while the move runs, so a wait
+	// could only spend its bound: the default is forced to 0 there.
+	SourceWait *Duration `yaml:"source_wait"`
 	// RequireAuthority is the default for a job that does not set
 	// require_authority: refuse a job whose authority — the store the caller named
 	// as its source — could not confirm what its tag means, instead of serving
@@ -530,4 +547,113 @@ type WorkerConfig struct {
 	// open indefinitely; on expiry the job is planned as if the store had not
 	// answered. Default 10s.
 	AdmissionTimeout Duration `yaml:"admission_timeout"`
+}
+
+// SourceWaitOr is how long a move waits for an in-flight fill of its source.
+// Reading it through a method keeps the nil (un-Evaluated) case from silently
+// meaning "wait forever" or panicking in a caller that builds a WorkerConfig by
+// hand; Evaluate always sets it.
+func (c WorkerConfig) SourceWaitOr() time.Duration {
+	if c.SourceWait == nil {
+		return 0
+	}
+	return time.Duration(*c.SourceWait)
+}
+
+// CacheRoute is one route gantry may take when reading from the store that
+// declares it: a nearer registry holding copies of that store's content, and the
+// jobs it applies to. It is gantry's own cost optimization — the caller neither
+// names the route nor sees a different result — so a scope that excludes a job
+// means only that the job reads its source directly.
+type CacheRoute struct {
+	// Store is the declared registry store to read through. Required.
+	Store string `yaml:"store"`
+	// ForTargets limits the route to jobs delivering to one of these stores.
+	// Empty matches every target. This is how a per-rack cache is expressed: one
+	// route per rack on the same origin, each naming that rack's nodes.
+	ForTargets []string `yaml:"for_targets"`
+	// ForRepos limits the route to repositories matching one of these doublestar
+	// patterns, e.g. "team/**". Empty matches every repository. The pattern is
+	// matched against the repository PATH alone ("team/app") — the host is the
+	// declaring store's own, so including it could never match.
+	ForRepos []string `yaml:"for_repos"`
+}
+
+// matches reports whether this route applies to a job delivering repo to target.
+func (r CacheRoute) matches(target, repo string) bool {
+	if len(r.ForTargets) > 0 && !slices.Contains(r.ForTargets, target) {
+		return false
+	}
+	if len(r.ForRepos) == 0 {
+		return true
+	}
+	for _, p := range r.ForRepos {
+		if ok, err := doublestar.Match(p, repo); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// CacheFor is the store a job delivering repo to target should be read through,
+// or "" when this store declares no route that applies. First match wins, so an
+// unscoped route placed last reads as the default and one placed first shadows
+// everything after it — which the loader rejects rather than let it look like a
+// working config.
+func (c StoreConfig) CacheFor(target, repo string) string {
+	for _, r := range c.Caches {
+		if r.matches(target, repo) {
+			return r.Store
+		}
+	}
+	return ""
+}
+
+// RouteAliases expands a retention/enforcement repository pattern across the
+// caches its registry declares.
+//
+// Retention rules are doublestar patterns over HOST-QUALIFIED repositories, and a
+// routed job deliberately lands the image under the cache's host — so a rule an
+// operator wrote for the origin does not match what the node actually holds, and
+// the image is left `unmanaged` and never collected. Rather than make the
+// operator restate every rule per cache (and remember to, whenever a route is
+// added), the pattern is expanded here: `cr.example.com/team/**` also covers
+// `registry.corp/team/**` for as long as `cr.example.com` declares
+// `registry.corp` as a cache.
+//
+// target is the store the rules belong to, so a route scoped to other targets is
+// not expanded into them. Only a pattern whose first segment is a declared
+// registry's literal host expands; anything else (a glob host, a bare repository
+// pattern like `**`) already matches host-agnostically or was never about a host.
+// The returned slice excludes the input.
+func (c Config) RouteAliases(target, pattern string) []string {
+	host, rest, ok := strings.Cut(pattern, "/")
+	if !ok || host == "" {
+		return nil
+	}
+	var src StoreConfig
+	for _, s := range c.Stores {
+		if s.IsRegistry() && s.Host == host {
+			src = s
+			break
+		}
+	}
+	if len(src.Caches) == 0 {
+		return nil
+	}
+	var out []string
+	for _, r := range src.Caches {
+		if len(r.ForTargets) > 0 && !slices.Contains(r.ForTargets, target) {
+			continue // this route can never deliver to the store these rules govern
+		}
+		cache, ok := c.Stores[r.Store]
+		if !ok || cache.Host == "" || cache.Host == host {
+			continue
+		}
+		alias := cache.Host + "/" + rest
+		if !slices.Contains(out, alias) {
+			out = append(out, alias)
+		}
+	}
+	return out
 }

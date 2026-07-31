@@ -299,6 +299,55 @@ stores:
     host: registry.corp.internal
 ```
 
+**Routing is one level deep, and the route belongs to the source.** Two
+consequences are worth stating because the config file does not make them
+obvious:
+
+- A cache may declare a cache of its own, and the loader accepts it — but that is
+  **two independent routes, not a chain**. A job reading from `cr.example.com`
+  goes through `site` and stops there; it never continues on to whatever `site`
+  declares. `site`'s own `cache` applies only to jobs whose *source* is `site`.
+  There is no recursion and therefore no cycle to detect.
+- One source has one cache, for every job that reads from it. The route cannot
+  depend on where the image is going or on which repository it is, unless it is
+  scoped explicitly — see below. A per-rack topology (`cloud` →
+  `rack1`/`rack2`/`rack3`) is expressed by scoping several routes on `cloud`, not
+  by chaining them.
+
+### Scoping a route
+
+`cache: site` is the shorthand for a single unscoped route. The long form is a
+list, and the first route whose scope covers the job wins:
+
+```yaml
+stores:
+  "cr.example.com":
+    kind: oci
+    caches:
+      # Nodes in rack 1 read through the cache in rack 1.
+      - store: rack1
+        for_targets: [node1a, node1b]
+      - store: rack2
+        for_targets: [node2a, node2b]
+      # Everything else goes through the site registry — but only our own
+      # repositories; third-party images are pulled straight from upstream.
+      - store: site
+        for_repos: ["team/**", "infra/**"]
+```
+
+- `for_targets` lists **store names** the job delivers to. Empty matches any
+  target.
+- `for_repos` lists doublestar patterns matched against the **repository path
+  alone** (`team/app`) — the host is the declaring store's own, so a
+  host-qualified pattern could never match and the loader rejects one.
+- A route with neither is the default. It makes every route after it
+  unreachable, so the loader rejects that too rather than let dead config look
+  like it works.
+- A job no route covers reads its source directly. That is not a decline —
+  it was never a candidate — so it is not counted in `gantry.job.route`.
+
+Setting both `cache` and `caches` is an error; pick one.
+
 gantry may then satisfy `local ◀── cr.example.com` by going through `site`, so the
 cloud registry is read **once** rather than once per destination. The caller neither
 names `site` nor sees a different result — this is gantry's own cost optimization,
@@ -399,8 +448,15 @@ there the source the caller named *is* the authority.
 - **A routed job moves the image twice**, so `gantry.bytes` and the `job_done`
   audit record report roughly twice its size. That is honest — the bytes did move —
   but worth knowing when reading a routed job's numbers.
-- **`gantry.job.fallback` counts a route being abandoned as well as a source
-  fallback**, distinguished by its `reason` attribute, which names what was GIVEN
+- **Every routing decision is counted at admission** in `gantry.job.route`
+  (`decision` = `filled`/`warm`/`proxy`/`joined`/`declined`/`rejected`, plus a
+  `reason` on the last two). This is the only signal for a route gantry *declines*
+  — such a job is `done`, the target has the image, and the only difference is how
+  many times the origin was read, so a permanently dead route is otherwise
+  indistinguishable from a healthy one. Jobs whose source declares no `cache` are
+  not counted, so the metric is a complete breakdown of the routed population.
+- **`gantry.job.fallback` counts a route being abandoned at RUN time as well as a
+  source fallback**, distinguished by its `reason` attribute, which names what was GIVEN
   UP: `route` is gantry's own cache being abandoned, `planned` is the source the
   caller named being left (i.e. a fallback to the origin). A route that fails at
   run time shows up there rather than as failing jobs. A route gantry declines at
@@ -415,11 +471,23 @@ there the source the caller named *is* the authority.
   submit can be served by an active job that probed differently.
 - **A routed engine job leaves the node holding the CACHE's host name**, because
   the daemon was told to pull from there and retention is stamped with what the
-  daemon actually holds. A job that named the origin as its source and expected the
-  origin's name on the node will not get it, and host-qualified retention rules
-  written for the origin will not match the image. Use `as` to give it a name
-  independent of which store served it — the same remedy as for
-  [the source fallback](#falling-back-to-the-origin).
+  daemon actually holds. A job that named the origin as its source and expected
+  the origin's name on the node will not get it. Two subsystems key off that host
+  and both follow the `cache:` edge so a rule is stated once:
+  - **Retention.** A host-qualified rule written for the origin
+    (`cr.example.com/team/**`) also covers the caches that origin declares, for
+    the stores those routes can deliver to. Nothing is left `unmanaged` because
+    gantry chose a route the operator's rule did not name.
+  - **Enforcement.** `serve.enforce` verifies against the store whose host the
+    node recorded — the cache — and, if that store cannot prove the signature,
+    against the registries that declare it as a cache. A cache whose referrers
+    were collected, or that was filled by something other than gantry, therefore
+    does not cost a running container. An image no store can vouch for is still
+    quarantined.
+
+  `as` remains the way to give the image a name independent of which store served
+  it — the same remedy as for [the source fallback](#falling-back-to-the-origin)
+  — but it is no longer required to keep these two working.
 - **Referrers travel on every hop, and a fill always carries them.** A fill hop
   copies the authority's referrer artifacts whatever the job asked for — the same
   rule as `verbatim` and `platforms`, and for the same reason: what gantry puts in
@@ -453,10 +521,10 @@ there the source the caller named *is* the authority.
   that has not committed yet has published nothing — so gantry also asks its own
   job store. A second cold job for the same image therefore plans no fill of its
   own and reads the cache instead. Whether it *waits* for that fill is
-  `worker.source_wait`: at the default `0` it reads the cache, misses, and falls
-  through to the source the caller named, which costs what not routing would have
-  cost. **Set `worker.source_wait` if you submit many destinations for a cold image
-  at once** — that is what collapses the burst onto one authority read.
+  `worker.source_wait`, which defaults to `30s` precisely so it does: without the
+  wait it reads the cache, misses, and falls through to the source the caller
+  named, which costs what not routing would have cost. Setting `source_wait: 0s`
+  turns that off and accepts one origin read per destination on a cold image.
 - **Routing does not re-anchor the origin fallback.** A job that falls back to the
   registry named in its own `ref` resolves the tag *there*, at the tag's own
   authority, and declaring a `cache:` on its source does not change that. Otherwise
@@ -543,8 +611,8 @@ before submitting.
 
 A cache that is empty *because its fill job has not finished yet* is a different
 situation from one that cannot serve the image at all — but the pull cannot tell
-them apart from a single failed attempt. `worker.source_wait` (default `0` =
-off) lets a missed pull wait for an active job that is putting **exactly this
+them apart from a single failed attempt. `worker.source_wait` (default `30s`;
+set it to `0s` to turn waiting off) lets a missed move wait for an active job that is putting **exactly this
 image** into **exactly this store**, then try that source once more:
 
 ```
@@ -565,7 +633,8 @@ always keeps a worker free to run the fills themselves. A pull that cannot take 
 slot, or whose wait expires, goes straight on to the fallback. (With
 `max_concurrent_jobs: 1` the pipeline is serial by construction: nothing can be
 filling the cache while the pull runs, so a wait there only spends its bound
-before falling back. Leave `source_wait` at `0` on a single-worker server.) If the fill *failed*, the retry costs one cheap
+before falling back — the default is forced to `0` on a single-worker server,
+though an explicit value is still honored.) If the fill *failed*, the retry costs one cheap
 miss and the fallback follows — only the source itself can say whether it now
 holds the image.
 

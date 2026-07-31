@@ -65,6 +65,16 @@ For each start event, in order:
      the result back to the cache. A verified signature ⇒ allow; an unsigned or
      untrusted image ⇒ quarantine (enforcement verifies in `require` semantics, so
      an unsigned image is quarantined regardless of the store's admission mode).
+
+     More than one store may be asked. An image gantry
+     [routed through a cache](stores.md#routing-a-copy-through-a-cache) is
+     recorded under the CACHE's host, so that store is asked first — it is what
+     served the node — and the registries that declare it as their `cache` are
+     asked after, about the same digest. A cache whose referrers were collected,
+     or that was filled by something that never carried them, therefore does not
+     cost a running container. The refusal is only acted on once every one of
+     them has been asked: the signature is over the digest, so proof from any of
+     them is proof about the same bytes.
    - **`on_unavailable`** — if no live answer is obtainable (registry
      unreachable, no matching source store), the policy decides.
 

@@ -168,3 +168,175 @@ func TestStoreCacheValidation(t *testing.T) {
 		})
 	}
 }
+
+// source_wait is what collapses a burst of destinations onto one origin read, so
+// it is on by default — but 0 is a meaningful value (waiting off), which is why
+// the field is a pointer: unset and "explicitly zero" must not be the same thing.
+func TestSourceWaitDefault(t *testing.T) {
+	eval := func(t *testing.T, w WorkerConfig) time.Duration {
+		t.Helper()
+		c := Config{Worker: w}
+		if err := c.Evaluate(); err != nil {
+			t.Fatal(err)
+		}
+		return c.Worker.SourceWaitOr()
+	}
+	if got := eval(t, WorkerConfig{}); got != 30*time.Second {
+		t.Errorf("unset = %s, want 30s", got)
+	}
+	zero := Duration(0)
+	if got := eval(t, WorkerConfig{SourceWait: &zero}); got != 0 {
+		t.Errorf("explicit 0 = %s, want waiting off", got)
+	}
+	five := Duration(5 * time.Second)
+	if got := eval(t, WorkerConfig{SourceWait: &five}); got != 5*time.Second {
+		t.Errorf("explicit 5s = %s", got)
+	}
+	// One worker is a serial pipeline: nothing can be filling anything while the
+	// move that would wait for it is running, so the default must not park it.
+	if got := eval(t, WorkerConfig{MaxConcurrentJobs: 1}); got != 0 {
+		t.Errorf("single worker = %s, want waiting off by default", got)
+	}
+	if got := eval(t, WorkerConfig{MaxConcurrentJobs: 1, SourceWait: &five}); got != 5*time.Second {
+		t.Errorf("single worker with an explicit value = %s, want it honored", got)
+	}
+}
+
+// A scoped route is how a topology one-cache-per-source cannot express is written:
+// several routes on the SAME origin, each naming the jobs it serves. First match
+// wins, and a route nothing can reach is a config error rather than dead weight.
+func TestCacheRouteSelection(t *testing.T) {
+	load := func(t *testing.T, stores map[string]StoreConfig) (Config, error) {
+		t.Helper()
+		c := Config{Stores: stores}
+		return c, c.Evaluate()
+	}
+	base := func() map[string]StoreConfig {
+		return map[string]StoreConfig{
+			"cloud": {Kind: "oci", Host: "cr.example.com", Caches: []CacheRoute{
+				{Store: "rack1", ForTargets: []string{"node1"}},
+				{Store: "team", ForRepos: []string{"team/**"}},
+				{Store: "site"},
+			}},
+			"rack1": {Kind: "oci", Host: "cache.rack1"},
+			"team":  {Kind: "oci", Host: "cache.team"},
+			"site":  {Kind: "oci", Host: "registry.corp"},
+			"node1": {Kind: "docker"},
+			"node2": {Kind: "docker"},
+		}
+	}
+	c, err := load(t, base())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, tc := range []struct{ target, repo, want string }{
+		{"node1", "other/app", "rack1"}, // target scope wins, and it is first
+		{"node1", "team/app", "rack1"},  // …even when a later route also matches
+		{"node2", "team/app", "team"},   // repo scope
+		{"node2", "other/app", "site"},  // the unscoped default, last
+	} {
+		if got := c.Stores["cloud"].CacheFor(tc.target, tc.repo); got != tc.want {
+			t.Errorf("CacheFor(%q, %q) = %q, want %q", tc.target, tc.repo, got, tc.want)
+		}
+	}
+	// A store with no route at all routes nothing.
+	if got := c.Stores["site"].CacheFor("node1", "team/app"); got != "" {
+		t.Errorf("a store with no route returned %q", got)
+	}
+
+	// `cache: x` is exactly `caches: [{store: x}]`, normalized at load.
+	c2, err := load(t, map[string]StoreConfig{
+		"cloud": {Kind: "oci", Host: "cr.example.com", Cache: "site"},
+		"site":  {Kind: "oci", Host: "registry.corp"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := c2.Stores["cloud"].CacheFor("anything", "any/repo"); got != "site" {
+		t.Errorf("the shorthand resolved to %q, want site", got)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]StoreConfig)
+		want   string
+	}{
+		{"both spellings", func(m map[string]StoreConfig) {
+			s := m["cloud"]
+			s.Cache = "site"
+			m["cloud"] = s
+		}, "not both"},
+		{"unreachable route after an unscoped one", func(m map[string]StoreConfig) {
+			s := m["cloud"]
+			s.Caches = []CacheRoute{{Store: "site"}, {Store: "rack1", ForTargets: []string{"node1"}}}
+			m["cloud"] = s
+		}, "unreachable"},
+		{"undeclared target scope", func(m map[string]StoreConfig) {
+			s := m["cloud"]
+			s.Caches = []CacheRoute{{Store: "site", ForTargets: []string{"nope"}}}
+			m["cloud"] = s
+		}, "not a declared store"},
+		{"host-qualified repo pattern", func(m map[string]StoreConfig) {
+			s := m["cloud"]
+			s.Caches = []CacheRoute{{Store: "site", ForRepos: []string{"cr.example.com/team/**"}}}
+			m["cloud"] = s
+		}, "host-qualified"},
+		{"route names no store", func(m map[string]StoreConfig) {
+			s := m["cloud"]
+			s.Caches = []CacheRoute{{ForRepos: []string{"team/**"}}}
+			m["cloud"] = s
+		}, "names no store"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stores := base()
+			tc.mutate(stores)
+			_, err := load(t, stores)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Retention rules are doublestar patterns over HOST-QUALIFIED repositories, and a
+// routed job deliberately lands the image under the cache's host. Without the
+// expansion a rule written for the origin matches nothing the node holds and the
+// image sits unmanaged forever.
+func TestRouteAliasesForRetentionRules(t *testing.T) {
+	c := Config{Stores: map[string]StoreConfig{
+		"cloud": {Kind: "oci", Host: "cr.example.com", Caches: []CacheRoute{
+			{Store: "rack1", ForTargets: []string{"node1"}},
+			{Store: "site"},
+		}},
+		"rack1": {Kind: "oci", Host: "cache.rack1"},
+		"site":  {Kind: "oci", Host: "registry.corp"},
+		"node1": {Kind: "docker"},
+		"node2": {Kind: "docker"},
+	}}
+	if err := c.Evaluate(); err != nil {
+		t.Fatal(err)
+	}
+	got := c.RouteAliases("node1", "cr.example.com/team/**")
+	want := []string{"cache.rack1/team/**", "registry.corp/team/**"}
+	if len(got) != len(want) {
+		t.Fatalf("aliases for node1 = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("aliases for node1 = %v, want %v", got, want)
+		}
+	}
+	// node2 is not in the rack-1 route's scope, so a rack-1 image can never reach
+	// it and its rules must not claim one.
+	if got := c.RouteAliases("node2", "cr.example.com/team/**"); len(got) != 1 || got[0] != "registry.corp/team/**" {
+		t.Errorf("aliases for node2 = %v, want only the unscoped site route", got)
+	}
+	// A host-agnostic pattern already matches everywhere; a host that declares no
+	// route has nothing to expand into.
+	if got := c.RouteAliases("node1", "**"); got != nil {
+		t.Errorf("host-agnostic pattern expanded to %v", got)
+	}
+	if got := c.RouteAliases("node1", "registry.corp/team/**"); got != nil {
+		t.Errorf("a store with no route of its own expanded to %v", got)
+	}
+}

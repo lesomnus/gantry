@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 	"github.com/lesomnus/z"
 )
@@ -96,6 +97,18 @@ func (c *Config) Evaluate() error {
 	z.FallbackP(&c.Worker.QueueSize, 256)
 	z.FallbackP((*time.Duration)(&c.Worker.JobTTL), 30*time.Minute)
 	z.FallbackP((*time.Duration)(&c.Worker.AdmissionTimeout), 10*time.Second)
+	// Nil is "unset" rather than zero, because zero is a meaningful value here:
+	// it disables waiting, and an operator must be able to say so.
+	if c.Worker.SourceWait == nil {
+		d := Duration(30 * time.Second)
+		if c.Worker.MaxConcurrentJobs <= 1 {
+			// One worker is a serial pipeline: nothing can be filling anything while
+			// the move that would wait for it is running, so a wait could only ever
+			// spend its bound and move on.
+			d = 0
+		}
+		c.Worker.SourceWait = &d
+	}
 
 	for name, s := range c.Stores {
 		if name == "" {
@@ -140,21 +153,60 @@ func (c *Config) Evaluate() error {
 	// generates is never itself routed — so a store that is someone's cache may
 	// declare a cache of its own without any risk of a cycle.
 	for name, s := range c.Stores {
-		if s.Cache == "" {
+		if s.Cache != "" {
+			if len(s.Caches) > 0 {
+				return z.Err(nil, "store %q: set either `cache` or `caches`, not both; `cache: x` is the shorthand for `caches: [{store: x}]`", name)
+			}
+			// Normalize the shorthand away here so nothing downstream has to know
+			// there are two spellings.
+			s.Caches = []CacheRoute{{Store: s.Cache}}
+			c.Stores[name] = s
+		}
+		if len(s.Caches) == 0 {
 			continue
 		}
 		if !s.IsRegistry() {
 			return z.Err(nil, "store %q: cache is a route for reading FROM a registry; a %s store is never a job's source", name, s.Kind)
 		}
-		if s.Cache == name {
-			return z.Err(nil, "store %q: cache names the store itself", name)
-		}
-		cache, declared := c.Stores[s.Cache]
-		if !declared {
-			return z.Err(nil, "store %q: cache %q is not a declared store", name, s.Cache)
-		}
-		if !cache.IsRegistry() {
-			return z.Err(nil, "store %q: cache %q is a %s; only a registry can hold copies of another registry's content", name, s.Cache, cache.Kind)
+		unscoped := -1
+		for i, r := range s.Caches {
+			if r.Store == "" {
+				return z.Err(nil, "store %q: cache route %d names no store", name, i)
+			}
+			if r.Store == name {
+				return z.Err(nil, "store %q: cache names the store itself", name)
+			}
+			cache, declared := c.Stores[r.Store]
+			if !declared {
+				return z.Err(nil, "store %q: cache %q is not a declared store", name, r.Store)
+			}
+			if !cache.IsRegistry() {
+				return z.Err(nil, "store %q: cache %q is a %s; only a registry can hold copies of another registry's content", name, r.Store, cache.Kind)
+			}
+			for _, t := range r.ForTargets {
+				if _, ok := c.Stores[t]; !ok {
+					return z.Err(nil, "store %q: cache route %d limits itself to target %q, which is not a declared store", name, i, t)
+				}
+			}
+			for _, pat := range r.ForRepos {
+				if !doublestar.ValidatePattern(pat) {
+					return z.Err(nil, "store %q: cache route %d has an invalid repository pattern %q", name, i, pat)
+				}
+				if strings.Contains(pat, "://") || strings.Contains(strings.SplitN(pat, "/", 2)[0], ".") {
+					// The pattern is matched against the repository path alone, so a
+					// host-qualified one silently never matches — the failure mode this
+					// whole feature is meant to make visible.
+					return z.Err(nil, "store %q: cache route %d pattern %q looks host-qualified; match the repository path alone, e.g. %q", name, i, pat, "team/**")
+				}
+			}
+			// A route that matches everything makes every later route unreachable.
+			// Silently dead config is exactly what a routing feature must not have.
+			if unscoped >= 0 {
+				return z.Err(nil, "store %q: cache route %d is unreachable; route %d matches every job", name, i, unscoped)
+			}
+			if len(r.ForTargets) == 0 && len(r.ForRepos) == 0 {
+				unscoped = i
+			}
 		}
 	}
 

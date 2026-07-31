@@ -62,17 +62,29 @@ func (m *Manager) decide(ctx context.Context, eng Engine, ev down.StartEvent) de
 	// 2. Live verification against the source registry that the image was pulled
 	//    from (matched by the RepoDigest host). This also consults the local
 	//    signature layout and writes the verdict back to the cache.
-	if src, from, ok := m.sourceFor(ci); ok {
-		res, verr := m.verifier.Verify(ctx, from, src)
+	//    There may be more than one: an image gantry routed through a cache is
+	//    recorded under the CACHE's host, so the store the host matches is asked
+	//    first and the origin that declares it as a cache is asked after. A refusal
+	//    is therefore only acted on once every store that could hold the signature
+	//    has been asked — the signature is over the digest, so proof from any of
+	//    them is proof about the same bytes.
+	var refuse error
+	for _, c := range m.sourcesFor(ci) {
+		res, verr := m.verifier.Verify(ctx, c.store, c.ref)
 		switch {
 		case verr == nil && res.Verified():
 			return decision{action: actAllow, reason: "verified", digest: digest}
 		case errors.Is(verr, verify.ErrUnsigned) || errors.Is(verr, verify.ErrUntrusted):
-			return decision{action: actKill, reason: "verification: " + verr.Error(), digest: digest}
+			if refuse == nil {
+				refuse = verr
+			}
 		default:
 			// verr is nil-without-digest (verify-if-present unsigned-allowed) or a
 			// transient error (unreachable/timeout/not found): fall to the policy.
 		}
+	}
+	if refuse != nil {
+		return decision{action: actKill, reason: "verification: " + refuse.Error(), digest: digest}
 	}
 
 	// 3. No usable live answer.
@@ -115,6 +127,43 @@ func topLevelDigest(ci down.ContainerImage) string {
 // verify uses that store's transport/insecure/credentials (the signature lives
 // in the cache registry the daemon pulled from). Returns ok=false when no
 // RepoDigest names a configured store.
+// verifySource is one place a running image's signature may live.
+type verifySource struct {
+	ref   name.Digest
+	store config.StoreConfig
+}
+
+// sourcesFor lists the stores that could hold the signature for a running image,
+// in the order they should be asked.
+//
+// The first is the store whose host the daemon recorded — which for an image
+// gantry routed through a cache is the CACHE, not the registry the operator
+// pointed the job at. That store is asked first because it is what actually
+// served the node. The origins that declare it as a cache follow: a cache is only
+// ever a copy of their content, its referrers can be collected independently of
+// the image, and the signature is over the digest — so asking the origin about
+// the same digest asks about the same bytes. Without this, an image whose cache
+// copy lost (or never received) its signature is killed even though the registry
+// it came from can prove it.
+func (m *Manager) sourcesFor(ci down.ContainerImage) []verifySource {
+	ref, from, ok := m.sourceFor(ci)
+	if !ok {
+		return nil
+	}
+	out := []verifySource{{ref: ref, store: from}}
+	for _, origin := range m.cachedBy[from.Name] {
+		alt, err := name.NewDigest(origin.Host+"/"+ref.Context().RepositoryStr()+"@"+ref.DigestStr(), name.Insecure)
+		if err != nil {
+			continue
+		}
+		// Enforcement is a run-time requirement, independent of the store's own
+		// admission mode — same reasoning as sourceFor's.
+		origin.Verify = &config.StoreVerify{Mode: config.VerifyRequire}
+		out = append(out, verifySource{ref: alt, store: origin})
+	}
+	return out
+}
+
 func (m *Manager) sourceFor(ci down.ContainerImage) (name.Digest, config.StoreConfig, bool) {
 	for _, rd := range ci.RepoDigests {
 		ref, err := name.NewDigest(rd, name.Insecure)

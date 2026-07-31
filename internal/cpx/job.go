@@ -64,13 +64,16 @@ type Job struct {
 	// re-attempted against the registry named in Ref.
 	FallbackToOrigin bool
 	// RequireAuthority is the effective decision for this job: refuse rather than
-	// read a nearer cache of a source that could not confirm the reference.
+	// read a nearer cache of a source that could not confirm the reference. False
+	// whenever the source declares no cache — such a job is never routed, so there
+	// is nothing for the flag to refuse.
 	RequireAuthority bool
 	// Fills are the target-side references this job's steps publish into their
 	// stores — the things another job's read could be waiting on. Empty for a job
 	// whose only step is an engine pull, which publishes nothing another job reads.
-	// Released together when the job ends, so a waiter on an intermediate is freed
-	// one hop later than strictly necessary.
+	// Each is released by the step that publishes it, as soon as that step
+	// succeeds: an intermediate hop's readers must not be held for the length of
+	// the hop that follows it, which is a whole image copy of its own.
 	Fills []string
 	// Source and Target are the stores the job was ADMITTED for: what the caller
 	// asked, resolved to store names. They are deliberately not derived from the
@@ -113,6 +116,12 @@ type Job struct {
 	// Closed by run() so an erased or evicted record still releases its waiters.
 	done     chan struct{}
 	doneOnce sync.Once
+	// gates is one release signal per entry in Fills, keyed by the reference. A
+	// gate opens when the step that publishes it succeeds, and every gate still
+	// shut is opened when the job ends — a waiter must never outlive the job it
+	// waits on, whatever went wrong. Built once by setFills; read under the store
+	// mutex, released without it (each gate is its own sync.Once).
+	gates map[string]*fillGate
 
 	// refs and pins track the handles pointing at this shared execution, both
 	// guarded by the store mutex. refs counts handles that still want the move
@@ -145,9 +154,45 @@ func NewJob(id, ref string, platforms []string, now time.Time) *Job {
 // handing a waiter something that can only time out.
 func (j *Job) Done() <-chan struct{} { return j.done }
 
-// markDone releases everyone waiting on this execution. Safe to call more than
+// fillGate is the release signal for one reference a job publishes. It exists
+// per reference rather than per job so a waiter on an intermediate hop is freed
+// when THAT hop lands, not when the whole job — which may still have an entire
+// image copy ahead of it — finishes.
+type fillGate struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+func (g *fillGate) open() { g.once.Do(func() { close(g.ch) }) }
+
+// setFills declares the references this job's steps will publish, and opens a
+// gate for each. Called once, before the job is queued.
+func (j *Job) setFills(refs []string) {
+	j.Fills = refs
+	if len(refs) == 0 {
+		return
+	}
+	j.gates = make(map[string]*fillGate, len(refs))
+	for _, r := range refs {
+		j.gates[r] = &fillGate{ch: make(chan struct{})}
+	}
+}
+
+// markFilled reports that ref is now in its store, releasing anyone who was
+// waiting for it. A ref this job does not publish is ignored.
+func (j *Job) markFilled(ref string) {
+	if g := j.gates[ref]; g != nil {
+		g.open()
+	}
+}
+
+// markDone releases everyone waiting on this execution — both on the job itself
+// and on any reference it promised and did not deliver. Safe to call more than
 // once and from any goroutine.
 func (j *Job) markDone() {
+	for _, g := range j.gates {
+		g.open()
+	}
 	if j.done == nil {
 		return
 	}

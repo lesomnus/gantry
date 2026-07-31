@@ -120,15 +120,27 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 				return nil, z.Err(err, "open retention index for %q", name)
 			}
 			closers = append(closers, ix.Close)
-			rules := make([]retention.Rule, len(rc.Rules))
-			for i, rr := range rc.Rules {
-				rules[i] = retention.Rule{
+			rules := make([]retention.Rule, 0, len(rc.Rules))
+			for _, rr := range rc.Rules {
+				rule := retention.Rule{
 					Repo:    rr.Repo,
 					MaxAge:  (*time.Duration)(rr.MaxAge),
 					KeepN:   rr.KeepN,
 					MaxN:    rr.MaxN,
 					MaxIdle: (*time.Duration)(rr.MaxIdle),
 					Pins:    rr.Pins,
+				}
+				rules = append(rules, rule)
+				// A routed job lands the image under the CACHE's host, so a rule
+				// written for the origin would not match what the node holds and the
+				// image would sit unmanaged forever. Cover the caches the origin
+				// declares, so the operator states the rule once.
+				for _, alias := range c.RouteAliases(name, rr.Repo) {
+					aliased := rule
+					aliased.Repo = alias
+					rules = append(rules, aliased)
+					log.From(ctx).Debug("retention rule covers a routed cache",
+						slog.String("store", name), slog.String("rule", rr.Repo), slog.String("also", alias))
 				}
 			}
 			gcStores = append(gcStores, retention.Store{

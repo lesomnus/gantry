@@ -206,7 +206,10 @@ message Job {
   // definite answer there is, and such a job is simply not routed. Absent =
   // server default (worker.require_authority), which is false: a cache that keeps
   // working while the registry behind it does not is usually the point of having
-  // one. On a job record this is the effective decision.
+  // one. On a job record this is the EFFECTIVE decision, the same sense as field
+  // 21: false whenever the job's source declares no cache, whatever the request
+  // said, because only a routed job can read content its authority never
+  // confirmed and only a source with a cache is ever routed.
   bool require_authority = 22 [
     features.field_presence = EXPLICIT,
     (orm.field) = {immutable: true}

@@ -425,3 +425,96 @@ func TestReconcileListErrorDoesNotQuarantine(t *testing.T) {
 		t.Error("a failed reconcile must not quarantine anything")
 	}
 }
+
+// A routed image is recorded on the node under the CACHE's host, so that is the
+// store enforcement matches. But a cache is only a copy: its referrers can be
+// collected, or it may have been filled by something that never carried them.
+// The registry that declares it as a cache holds the same digest and the same
+// signature, so it is asked too — before an image is killed for being unsigned.
+func TestRoutedImageFallsBackToTheOriginForItsSignature(t *testing.T) {
+	const originHost = "cr.example.com"
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	cache, err := verify.OpenCache(filepath.Join(t.TempDir(), "v.db"), 28*24*time.Hour, 14*24*time.Hour,
+		verify.WithNow(func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cache.Close() })
+
+	// The node holds the image under the cache's host, as a routed pull leaves it.
+	eng := &fakeEngine{name: "dockerd", img: down.ContainerImage{
+		ImageID: "sha256:img", RepoDigests: []string{repoDigest("a")},
+	}}
+	var asked []string
+	vf := &hostVerifier{fn: func(from config.StoreConfig, ref name.Reference) (verify.Result, error) {
+		asked = append(asked, from.Name)
+		if from.Name == "origin" {
+			if got := ref.Context().RegistryStr(); got != originHost {
+				t.Errorf("the origin was asked about %q, want a ref at %q", got, originHost)
+			}
+			h, err := v1.NewHash(testDigest("a"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return verify.Result{Mode: config.VerifyRequire, Digest: h}, nil
+		}
+		return verify.Result{}, verify.ErrUnsigned
+	}}
+	stores := map[string]config.StoreConfig{
+		"local":  {Name: "local", Kind: "oci", Host: testHost, Insecure: true},
+		"origin": {Name: "origin", Kind: "oci", Host: originHost, Caches: []config.CacheRoute{{Store: "local"}}},
+	}
+	m := NewManager([]Store{{Name: "dockerd", Engine: eng}}, cache, vf, stores, Options{
+		OnUnavailable: "kill", Now: func() time.Time { return now },
+	})
+	m.handle(context.Background(), eng, down.StartEvent{ContainerID: "c1", Image: testHost + "/app:1"})
+
+	if eng.contRemovals() > 0 {
+		t.Error("the origin proved the signature; the container must not be quarantined")
+	}
+	if len(asked) != 2 || asked[0] != "local" || asked[1] != "origin" {
+		t.Errorf("stores asked = %v, want the cache first then the origin", asked)
+	}
+}
+
+// …and a refusal still kills once every store that could hold the signature has
+// been asked and none of them could prove it.
+func TestUnsignedEverywhereStillKills(t *testing.T) {
+	const originHost = "cr.example.com"
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	cache, err := verify.OpenCache(filepath.Join(t.TempDir(), "v.db"), 28*24*time.Hour, 14*24*time.Hour,
+		verify.WithNow(func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cache.Close() })
+	eng := &fakeEngine{name: "dockerd", img: down.ContainerImage{
+		ImageID: "sha256:img", RepoDigests: []string{repoDigest("a")},
+	}}
+	vf := &hostVerifier{fn: func(config.StoreConfig, name.Reference) (verify.Result, error) {
+		return verify.Result{}, verify.ErrUnsigned
+	}}
+	stores := map[string]config.StoreConfig{
+		"local":  {Name: "local", Kind: "oci", Host: testHost, Insecure: true},
+		"origin": {Name: "origin", Kind: "oci", Host: originHost, Caches: []config.CacheRoute{{Store: "local"}}},
+	}
+	m := NewManager([]Store{{Name: "dockerd", Engine: eng}}, cache, vf, stores, Options{
+		OnUnavailable: "grace", Now: func() time.Time { return now },
+	})
+	m.handle(context.Background(), eng, down.StartEvent{ContainerID: "c1", Image: testHost + "/app:1"})
+	if eng.contRemovals() == 0 {
+		t.Error("no store could prove the signature; the container must be quarantined")
+	}
+}
+
+// hostVerifier answers per (store, ref) so a test can make one store hold the
+// signature and another not.
+type hostVerifier struct {
+	fn func(config.StoreConfig, name.Reference) (verify.Result, error)
+}
+
+func (v *hostVerifier) Verify(_ context.Context, from config.StoreConfig, ref name.Reference) (verify.Result, error) {
+	return v.fn(from, ref)
+}
+func (v *hostVerifier) Describe() verify.Description        { return verify.Description{} }
+func (v *hostVerifier) Reload() (verify.Description, error) { return verify.Description{}, nil }

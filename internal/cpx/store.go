@@ -205,13 +205,15 @@ func (s *memStore) Filling(ref string, exclude string) (<-chan struct{}, bool) {
 		// job will never produce the ref, and an enqueuing one is not yet
 		// guaranteed to run, so waiting on any of them would only burn the
 		// caller's timeout.
-		if j.State.Terminal() || j.Canceled() || j.enqueuing || j.sealed || j.done == nil {
+		if j.State.Terminal() || j.Canceled() || j.enqueuing || j.sealed {
 			continue
 		}
-		for _, f := range j.Fills {
-			if f == ref {
-				return j.done, true
-			}
+		// The gate for this exact reference, not the job's own completion: an
+		// intermediate hop's readers are released when that hop lands. A record
+		// built outside NewJob/setFills has no gate and is skipped rather than
+		// handed something that can only time out.
+		if g := j.gates[ref]; g != nil {
+			return g.ch, true
 		}
 	}
 	return nil, false

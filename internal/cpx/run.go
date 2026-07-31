@@ -30,6 +30,12 @@ func (w *Copier) execute(ctx context.Context, job *Job) error {
 		err := w.runStep(ctx, job, p, st, delivered)
 		if err == nil {
 			delivered[st.idx] = true
+			// Release anyone waiting for what this hop publishes, now rather than
+			// when the job ends: the hop that follows is a whole image copy of its
+			// own, and a reader of the intermediate has no reason to wait for it.
+			if st.fills != "" {
+				w.store.Update(job.ID, func(j *Job) { j.markFilled(st.fills) })
+			}
 			continue
 		}
 		errs = append(errs, err)

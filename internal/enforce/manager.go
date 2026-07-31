@@ -14,6 +14,7 @@ package enforce
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -56,11 +57,15 @@ type Manager struct {
 	cache     *verify.Cache
 	verifier  verify.Service
 	ociByHost map[string]config.StoreConfig
-	policy    string
-	self      selfGuard
-	now       func() time.Time
-	wg        sync.WaitGroup
-	cancel    context.CancelFunc
+	// cachedBy maps a store name to the registries that declare it as their
+	// cache. A routed image is recorded on the node under the cache's host, so
+	// this is how enforcement gets back to the registry the job was actually for.
+	cachedBy map[string][]config.StoreConfig
+	policy   string
+	self     selfGuard
+	now      func() time.Time
+	wg       sync.WaitGroup
+	cancel   context.CancelFunc
 }
 
 type unit struct {
@@ -83,15 +88,28 @@ func NewManager(stores []Store, cache *verify.Cache, verifier verify.Service, al
 		policy = "grace"
 	}
 	byHost := map[string]config.StoreConfig{}
+	cachedBy := map[string][]config.StoreConfig{}
 	for _, s := range allStores {
-		if s.IsRegistry() && s.Host != "" {
+		if !s.IsRegistry() {
+			continue
+		}
+		if s.Host != "" {
 			byHost[s.Host] = s
 		}
+		for _, r := range s.Caches {
+			cachedBy[r.Store] = append(cachedBy[r.Store], s)
+		}
+	}
+	// Map iteration is unordered and this decides which store is asked second, so
+	// fix it: an image killed or spared must not depend on map layout.
+	for _, origins := range cachedBy {
+		slices.SortFunc(origins, func(a, b config.StoreConfig) int { return strings.Compare(a.Name, b.Name) })
 	}
 	m := &Manager{
 		cache:     cache,
 		verifier:  verifier,
 		ociByHost: byHost,
+		cachedBy:  cachedBy,
 		policy:    policy,
 		self:      selfGuard{id: resolveSelfID(opts.SelfContainer)},
 		now:       now,

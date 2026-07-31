@@ -761,3 +761,74 @@ Mutation coverage: 9 of the 10 fixes fail a test when reverted. The tenth — th
 `want == 0` short-circuit in `cacheServesReferrers` — cannot, because removing it is a
 cost difference (one fewer listing at the cache) and not a behaviour: with no referrers
 anywhere, `have >= want` answers the same. It is noted rather than papered over.
+
+### Acting on the design-level concerns
+
+The second review left six things that were not defects — gaps in what the design
+could express, what it defaulted to, and what an operator could see. All six are
+now closed. Each has a test that a mutation reverting it fails (14 mutations, all
+caught).
+
+1. **The cost model needed a second knob to hold, and nobody was told.** The
+   promise is that the origin is read once rather than once per destination, and
+   the burst the feature exists for — N destinations submitted together for a cold
+   image — was the case where it did not. `worker.source_wait` is what collapses
+   it, and it defaulted to off.
+
+   It now defaults to **30s**. The argument that made the wait safe in the first
+   place (§2.1: the wait happens only after a real miss, so a warm source is never
+   delayed) is the argument for defaulting it on, and the slot semaphore already
+   bounds the cost. Zero is a meaningful value here — waiting off — so the field
+   became a pointer: unset is 30s, explicit `0s` is off, and one worker forces 0
+   because a serial pipeline can have nothing filling anything while the move that
+   would wait for it runs.
+
+2. **A waiter was released a hop late.** `Job.Fills` released everyone when the JOB
+   ended (Decision 7), so a reader of an intermediate waited out the delivery hop
+   as well — a whole image copy it has no stake in. With waiting on by default that
+   stops being theoretical: waiters would routinely burn their whole bound on a
+   fill that landed minutes earlier. Each published reference now has its own gate,
+   opened by the step that publishes it; the job's end opens whatever is left, so a
+   waiter still can never outlive the job it waits on.
+
+3. **A declined route was invisible.** There are nine ways `route()` can decline,
+   and all of them logged and returned. `gantry.job.fallback` cannot cover them —
+   it counts a route abandoned at RUN time — so a permanently dead route looked
+   exactly like a healthy fleet: same job outcomes, same states, a different bill.
+   `gantry.job.route` now records every decision at admission
+   (`filled`/`warm`/`proxy`/`joined`/`declined`/`rejected`, plus a closed set of
+   reasons), counted only for jobs whose source declares a route, so the metric is
+   a complete breakdown of the routed population rather than of every job on the
+   server. `route()` became a wrapper over `routeDecision` so there is exactly one
+   place that records.
+
+4. **`require_authority` split the dedup key when it could not apply.** Its twin
+   `fallback` is narrowed to "an origin attempt was actually bound"; this one was
+   the raw effective value, so a strict and a lenient submit for a source with no
+   route ran the same image copy twice. It is now narrowed to sources that declare
+   a route — the flag is only ever consulted for a routed job, and only such a
+   source can be routed — and field 22's proto comment says "effective" in the same
+   sense field 21 does, which it did not before.
+
+5. **The route could not express a topology.** One cache per source, for every job.
+   A per-rack or per-repository layout was inexpressible, and the natural attempt —
+   declaring a cache on the cache — silently produces two independent routes rather
+   than a chain, which the config validator accepted and a test appeared to bless.
+   `caches:` is now an ordered list of routes scoped by `for_targets` (store names)
+   and `for_repos` (doublestar over the repository PATH); first match wins, `cache:
+   x` is the shorthand for a single unscoped route, and the loader rejects both
+   spellings together, a host-qualified repo pattern (which could never match), and
+   a route made unreachable by an unscoped one ahead of it. Routing stays one level
+   deep — the docs now say so plainly.
+
+6. **The host a routed job leaves on a node was nobody else's business.** Retention
+   rules and `serve.enforce` both key off it, and both were written for the origin.
+   A rule now expands across the caches its registry declares (for the targets those
+   routes can reach), so it is stated once; and enforcement asks the cache first and
+   then the registries that declare it as their cache, acting on a refusal only once
+   every one of them has been asked. The signature is over the digest, so proof from
+   any of them is proof about the same bytes — and a cache whose referrers were
+   collected no longer costs a running container.
+
+Also: `maxAttempts` is headroom, not a live constraint, and the comment now records
+that the largest plan `plan()` can build makes four attempts, so the gap is visible.

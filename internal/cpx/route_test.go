@@ -5,12 +5,14 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/z"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
@@ -881,7 +883,7 @@ func TestRoutedJobDoesNotWaitForItsOwnFill(t *testing.T) {
 		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
 	}, false)
 	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker"}, eng)
-	w.wc.SourceWait = config.Duration(30 * time.Second) // would hang the test if taken
+	w.wc.SourceWait = z.Ptr(config.Duration(30 * time.Second)) // would hang the test if taken
 	eng.failFor = failHost(site, errors.New("MANIFEST_UNKNOWN: manifest unknown"))
 	pushImage(t, cloud+"/team/app:1", 1)
 
@@ -1173,7 +1175,7 @@ func TestRouteDoesNotPlanAFillSomeoneElseIsAlreadyRunning(t *testing.T) {
 	// A job that is, right now, putting exactly this image into the site.
 	filling := NewJob("job_filler", cloud+"/team/app:1", nil, time.Now())
 	filling.State = JobRunning
-	filling.Fills = []string{site + "/team/app:1"}
+	filling.setFills([]string{site + "/team/app:1"})
 	if err := js.Add(filling); err != nil {
 		t.Fatal(err)
 	}
@@ -1336,5 +1338,199 @@ func TestUnroutableJobIsNotRefusedForAnUnconfirmedAuthority(t *testing.T) {
 				t.Fatalf("steps = %+v, want one unrouted hop", res.Steps)
 			}
 		})
+	}
+}
+
+// A waiter on an intermediate hop is released when THAT hop lands. Holding it
+// until the job ends would make it wait out the delivery hop as well — a whole
+// image copy it has no stake in — and on a bounded wait that is the difference
+// between being served and timing out.
+func TestAFillReleasesItsWaitersWhenTheHopLands(t *testing.T) {
+	cloud, site := startRegistry(t), startRegistry(t)
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
+	w, js := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+	}, false)
+	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker"}, eng)
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	// Hold the delivery hop open, so the job is unambiguously still running when
+	// the fill hop has already landed.
+	pulling, hold := make(chan struct{}), make(chan struct{})
+	var started, released sync.Once
+	release := func() { released.Do(func() { close(hold) }) }
+	eng.failFor = func(string) error {
+		started.Do(func() { close(pulling) })
+		<-hold
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); release(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-pulling // the fill committed; the pull is in flight
+
+	fillRef := mustRefName(t, site+"/team/app:1")
+	gate, ok := js.Filling(fillRef, "")
+	if !ok {
+		t.Fatalf("the running job should still be the one that fills %q", fillRef)
+	}
+	select {
+	case <-gate:
+	default:
+		t.Error("the fill hop has landed but its waiters are still parked on the delivery hop")
+	}
+
+	release()
+	if done := waitTerminal(t, js, snap.ID); done.State != JobDone {
+		t.Fatalf("state = %q (err=%q)", done.State, done.Err)
+	}
+}
+
+// A route declined at admission leaves no other trace — the job is done, the
+// target has the image, and the only difference is how many times the origin was
+// read. The counter is the whole of an operator's visibility into that, so it has
+// to fire on every decision, with the reason attached.
+func TestRouteDecisionIsCounted(t *testing.T) {
+	cloud, site, local := startRegistry(t), startRegistry(t), startRegistry(t)
+	edge := startRegistry(t)
+	build := func(t *testing.T) (*Copier, Store) {
+		t.Helper()
+		return newCopier(t, []config.StoreConfig{
+			{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+			{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+			{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+			// A pull-through TARGET fetches from its own upstream, so it cannot be
+			// routed — one of the declines worth seeing.
+			{Name: "edge", Kind: "oci", Host: edge, Insecure: true, Mode: "proxy"},
+			{Name: "elsewhere", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+		}, false)
+	}
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	for _, tc := range []struct {
+		name     string
+		req      Request
+		decision string
+		reason   string
+	}{
+		{"cold cache", Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local"}, routeFilled, ""},
+		{"target is the cache", Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "site"}, routeDeclined, "target_is_cache"},
+		{"target cannot be routed", Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "edge"}, routeDeclined, "cache_unreadable"},
+		{"authority has no such image", Request{Ref: cloud + "/team/gone:1", Source: "cloud", Target: "local"}, routeDeclined, "no_such_image"},
+		// A source that declares no cache is not a routing decision at all and must
+		// not be counted — otherwise the denominator is every job on the server.
+		{"unrouted source", Request{Ref: site + "/team/app:1", Source: "site", Target: "local"}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, _ := build(t)
+			mctx, reader := otxContext(t)
+			w.SetBaseContext(mctx)
+			w.metrics = newMetrics(mctx)
+
+			_, _ = w.Plan(mctx, tc.req) // admission alone; nothing needs to run
+
+			var rm metricdata.ResourceMetrics
+			if err := reader.Collect(mctx, &rm); err != nil {
+				t.Fatal(err)
+			}
+			if tc.decision == "" {
+				if _, ok := counterValue(t, rm, "gantry.job.route", "source", "site"); ok {
+					t.Fatal("a source that declares no cache is not a routing decision")
+				}
+				return
+			}
+			got, ok := counterValue(t, rm, "gantry.job.route", "decision", tc.decision)
+			if !ok || got != 1 {
+				t.Fatalf("gantry.job.route{decision=%s} = %d (found=%v), want 1", tc.decision, got, ok)
+			}
+			if tc.reason != "" {
+				if got, ok := counterValue(t, rm, "gantry.job.route", "reason", tc.reason); !ok || got != 1 {
+					t.Errorf("gantry.job.route{reason=%s} = %d (found=%v), want 1", tc.reason, got, ok)
+				}
+			}
+			if got, ok := counterValue(t, rm, "gantry.job.route", "cache", "site"); !ok || got != 1 {
+				t.Errorf("gantry.job.route{cache=site} = %d (found=%v), want the configured cache named", got, ok)
+			}
+		})
+	}
+}
+
+// require_authority only ever governs a job gantry routed, and only a source that
+// declares a cache is ever routed — so for every other source the flag is
+// provably inert and must not split two otherwise identical submits into two
+// copies of the same image. Same narrowing as fallback_to_origin.
+func TestRequireAuthorityIsInertWithoutACache(t *testing.T) {
+	w, _, _, site, _ := routedCopier(t)
+	w.base = context.Background() // enqueue without workers; jobs stay active
+	pushImage(t, site+"/team/app:1", 1)
+
+	yes, no := true, false
+	// `site` declares no cache of its own, so neither submit can ever be routed.
+	req := Request{Ref: site + "/team/app:1", Source: "site", Target: "local", RequireAuthority: &no}
+	snap, created, err := w.Submit(req)
+	if err != nil || !created {
+		t.Fatalf("first submit: created=%v err=%v", created, err)
+	}
+	strict := req
+	strict.RequireAuthority = &yes
+	if _, created, err := w.Submit(strict); err != nil || created {
+		t.Fatalf("a strict submit should coalesce when the flag cannot apply: created=%v err=%v", created, err)
+	}
+	// …and the job reports the effective decision, which is that it refuses
+	// nothing, because there is nothing it could refuse.
+	if snap.RequireAuthority {
+		t.Error("require_authority = true on a job whose source declares no cache")
+	}
+}
+
+// A scope is what expresses a topology one cache per source cannot: several
+// routes on the SAME origin, each naming the jobs it serves. A job the scope
+// excludes reads its source directly, which is not a failure and not a decline
+// worth alerting on — it was never a candidate.
+func TestScopedRoutesPickTheCachePerJob(t *testing.T) {
+	cloud, rack, site := startRegistry(t), startRegistry(t), startRegistry(t)
+	local1, local2 := startRegistry(t), startRegistry(t)
+	w, _ := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Caches: []config.CacheRoute{
+			{Store: "rack", ForTargets: []string{"local1"}},
+			{Store: "site", ForRepos: []string{"team/**"}},
+		}},
+		{Name: "rack", Kind: "oci", Host: rack, Insecure: true, Mode: "copy"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		{Name: "local1", Kind: "oci", Host: local1, Insecure: true, Mode: "copy"},
+		{Name: "local2", Kind: "oci", Host: local2, Insecure: true, Mode: "copy"},
+	}, false)
+	pushImage(t, cloud+"/team/app:1", 1)
+	pushImage(t, cloud+"/other/app:1", 1)
+
+	routedThrough := func(t *testing.T, repo, target string) string {
+		t.Helper()
+		p, err := w.plan(context.Background(), Request{Ref: cloud + "/" + repo + ":1", Source: "cloud", Target: target})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		for _, at := range p.last().attempts {
+			if at.why == whyRoute {
+				return at.src.Name
+			}
+		}
+		return ""
+	}
+	for _, tc := range []struct{ repo, target, want string }{
+		{"other/app", "local1", "rack"}, // the target scope, and it is first
+		{"team/app", "local1", "rack"},  // …even though the repo scope also matches
+		{"team/app", "local2", "site"},  // the repo scope
+		{"other/app", "local2", ""},     // no route covers this job
+	} {
+		if got := routedThrough(t, tc.repo, tc.target); got != tc.want {
+			t.Errorf("%s -> %s routed through %q, want %q", tc.repo, tc.target, got, tc.want)
+		}
 	}
 }
