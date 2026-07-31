@@ -116,6 +116,25 @@ func upstreamPlan(ctx context.Context, source config.StoreConfig, ref name.Refer
 // reached has told nothing.
 var ErrNoSuchImage = errors.New("the registry does not have this reference")
 
+// ErrDestination marks a failure the DESTINATION registry itself returned — it
+// refused the write, or could not be reached to accept it. No other source can
+// substitute for that: re-reading the image from somewhere else would move every
+// byte again and be refused identically at the end. It is the registry-copy
+// counterpart of down.ErrEngine, which says the same thing about a daemon.
+var ErrDestination = errors.New("destination-side failure")
+
+// answeredBy reports whether err is a registry error that HOST itself returned.
+// The request that failed is carried on the error, so which side of a copy broke
+// is a fact rather than a guess — a blob is streamed from the source through to
+// the destination, so the failure surfaces from the same call either way.
+func answeredBy(err error, host string) bool {
+	var te *transport.Error
+	if !errors.As(err, &te) {
+		return false
+	}
+	return te.Request != nil && te.Request.URL != nil && te.Request.URL.Host == host
+}
+
 // absent reports whether err is a registry's own definitive "no". Only 404 and
 // 403 qualify: some registries hide the existence of a repository behind a
 // forbidden rather than a not-found. Everything else — 401, 429, 5xx, a TLS

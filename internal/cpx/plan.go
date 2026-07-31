@@ -124,7 +124,15 @@ type execPlan struct {
 	as       []string // engine step: names the image is recorded under
 	asDigest bool     // `as` holds digest refs, so an anchor blob must be fetched
 
-	copyReferrers bool                  // a job property, applied per registry step
+	copyReferrers bool // a job property, applied per registry step
+	// needReferrers says a routed read must be able to supply everything the
+	// authority holds over the image. It is NOT the same question as
+	// copyReferrers: an engine target cannot ask for referrer propagation (there
+	// is no referrer transport in a daemon pull) and yet the signatures still
+	// matter to it, because serve.enforce re-verifies what the node holds against
+	// the store whose HOST the daemon recorded — which, on a routed job, is the
+	// cache. So the caller can only ever widen this, never narrow it away.
+	needReferrers bool
 	verification  *VerificationSnapshot // admission-time verification, stamped on the Job
 	// fallback is the EFFECTIVE fallback_to_origin decision: true exactly when an
 	// origin attempt was actually bound. Part of the dedup key, so a job that
@@ -430,6 +438,14 @@ func (w *Copier) plan(ctx context.Context, req Request) (*execPlan, error) {
 		}
 		deliver.referrers = p.copyReferrers
 	}
+	// Whether a routed read has to be able to supply the referrers. A registry
+	// target says so with copy_referrers. An engine target has no way to say it —
+	// a daemon pull has no referrer transport — and needs it regardless: the node
+	// records the host it was told to pull from, and serve.enforce re-verifies what
+	// the node holds against the store that host resolves to. Route it through a
+	// cache with no signatures and a live verifier finds an unsigned image.
+	_, isPuller := p.target.(puller)
+	p.needReferrers = p.copyReferrers || isPuller
 
 	// Attempts last, so every one of them inherits whatever verification pinned: a
 	// job that falls back reaches for the very digest it verified, from a different
@@ -569,7 +585,14 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		l.Warn("not routing: the cache store cannot hold an image", slog.String("cache", cacheName))
 		return w.requireAuthority(p, req, false)
 	}
-	cacheCfg, _ := w.stores.Config(cacheName)
+	cacheCfg, declared := w.stores.Config(cacheName)
+	if !declared {
+		// Validated at config load, so this is a store that stopped being declared.
+		// A zero StoreConfig has no host, which would route the job at whatever
+		// `/repo:tag` parses to — never that.
+		l.Warn("not routing: the cache store is not declared", slog.String("cache", cacheName))
+		return w.requireAuthority(p, req, false)
+	}
 
 	// Settle the tag at the authority. Everything downstream is anchored to this:
 	// it makes the nearer copy provably the same content, and it is what the probe
@@ -600,6 +623,27 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		// the useful answer — the site registry keeps working while the cloud one
 		// does not — and it is the one case where the caller can receive content the
 		// authority never confirmed, so require_authority governs it.
+		//
+		// Everything that can decline the route is settled BEFORE require_authority
+		// is asked, because the flag "is a no-op for a job that is not routed" and a
+		// job gantry was never going to route is exactly that. Both checks are the
+		// ones the confirmed path makes; the difference is only that there is no
+		// digest here to make them with.
+		if why, ok := w.unreadableCache(p, deliver, cacheCfg); !ok {
+			l.Debug("not routing: the cache could not be read by this job",
+				slog.String("cache", cacheName), slog.String("reason", why))
+			return nil
+		}
+		if p.needReferrers {
+			// Without a digest the cache cannot be asked whether it holds the
+			// referrers, and reading it unasked is how a signature goes missing on a
+			// job that reports done. Decline: the job then reads the source it named
+			// and fails there, which is what an unrouted job does when its source is
+			// unreachable.
+			l.Info("not routing: the authority could not confirm the reference and this job needs its referrers",
+				slog.String("ref", p.authorityRef.Name()), slog.String("cache", cacheName))
+			return nil
+		}
 		if aerr := w.requireAuthority(p, req, true); aerr != nil {
 			// Both halves matter: that it is fatal, and why the authority went quiet.
 			return fmt.Errorf("%w: %w", aerr, derr)
@@ -633,6 +677,16 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	// guard — a fill step targeting a proxy would read the whole image into
 	// io.Discard and commit nothing.
 	if rd, isRegistry := cacheDest.(*registryDest); isRegistry && rd.isProxy() {
+		if p.needReferrers {
+			// What a pull-through cache fills on a read is the image. Whether it
+			// also proxies the referrers API is the upstream product's business, not
+			// something gantry can establish, and there is no fill step here to carry
+			// them instead — so a job whose signatures must travel reads the
+			// authority, which certainly has them.
+			l.Info("not routing: a pull-through cache cannot be relied on for referrers",
+				slog.String("cache", cacheName))
+			return nil
+		}
 		l.Debug("routing through a pull-through cache: reading it is what fills it",
 			slog.String("cache", cacheName))
 		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
@@ -653,12 +707,12 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		return nil
 	}
 	if warm {
-		if p.copyReferrers && !w.cacheHasReferrers(ctx, cacheCfg, dg) {
-			// The cache holds the image but not its referrers — filled before, by a
-			// job that did not need them. Reading it would satisfy the pull and drop
-			// the signature, so read the authority instead. The image is already
-			// there, so nothing is re-transferred by declining.
-			l.Info("not routing: the cache holds the image but not its referrers",
+		if p.needReferrers && !w.cacheServesReferrers(ctx, p, cacheCfg, dg) {
+			// The cache holds the image but not everything the authority has over it
+			// — filled before, by a job that did not carry them. Reading it would
+			// satisfy the move and drop a signature, so read the authority instead.
+			// The image is already there, so nothing is re-transferred by declining.
+			l.Info("not routing: the cache does not hold every referrer the authority has",
 				slog.String("cache", cacheName), slog.String("digest", digest))
 			return nil
 		}
@@ -675,17 +729,31 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	if err != nil {
 		return z.Err(err, "cache ref at %q", cacheName)
 	}
+	// Unless somebody is already filling it. A second fill would stream the whole
+	// image out of the authority again — the egress this feature exists to spend
+	// once — and the probe cannot see it, because a fill in flight has published
+	// nothing yet. Read the cache instead and let the attempt wait that fill out
+	// (worker.source_wait). If waiting is off, or the fill fails, the delivery falls
+	// through to the source the caller named, exactly as an abandoned route does:
+	// no worse than not routing, and never a duplicated image.
+	if _, filling := w.store.Filling(tagRef.Name(), ""); filling {
+		l.Debug("not filling: another job is already filling this cache",
+			slog.String("cache", cacheName), slog.String("ref", tagRef.Name()))
+		return w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
+	}
 	fill := &execStep{
 		dst: cacheDest, ref: tagRef,
 		verbatim:  true, // so the authority's digest resolves from the cache
 		platforms: nil,  // a verbatim commit writes every child manifest
 		fills:     tagRef.Name(),
 		optional:  true, // gantry added this step for itself
-		// The referrers must travel on THIS hop, from the authority that has them.
-		// Without it the delivery hop asks the cache for referrers it was never
-		// given, finds none — an empty list is not an error — and the job completes
-		// having silently dropped the signature the caller asked to propagate.
-		referrers: p.copyReferrers,
+		// Referrers travel on THIS hop, from the authority that has them, whatever
+		// the job asked for — the same rule as verbatim and platforms above, and for
+		// the same reason: what gantry puts in a shared cache is read by later jobs
+		// that asked for something else. A cache filled without them makes every
+		// later job that needs them decline the route (or, for an engine target,
+		// leaves a node holding an image no host-keyed verifier can check).
+		referrers: true,
 	}
 	fill.newMover = newCopyMover(fill)
 	src, err := w.planAttemptRef(p, p.source)
@@ -703,16 +771,38 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 	return w.addRouteAttempt(ctx, p, deliver, cacheCfg, []int{fill.idx})
 }
 
-// cacheHasReferrers reports whether a store can supply the referrers of a digest
-// it holds. Only asked when the job propagates them, since it costs a listing.
-func (w *Copier) cacheHasReferrers(ctx context.Context, cache config.StoreConfig, dg name.Digest) bool {
-	n, err := countReferrers(ctx, cache, dg)
+// cacheServesReferrers reports whether reading the cache instead of the authority
+// would deliver everything the authority has over this digest.
+//
+// It compares counts rather than asking whether the cache has ANY, because "any"
+// answers a different question than the one that matters and gets both directions
+// wrong: a cache holding one of three signatures reads as complete, and an image
+// that legitimately has none reads as deficient — which would decline the route
+// for every unsigned image and leave the whole optimization inert while every job
+// still reported done. Asking the authority first is also what makes the common
+// case cheap: an image with no referrers costs one listing and routes.
+func (w *Copier) cacheServesReferrers(ctx context.Context, p *execPlan, cache config.StoreConfig, dg name.Digest) bool {
+	l := log.From(ctx)
+	authority, ok := p.authorityRef.(name.Digest)
+	if !ok {
+		return false // unpinned: there is nothing to compare against
+	}
+	want, err := countReferrers(ctx, p.source, authority)
 	if err != nil {
-		log.From(ctx).Debug("could not list the cache's referrers",
+		l.Debug("could not list the authority's referrers",
+			slog.String("source", p.source.Name), slog.String("error", err.Error()))
+		return false
+	}
+	if want == 0 {
+		return true // nothing to drop, so nothing to check for
+	}
+	have, err := countReferrers(ctx, cache, dg)
+	if err != nil {
+		l.Debug("could not list the cache's referrers",
 			slog.String("cache", cache.Name), slog.String("error", err.Error()))
 		return false
 	}
-	return n > 0
+	return have >= want
 }
 
 // unreadableCache reports whether a read of cache would actually reach it from the
@@ -770,8 +860,21 @@ func (w *Copier) addRouteAttempt(ctx context.Context, p *execPlan, st *execStep,
 // repin re-derives everything that was built from the authority reference before
 // the authority settled its tag. Only the delivery step's own attempts exist at
 // this point; its in-store ref is deliberately left on the tag.
+//
+// The origin attempt is deliberately left alone. It is not a read of the
+// authority's content from somewhere nearer — it is the fallback's own,
+// different trust decision: an unpinned job's tag is resolved by the origin
+// itself, which is the tag's authority (plan-source-fallback.md §3.2). Pinning it
+// to a digest the SOURCE reported would silently convert that, and would fail the
+// fallback outright whenever the source holds a manifest the origin never had —
+// a platform-narrowed copy rebuilds the index, so this is ordinary. A job pinned
+// by its own ref or by verification is unaffected: that digest was already on
+// the attempt before routing ran.
 func (w *Copier) repin(p *execPlan, st *execStep) error {
 	for _, at := range st.attempts {
+		if at.why == whyOrigin {
+			continue
+		}
 		ref, err := w.planAttemptRef(p, at.src)
 		if err != nil {
 			return err

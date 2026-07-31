@@ -3,6 +3,7 @@ package cpx
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -15,15 +16,17 @@ import (
 )
 
 // attachReferrer packs and pushes a minimal artifact manifest whose subject is
-// the given descriptor, like a notation signature.
-func attachReferrer(t *testing.T, store config.StoreConfig, repo name.Repository, subject *remote.Descriptor) {
+// the given descriptor, like a notation signature. variant makes the artifact
+// distinct: the manifest is content-addressed, so two attachments of the same
+// bytes are one referrer, not two.
+func attachReferrer(t *testing.T, store config.StoreConfig, repo name.Repository, subject *remote.Descriptor, variant ...string) {
 	t.Helper()
 	ctx := context.Background()
 	r, err := orasRepo(store, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blob := []byte(`{"sig":"test"}`)
+	blob := []byte(`{"sig":"test` + strings.Join(variant, "") + `"}`)
 	blob_desc := ocispec.Descriptor{
 		MediaType: "application/vnd.test.signature",
 		Digest:    godigest.FromBytes(blob),

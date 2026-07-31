@@ -50,7 +50,10 @@ func newCopyMover(st *execStep) func(*Copier, *execAttempt) (mover, error) {
 	}
 }
 
-func (m *copyMove) run(ctx context.Context, job *Job, t *Transfer) error {
+// run copies the image in. Errors leave through attributed(), so a destination
+// that refused the write is never mistaken for a source that could not serve it.
+func (m *copyMove) run(ctx context.Context, job *Job, t *Transfer) (rerr error) {
+	defer func() { rerr = m.attributed(rerr) }()
 	w, st, at := m.w, m.st, m.at
 
 	src, err := m.d.newSource(at.src)
@@ -96,6 +99,18 @@ func (m *copyMove) run(ctx context.Context, job *Job, t *Transfer) error {
 		slog.String("store", m.d.Name()), slog.String("source", at.src.Name),
 		slog.String("ref", st.ref.Name()), slog.Int64("bytes", t.BytesDone.Load()))
 	return nil
+}
+
+// attributed marks an error the destination registry itself answered with, so
+// the attempt loop does not answer a target-side outage by re-reading the whole
+// image from another source — which would be refused identically, and would
+// blame the source (and gantry's own cache) in the metric and the audit event
+// for a failure that belongs to the job's target.
+func (m *copyMove) attributed(err error) error {
+	if err == nil || !answeredBy(err, m.st.ref.Context().RegistryStr()) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrDestination, err)
 }
 
 // --- engine pull -----------------------------------------------------------
@@ -203,14 +218,15 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 // --- attempt classification ------------------------------------------------
 
 // worthAnotherSource reports whether err is worth re-attempting from a different
-// place. Cancellation is the job ending, not a source fault, and an engine
-// capability gap fails identically wherever the bytes come from. Everything else —
-// an unreachable host, a missing manifest, even a platform this source's copy of
-// the index lacks — is a property of the source, and another one may well not
-// share it.
+// place. Cancellation is the job ending, not a source fault; an engine capability
+// gap fails identically wherever the bytes come from; and a destination that
+// refused the write is not a fault of whoever was reading. Everything else — an
+// unreachable host, a missing manifest, even a platform this source's copy of the
+// index lacks — is a property of the source, and another one may well not share
+// it.
 func worthAnotherSource(ctx context.Context, err error) bool {
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		return false
 	}
-	return !errors.Is(err, down.ErrEngine)
+	return !errors.Is(err, down.ErrEngine) && !errors.Is(err, ErrDestination)
 }

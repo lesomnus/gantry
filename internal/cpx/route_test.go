@@ -937,3 +937,404 @@ func TestRequireAuthoritySplitsTheDedupKey(t *testing.T) {
 		t.Fatalf("a stricter submit must not coalesce onto a lenient job: created=%v err=%v", created, err)
 	}
 }
+
+// --- review round: defects found reviewing this branch ----------------------
+
+// The origin fallback is not a read of the authority's content from somewhere
+// nearer — it is the fallback's own trust decision, in which the origin resolves
+// the tag itself. Routing settles the tag at the SOURCE, so re-anchoring every
+// attempt to that digest would silently convert the fallback, and would break it
+// outright whenever the source holds a manifest the origin never had (a
+// platform-narrowed copy rebuilds the index, so that is ordinary).
+func TestRoutingDoesNotPinTheOriginFallbackToTheSourcesDigest(t *testing.T) {
+	origin, mid, rack := startRegistry(t), startRegistry(t), startRegistry(t)
+	// Deliberately different content under the same tag: if the origin attempt
+	// were re-anchored to what `mid` reports, it would ask the origin for a digest
+	// the origin has never held.
+	pushImage(t, origin+"/team/app:1", 1)
+	pushImage(t, mid+"/team/app:1", 3)
+
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
+	w, _ := newCopier(t, []config.StoreConfig{
+		{Name: "origin", Kind: "oci", Host: origin, Insecure: true},
+		{Name: "mid", Kind: "oci", Host: mid, Insecure: true, Mode: "copy", Cache: "rack"},
+		{Name: "rack", Kind: "oci", Host: rack, Insecure: true, Mode: "copy"},
+	}, false)
+	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker"}, eng)
+
+	p, err := w.plan(context.Background(), Request{
+		Ref: origin + "/team/app:1", Source: "mid", Target: "node", FallbackToOrigin: boolp(true),
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	var origAt, routeAt *execAttempt
+	for _, at := range p.last().attempts {
+		switch at.why {
+		case whyOrigin:
+			origAt = at
+		case whyRoute:
+			routeAt = at
+		}
+	}
+	if routeAt == nil {
+		t.Fatal("the job should have been routed through the rack cache")
+	}
+	if _, pinned := routeAt.ref.(name.Digest); !pinned {
+		t.Errorf("the route attempt = %q, want it anchored to the authority's digest", routeAt.ref.Name())
+	}
+	if origAt == nil {
+		t.Fatal("the job should have an origin fallback attempt")
+	}
+	if dg, pinned := origAt.ref.(name.Digest); pinned {
+		t.Errorf("the origin attempt = %q, want the tag; routing pinned it to the SOURCE's digest %s",
+			origAt.ref.Name(), dg.DigestStr())
+	}
+	if want := origin + "/team/app:1"; origAt.pullRef != want {
+		t.Errorf("origin pull ref = %q, want %q", origAt.pullRef, want)
+	}
+}
+
+// An authority that cannot answer leaves no digest, so the cache cannot be asked
+// whether it holds the referrers either. Reading it unasked is how a signature
+// goes missing on a job that reports done, so such a job is simply not routed.
+func TestRouteDeclinesAnUnconfirmedCacheWhenReferrersMustTravel(t *testing.T) {
+	site, local := startRegistry(t), startRegistry(t)
+	// A dead port: not a registry's "no", just silence.
+	w, _ := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: "127.0.0.1:1", Insecure: true, Cache: "site"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+	}, false)
+
+	res, err := w.Plan(context.Background(), Request{
+		Ref: "127.0.0.1:1/team/app:1", Source: "cloud", Target: "local", CopyReferrers: boolp(true),
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(res.Steps) != 1 || len(res.Steps[0].Sources) != 1 || res.Steps[0].Sources[0].Store != "cloud" {
+		t.Fatalf("steps = %+v, want one unrouted hop reading the cloud", res.Steps)
+	}
+	// Without the referrer requirement the same silence DOES route: that is the
+	// documented behaviour this must not have broken.
+	res, err = w.Plan(context.Background(), Request{
+		Ref: "127.0.0.1:1/team/app:1", Source: "cloud", Target: "local", CopyReferrers: boolp(false),
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(res.Steps) != 1 || len(res.Steps[0].Sources) != 2 || res.Steps[0].Sources[0].Store != "site" {
+		t.Fatalf("steps = %+v, want the site read ahead of the cloud", res.Steps)
+	}
+}
+
+// A cache is complete when it holds everything the AUTHORITY holds — not when it
+// holds anything at all. Asking `> 0` declines every image that legitimately has
+// no referrers, which leaves the whole optimization inert while every job still
+// reports done.
+func TestWarmCacheIsJudgedAgainstTheAuthoritysReferrers(t *testing.T) {
+	cloud, site, local := startReferrersRegistry(t), startReferrersRegistry(t), startRegistry(t)
+	cloudCfg := config.StoreConfig{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"}
+	siteCfg := config.StoreConfig{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"}
+	w, js := newCopier(t, []config.StoreConfig{
+		cloudCfg, siteCfg,
+		{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+	}, false)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	src := pushImage(t, cloud+"/team/app:1", 1)
+	// Warm the site directly (target == cache is the degenerate, unrouted shape).
+	warm, _, err := w.Submit(Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "site", CopyReferrers: boolp(false)})
+	if err != nil {
+		t.Fatalf("warm submit: %v", err)
+	}
+	if done := waitTerminal(t, js, warm.ID); done.State != JobDone {
+		t.Fatalf("warm job state = %q (err=%q)", done.State, done.Err)
+	}
+
+	// The image has no referrers anywhere, so nothing can be dropped and the warm
+	// cache must be used.
+	res, err := w.Plan(context.Background(), Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", CopyReferrers: boolp(true),
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(res.Steps) != 1 || res.Steps[0].Sources[0].Store != "site" {
+		t.Fatalf("steps = %+v, want the warm site read; an image with no referrers has none to drop", res.Steps)
+	}
+
+	// Give the AUTHORITY a signature the site does not have: now the site is
+	// genuinely incomplete and must be declined.
+	desc, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachReferrer(t, cloudCfg, src.Context(), desc)
+	res, err = w.Plan(context.Background(), Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", CopyReferrers: boolp(true),
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(res.Steps) != 1 || res.Steps[0].Sources[0].Store != "cloud" {
+		t.Fatalf("steps = %+v, want the cloud read: the site is missing the authority's referrer", res.Steps)
+	}
+
+	// A cache holding SOME of them is still incomplete. This is the half a
+	// "does it have any" test cannot see.
+	siteRepo, err := name.NewRepository(site+"/team/app", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	siteSrc, err := name.ParseReference(site+"/team/app:1", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	siteDesc, err := remote.Get(siteSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachReferrer(t, siteCfg, siteRepo, siteDesc)             // the site now has one…
+	attachReferrer(t, cloudCfg, src.Context(), desc, "second") // …of the authority's two
+	if n := len(listReferrers(t, cloudCfg, src.Context(), desc.Digest)); n != 2 {
+		t.Fatalf("the authority holds %d referrers, want 2", n)
+	}
+	if n := len(listReferrers(t, siteCfg, siteRepo, siteDesc.Digest)); n != 1 {
+		t.Fatalf("the site holds %d referrers, want 1", n)
+	}
+	res, err = w.Plan(context.Background(), Request{
+		Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", CopyReferrers: boolp(true),
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(res.Steps) != 1 || res.Steps[0].Sources[0].Store != "cloud" {
+		t.Fatalf("steps = %+v, want the cloud read: the site has one of the authority's two referrers", res.Steps)
+	}
+}
+
+// What gantry puts in a shared cache is read by later jobs that asked for
+// something else, so a fill carries the referrers whatever the job asked for —
+// the same rule as verbatim and platforms. An ENGINE target cannot ask at all,
+// and needs them: serve.enforce re-verifies what the node holds against the store
+// whose host the daemon recorded, which on a routed job is the cache.
+func TestRoutedFillCarriesReferrersEvenForAnEngineTarget(t *testing.T) {
+	cloud, site := startReferrersRegistry(t), startReferrersRegistry(t)
+	cloudCfg := config.StoreConfig{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"}
+	siteCfg := config.StoreConfig{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"}
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
+	w, js := newCopier(t, []config.StoreConfig{cloudCfg, siteCfg}, false)
+	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker"}, eng)
+
+	src := pushImage(t, cloud+"/team/app:1", 1)
+	desc, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachReferrer(t, cloudCfg, src.Context(), desc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	if done.State != JobDone {
+		t.Fatalf("state = %q (err=%q)", done.State, done.Err)
+	}
+	if len(done.Transfers) != 2 || done.Transfers[0].Store != "site" {
+		t.Fatalf("transfers = %+v, want a fill hop into the site then the pull", done.Transfers)
+	}
+	siteRepo, err := name.NewRepository(site+"/team/app", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(listReferrers(t, siteCfg, siteRepo, desc.Digest)); n != 1 {
+		t.Errorf("the cache holds %d referrers, want the fill to have carried the authority's one", n)
+	}
+}
+
+// A fill already in flight is invisible to the probe — it has published nothing
+// yet — so a second cold job would stream the same image out of the authority
+// again, which is the egress the whole feature exists to spend once. Read the
+// cache instead and let the attempt wait that fill out.
+func TestRouteDoesNotPlanAFillSomeoneElseIsAlreadyRunning(t *testing.T) {
+	w, js, cloud, site, _ := routedCopier(t)
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	// A job that is, right now, putting exactly this image into the site.
+	filling := NewJob("job_filler", cloud+"/team/app:1", nil, time.Now())
+	filling.State = JobRunning
+	filling.Fills = []string{site + "/team/app:1"}
+	if err := js.Add(filling); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := w.plan(context.Background(), Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local"})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(p.steps) != 1 {
+		t.Fatalf("steps = %d, want one: somebody is already filling the site", len(p.steps))
+	}
+	at := p.steps[0].attempts[0]
+	if at.why != whyRoute || at.src.Name != "site" {
+		t.Fatalf("first attempt = %+v, want a read of the site", at)
+	}
+	if at.waitFill != site+"/team/app:1" {
+		t.Errorf("waitFill = %q, want the reference the in-flight fill publishes", at.waitFill)
+	}
+	if len(at.needs) != 0 {
+		t.Errorf("needs = %v, want none: this job plans no fill of its own", at.needs)
+	}
+
+	// With nothing filling it, the same request plans the fill itself.
+	if !js.Delete("job_filler") {
+		t.Fatal("could not remove the filling job")
+	}
+	p, err = w.plan(context.Background(), Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local"})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(p.steps) != 2 {
+		t.Fatalf("steps = %d, want a fill hop and a delivery hop", len(p.steps))
+	}
+}
+
+// copy_referrers decides what a caller is SERVED — the image is identical either
+// way and the signature simply absent — so it splits the dedup key like every
+// other flag of that kind.
+func TestCopyReferrersSplitsTheDedupKey(t *testing.T) {
+	w, _, cloud, _, _ := routedCopier(t)
+	w.base = context.Background() // enqueue without workers; jobs stay active
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	req := Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local", CopyReferrers: boolp(false)}
+	if _, created, err := w.Submit(req); err != nil || !created {
+		t.Fatalf("first submit: created=%v err=%v", created, err)
+	}
+	if _, created, err := w.Submit(req); err != nil || created {
+		t.Fatalf("an identical submit should coalesce: created=%v err=%v", created, err)
+	}
+	withRefs := req
+	withRefs.CopyReferrers = boolp(true)
+	if _, created, err := w.Submit(withRefs); err != nil || !created {
+		t.Fatalf("a submit that needs the signatures must not coalesce onto one that drops them: created=%v err=%v", created, err)
+	}
+}
+
+// A verbatim commit pushes each child manifest at the destination before the
+// index. The child reference must inherit the destination's own scheme: re-parsing
+// it from the destination's NAME drops that, and pushes the children over https
+// into a plain-HTTP cache while the index goes over http.
+func TestVerbatimCommitAddressesChildrenWithTheDestinationsScheme(t *testing.T) {
+	cloud, local := startRegistry(t), startRegistry(t)
+	site := startRegistryOffLoopback(t)
+	w, js := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+	}, false)
+	// An INDEX, so the fill's verbatim commit has children to push.
+	pushIndex(t, cloud+"/team/app:1", "linux/amd64", "linux/arm64")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	if done.State != JobDone {
+		t.Fatalf("state = %q (err=%q)", done.State, done.Err)
+	}
+	// The fill is optional, so a broken commit would still leave the JOB done —
+	// the fill hop's own state and the cache's contents are what tell the truth.
+	if len(done.Transfers) != 2 || done.Transfers[0].State != "done" {
+		t.Fatalf("fill hop = %+v, want it to have committed", done.Transfers[0])
+	}
+	if !hasTagAt(t, site, "team/app", "1") {
+		t.Error("the site should hold the index after a verbatim fill")
+	}
+}
+
+// A destination that refuses the write is not a fault of whoever was reading, so
+// it must not be answered by re-reading the whole image from another source: the
+// second attempt would be refused identically, and gantry would blame its own
+// cache in the metric and the audit event for the target's outage.
+func TestATargetThatRefusesTheWriteIsNotBlamedOnTheSource(t *testing.T) {
+	cloud, site := startRegistry(t), startRegistry(t)
+	local := startRefusingRegistry(t)
+	w, js := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: cloud, Insecure: true, Cache: "site"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		{Name: "local", Kind: "oci", Host: local, Insecure: true, Mode: "copy"},
+	}, false)
+	pushImage(t, cloud+"/team/app:1", 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: cloud + "/team/app:1", Source: "cloud", Target: "local"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	if done.State != JobFailed {
+		t.Fatalf("state = %q, want failed: the caller's target refused the image", done.State)
+	}
+	var delivery []TransferSnapshot
+	for _, tr := range done.Transfers {
+		if tr.Store == "local" {
+			delivery = append(delivery, tr)
+		}
+	}
+	if len(delivery) != 1 {
+		t.Fatalf("delivery attempts = %d (%+v), want one: no source can substitute for a target that refused the write", len(delivery), delivery)
+	}
+}
+
+// require_authority "is a no-op for a job that is not routed". A job whose engine
+// reaches every source by one host can never read the cache, so it is not routed
+// whatever the authority says — and must not be refused for the authority's
+// silence. Settled before require_authority is asked, exactly as on the confirmed
+// path.
+func TestUnroutableJobIsNotRefusedForAnUnconfirmedAuthority(t *testing.T) {
+	site, edge := startRegistry(t), startRegistry(t)
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
+	w, _ := newCopier(t, []config.StoreConfig{
+		{Name: "cloud", Kind: "oci", Host: "127.0.0.1:1", Insecure: true, Cache: "site"},
+		{Name: "site", Kind: "oci", Host: site, Insecure: true, Mode: "copy"},
+		// A pull-through TARGET fetches from its own upstream and ignores whatever
+		// source gantry hands it, so naming the cache changes nothing.
+		{Name: "edge", Kind: "oci", Host: edge, Insecure: true, Mode: "proxy"},
+	}, false)
+	// An engine that reaches every source by one host is the other shape that
+	// cannot be routed.
+	w.stores.PutEngine(config.StoreConfig{Name: "node", Kind: "docker", PullHost: "mirror.local"}, eng)
+
+	for _, target := range []string{"edge", "node"} {
+		t.Run(target, func(t *testing.T) {
+			res, err := w.Plan(context.Background(), Request{
+				Ref: "127.0.0.1:1/team/app:1", Source: "cloud", Target: target, RequireAuthority: boolp(true),
+			})
+			if err != nil {
+				t.Fatalf("plan: %v — this job cannot read the cache, so it is not routed", err)
+			}
+			if len(res.Steps) != 1 || len(res.Steps[0].Sources) != 1 || res.Steps[0].Sources[0].Store != "cloud" {
+				t.Fatalf("steps = %+v, want one unrouted hop", res.Steps)
+			}
+		})
+	}
+}

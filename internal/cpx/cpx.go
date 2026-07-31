@@ -275,7 +275,7 @@ func (w *Copier) Submit(req Request) (snap JobSnapshot, created bool, err error)
 		return JobSnapshot{}, false, err
 	}
 
-	key := dedupKey(req.Ref, p.platforms, p.source.Name, p.target.Name(), p.as, p.fallback, p.strictAuthority)
+	key := dedupKey(req.Ref, p.platforms, p.source.Name, p.target.Name(), p.as, p.fallback, p.strictAuthority, p.copyReferrers)
 	now := time.Now()
 	id := w.idgen()
 	// Coalesce onto an identical in-flight move, but hand this caller its own
@@ -425,7 +425,7 @@ func (w *Copier) Plan(ctx context.Context, req Request) (PlanResult, error) {
 		}
 		out.Steps = append(out.Steps, ps)
 	}
-	key := dedupKey(req.Ref, p.platforms, p.source.Name, p.target.Name(), p.as, p.fallback, p.strictAuthority)
+	key := dedupKey(req.Ref, p.platforms, p.source.Name, p.target.Name(), p.as, p.fallback, p.strictAuthority, p.copyReferrers)
 	if snap, ok := w.store.Active(key); ok {
 		out.Coalesces = snap.ID
 	}

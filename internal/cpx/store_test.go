@@ -8,7 +8,7 @@ import (
 
 func mkJob(id, ref string, platforms []string) *Job {
 	j := NewJob(id, ref, platforms, time.Now())
-	j.dedup = dedupKey(ref, platforms, "", "", nil, false, false)
+	j.dedup = dedupKey(ref, platforms, "", "", nil, false, false, false)
 	return j
 }
 
@@ -59,7 +59,7 @@ func TestStoreActiveDedup(t *testing.T) {
 	s := NewMemStore()
 	a := mkJob("a", "img:1", []string{"linux/arm64", "linux/amd64"})
 	_ = s.Add(a)
-	key := dedupKey("img:1", []string{"linux/amd64", "linux/arm64"}, "", "", nil, false, false)
+	key := dedupKey("img:1", []string{"linux/amd64", "linux/arm64"}, "", "", nil, false, false, false)
 	if _, ok := s.Active(key); !ok {
 		t.Error("active job not found by dedup key")
 	}

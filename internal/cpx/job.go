@@ -172,14 +172,16 @@ func (j *Job) DedupKey() string { return j.dedup }
 // an interchangeable move. What a caller may be SERVED is part of it, not just what
 // is moved: `fallback` because a submit that refused the origin must not be handed
 // a job allowed to read from it (nor the reverse, which would silently drop the
-// fallback the caller asked for), and `strictAuthority` because a submit that
-// refused unconfirmed content must not be handed a job that read a cache the
-// authority never vouched for.
+// fallback the caller asked for), `strictAuthority` because a submit that refused
+// unconfirmed content must not be handed a job that read a cache the authority
+// never vouched for, and `copyReferrers` because a submit that asked for the
+// signatures to travel with the image must not be handed a job that left them
+// behind — the image would be identical and the signature simply absent.
 //
 // The route itself is deliberately NOT in the key: every route delivers the same
 // image to the same store, so it is not identity-bearing, and two submits that
 // probed differently are still interchangeable.
-func dedupKey(ref string, platforms []string, source, target string, as []string, fallback, strictAuthority bool) string {
+func dedupKey(ref string, platforms []string, source, target string, as []string, fallback, strictAuthority, copyReferrers bool) string {
 	ps := append([]string(nil), platforms...)
 	sort.Strings(ps)
 	ns := append([]string(nil), as...)
@@ -187,6 +189,7 @@ func dedupKey(ref string, platforms []string, source, target string, as []string
 	return strings.Join([]string{
 		ref, strings.Join(ps, ","), source, target, strings.Join(ns, ","),
 		strconv.FormatBool(fallback), strconv.FormatBool(strictAuthority),
+		strconv.FormatBool(copyReferrers),
 	}, "\x00")
 }
 

@@ -473,3 +473,15 @@ their pushed HEADs.
   4. `event.proto` said `detail.source` on `job_admitted` is "the one that served the
      job"; it is the source the job was *admitted with*, which on a job that later fell
      back is precisely the one that did not serve it.
+
+### Amended by the routed-copy review
+
+`repin` (added by the routing work) re-anchored **every** delivery attempt to the digest
+the source reported, including the origin one. That silently overrode §3.2's decision
+that an unpinned tag job lets the origin resolve its own tag — and broke the fallback
+outright whenever the source held a manifest the origin never had, which a
+platform-narrowed copy produces routinely. Fixed there; recorded here because it is this
+plan's invariant that was at stake, and it is not visible from this file's own code.
+
+`copy_referrers` was also added to the dedup key, on the same rule §3.5 states for
+`fallback_to_origin`: the key is about what a caller may be **served**.

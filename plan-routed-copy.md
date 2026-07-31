@@ -662,3 +662,102 @@ independently. Everything below is fixed, with a test that a mutation reverting 
   already been partially generalised once (`bindings` for attempts) and would need a second,
   overlapping generalisation for steps. Two overlapping generalisations of the same idea is the
   actual smell. A design pass is running to settle the replacement before any of it is written.
+
+### Second adversarial review, and what it found
+
+Six lenses (routing, execution, identity, concurrency, contract, design) × independent
+refuters, over the whole branch. Everything below is fixed, and every fix has a test
+that a mutation reverting it fails.
+
+The shape of what it found is worth stating, because it is not what the first round
+found. The first round found *missing* behaviour. This one found **guards wired onto
+one branch of three**: `cacheHasReferrers` and `unreadableCache` were both added late,
+both onto the confirmed-authority path only, so `route()` ran on the silent path a
+route the same function refuses to build one branch over.
+
+1. **Routing silently re-anchored the origin fallback.** `repin` rewrote *every*
+   delivery attempt to the digest the SOURCE reported, including the `whyOrigin` one —
+   which is not a nearer read of the authority's content but the fallback's own,
+   different trust decision (§3.2 of the fallback plan: the origin resolves the tag
+   itself). Declaring `cache:` on a store therefore converted an unpinned tag fallback
+   into a digest fallback, and failed it outright whenever the source held a manifest
+   the origin never had — a platform-narrowed copy rebuilds the index, so that is
+   ordinary rather than exotic. `repin` now skips the origin attempt.
+
+2. **The referrer guard asked the wrong question.** `count > 0` at the cache gets both
+   directions wrong: a cache with one of three signatures reads as complete, and an
+   image that legitimately has none reads as deficient — so a warm cache was declined
+   for **every unsigned image**, permanently, while every job still reported `done`.
+   The optimization was inert for a broad class of images and nothing said so. It now
+   compares against the authority (`have >= want`), with `want == 0` short-circuiting
+   before the cache is listed at all.
+
+3. **The silent-authority branch skipped both guards.** A `copy_referrers` job read a
+   referrer-less cache unprobed and completed `done` with the signature dropped — the
+   same request without the `cache:` line *fails*. And `require_authority` refused jobs
+   that provably could not be routed (a `pull_host`-collapsed engine, a proxy target),
+   contradicting "a no-op for a job that is not routed". Both guards now run on that
+   branch, ahead of `require_authority`, because a job gantry was never going to route
+   is exactly the job the flag has nothing to say about.
+
+4. **A fill did not carry referrers for an engine target, and could not be asked to.**
+   `p.copyReferrers` is assigned only inside `if isRegistry`, and an explicit
+   `copy_referrers` on an engine target is rejected — so a routed engine job filled the
+   cache without signatures, and `serve.enforce`, which resolves what a node holds by
+   HOST, then found an unsigned image at the cache and killed the container. The fill
+   now carries referrers **unconditionally**, which is the same rule §Decision 1
+   already reached for `verbatim` and `platforms` and for the same reason: what gantry
+   puts in a shared cache is read by later jobs that asked for something else.
+
+5. **`commitVerbatim` lost the destination's scheme.** `name.NewDigest(dst.Context().Name() + "@" + …)`
+   re-parses without options; http-vs-https lives in the parsed `Registry`, not in the
+   string. So the children went over https while the index went over http, and the
+   verbatim commit could never succeed against a plain-HTTP cache addressed by a DNS
+   name. Making the routed fill unconditionally verbatim turned that latent opt-in bug
+   into a hard blocker for the whole feature — and every `httptest` registry in the
+   suite masked it, because ggcr auto-detects `127.0.0.1` as http on both sides. The
+   child is now derived from `dst.Context()`, and the test binds **127.0.0.2**, which
+   ggcr does not special-case.
+
+6. **`copy_referrers` was missing from the dedup key.** The branch rewrote the key's
+   contract to "what a caller may be SERVED" and widened it twice on that rule, leaving
+   out the strongest case: the image is byte-identical and the signature simply absent,
+   which is the hardest of the three to notice.
+
+7. **Nothing coordinated cold fills.** The probe cannot see a fill in flight — it has
+   published nothing yet — so N concurrent submits each planned their own fill and each
+   streamed the image out of the authority, which is the egress the feature exists to
+   spend once. `route()` now asks the job store as well, and plans no fill when one is
+   already running. Collapsing the burst onto a single authority read still requires
+   `worker.source_wait`; that is now documented where it matters rather than left to be
+   discovered.
+
+8. **A target that refused the write was blamed on the source.** `worthAnotherSource`
+   excluded only cancellation and `down.ErrEngine`, so a destination-side rejection on a
+   registry copy was answered by re-reading the whole image from the origin — refused
+   identically at the end — and reported as `gantry.job.fallback{reason=route}`, polluting
+   the one signal an operator has for cache health. The recon note that said this
+   classifier "cannot be reused verbatim on the copy path" had been honoured for the fill
+   hop only. There is now an `ErrDestination` sentinel, applied by attributing the error
+   to whichever registry actually answered it (`transport.Error` carries the request), so
+   a mid-copy failure at the *source* still falls through as before.
+
+9. **`reason=origin` is unreachable** — the origin attempt is always last, so it is never
+   the attempt given up. The mechanism is right (the reason names what was given up); the
+   docs promised a value that cannot occur. Documentation fixed, in `stores.md` and
+   `observability.md`.
+
+10. **A cache that stopped being declared** produced a zero `StoreConfig` (the error from
+    `stores.Config` was discarded), which would have routed the job at whatever
+    `/repo:tag` parses to. Now declines to route.
+
+Not fixed, deliberately: `require_authority` enters the dedup key un-narrowed while
+`fallback` is narrowed to "an origin attempt was actually bound". Narrowing it would make
+a coalesced strict caller read `require_authority: false` from the shared snapshot, and
+`route_test.go` deliberately pins the split. The asymmetry is real and is a design
+question, not a defect.
+
+Mutation coverage: 9 of the 10 fixes fail a test when reverted. The tenth — the
+`want == 0` short-circuit in `cacheServesReferrers` — cannot, because removing it is a
+cost difference (one fewer listing at the cache) and not a behaviour: with no referrers
+anywhere, `have >= want` answers the same. It is noted rather than papered over.

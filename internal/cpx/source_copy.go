@@ -130,10 +130,11 @@ func (s *copySource) commitVerbatim(ctx context.Context, dst name.Reference, des
 		return v1.Hash{}, z.Err(err, "index manifest")
 	}
 	for _, m := range im.Manifests {
-		child, err := name.NewDigest(dst.Context().Name() + "@" + m.Digest.String())
-		if err != nil {
-			return v1.Hash{}, z.Err(err, "child ref %s", m.Digest)
-		}
+		// Derived from dst's own repository rather than re-parsed from its name:
+		// http-vs-https lives in the parsed Registry, not in the string Name()
+		// returns, so re-parsing would push the children over https into a
+		// plain-HTTP cache while the index itself goes over http.
+		child := dst.Context().Digest(m.Digest.String())
 		if m.MediaType.IsIndex() {
 			nested, err := src_idx.ImageIndex(m.Digest)
 			if err != nil {

@@ -128,14 +128,17 @@ client retry (network blip, restart) safe without double-moving an image.
 
 Coalescing (and idempotency's "identical move" notion) keys on the tuple
 **(`ref`, `platforms`, `source`, `target`, `as`, `fallback_to_origin`,
-`require_authority`)**. Two submits that differ in any of those seven run as
-separate jobs; two that match an active job coalesce.
+`require_authority`, `copy_referrers`)**. Two submits that differ in any of those
+eight run as separate jobs; two that match an active job coalesce.
 
-The last two are in the key because they change what a caller may be **served**,
+The last three are in the key because they change what a caller may be **served**,
 not only what is moved: a submit that refused the origin must not be handed a job
 allowed to read from it (nor the reverse, which would silently drop the fallback it
-asked for), and a submit that refused content its source never confirmed must not
-be handed a job that accepted it.
+asked for); a submit that refused content its source never confirmed must not be
+handed a job that accepted it; and a submit that asked for the signatures to travel
+with the image must not be handed a job that left them behind — the image would be
+byte-identical and the signature simply absent, which is the hardest of the three
+to notice.
 
 The *route* is deliberately not in the key. Every route delivers the same image to
 the same store, so it is not identity-bearing, and two submits that probed a cache

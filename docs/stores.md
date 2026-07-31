@@ -400,8 +400,12 @@ there the source the caller named *is* the authority.
   audit record report roughly twice its size. That is honest — the bytes did move —
   but worth knowing when reading a routed job's numbers.
 - **`gantry.job.fallback` counts a route being abandoned as well as a source
-  fallback**, distinguished by its `reason` attribute (`route` vs `origin`). A route
-  that never works shows up there rather than as failing jobs.
+  fallback**, distinguished by its `reason` attribute, which names what was GIVEN
+  UP: `route` is gantry's own cache being abandoned, `planned` is the source the
+  caller named being left (i.e. a fallback to the origin). A route that fails at
+  run time shows up there rather than as failing jobs. A route gantry declines at
+  admission does **not** — it is logged, and visible in `JobService.Plan`, but
+  there is no counter for it.
 - **An abandoned route's already-pushed blobs are left in the cache.** They are
   content-addressed, so the next attempt and the direct copy both reuse them; a
   registry with aggressive unreferenced-blob GC turns an abandonment into a
@@ -416,13 +420,54 @@ there the source the caller named *is* the authority.
   written for the origin will not match the image. Use `as` to give it a name
   independent of which store served it — the same remedy as for
   [the source fallback](#falling-back-to-the-origin).
-- **Referrers travel on every hop.** A job propagating them fills the cache with
-  them too, and a cache that holds the image but not its referrers — filled earlier
-  by a job that did not need them — is declined rather than read, so a signature is
-  never silently dropped. That costs a referrer listing per routed job that
-  propagates them.
+- **Referrers travel on every hop, and a fill always carries them.** A fill hop
+  copies the authority's referrer artifacts whatever the job asked for — the same
+  rule as `verbatim` and `platforms`, and for the same reason: what gantry puts in
+  a shared cache is read later by jobs that asked for something else. An engine
+  target cannot ask for referrer propagation at all (a daemon pull has no referrer
+  transport) and needs it anyway, because `serve.enforce` re-verifies what a node
+  holds against the store whose host the daemon recorded — which, on a routed job,
+  is the cache.
+- **A warm cache is judged against the authority, not against zero.** Before
+  reading a cache instead of the authority, gantry checks that it holds at least as
+  many referrers as the authority does for that digest; a deficient one is declined
+  and the authority is read, so a signature is never silently dropped. Asking
+  "does it have any" would get this wrong in both directions — a cache with one of
+  three signatures would read as complete, and an image that legitimately has none
+  would read as deficient, which would leave routing permanently inert for every
+  unsigned image. The check costs one referrer listing at the authority, plus one
+  at the cache when the authority actually has some. It runs for a job that
+  propagates referrers, and for every engine-target job.
+- **An unconfirmed cache is never read by a job that needs referrers.** With no
+  digest there is nothing to check the cache against, so a job propagating
+  referrers — or any engine-target job — is simply not routed when the authority
+  cannot confirm the reference, rather than reading the cache on faith.
+- **A pull-through cache is not routed through by a job that needs referrers.**
+  Reading a proxy is what fills it with the *image*; whether it also proxies the
+  referrers API is the upstream product's business, and there is no fill hop to
+  carry them instead.
 - **Admission does two registry requests** (settle the tag at the authority, probe
-  the cache), bounded together by `worker.admission_timeout` (default `10s`).
+  the cache), bounded together by `worker.admission_timeout` (default `10s`), plus
+  the referrer listings above when the job needs them.
+- **A fill already in flight is not duplicated.** The probe cannot see one — a fill
+  that has not committed yet has published nothing — so gantry also asks its own
+  job store. A second cold job for the same image therefore plans no fill of its
+  own and reads the cache instead. Whether it *waits* for that fill is
+  `worker.source_wait`: at the default `0` it reads the cache, misses, and falls
+  through to the source the caller named, which costs what not routing would have
+  cost. **Set `worker.source_wait` if you submit many destinations for a cold image
+  at once** — that is what collapses the burst onto one authority read.
+- **Routing does not re-anchor the origin fallback.** A job that falls back to the
+  registry named in its own `ref` resolves the tag *there*, at the tag's own
+  authority, and declaring a `cache:` on its source does not change that. Otherwise
+  a source holding a rebuilt (platform-narrowed) index would pin the fallback to a
+  digest the origin never had, and the fallback would fail on exactly the jobs it
+  exists to rescue.
+- **A target that refuses the write is not a source fault.** When the caller's own
+  target rejects the image, gantry does not answer by re-reading it from another
+  source: the second attempt would move every byte again and be refused
+  identically. Such a failure is not counted against the cache in
+  `gantry.job.fallback`.
 
 ## Falling back to the origin
 

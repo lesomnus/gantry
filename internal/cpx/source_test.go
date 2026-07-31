@@ -2,6 +2,7 @@ package cpx
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -33,6 +34,53 @@ func (s *testSink) lastState() string {
 func startRegistry(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(registry.New())
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
+}
+
+// startRegistryOffLoopback serves a registry on 127.0.0.2 rather than 127.0.0.1.
+// The address is still loopback to the kernel, but ggcr does NOT special-case it
+// — only the literal "127.0.0.1", "::1" and *.local(host) are auto-http — so the
+// scheme of every reference aimed at it comes from name.Insecure alone. That is
+// what makes a reference derived WITHOUT the store's options observably wrong
+// here, and invisible on a 127.0.0.1 registry.
+func startRegistryOffLoopback(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.2:0")
+	if err != nil {
+		t.Skipf("cannot bind 127.0.0.2: %v", err)
+	}
+	srv := httptest.NewUnstartedServer(registry.New())
+	srv.Listener.Close()
+	srv.Listener = l
+	srv.Start()
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
+}
+
+// startRefusingRegistry serves a registry that answers every write with 403, so a
+// destination that will not accept the image can be modelled.
+func startRefusingRegistry(t *testing.T) string {
+	t.Helper()
+	inner := registry.New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"errors":[{"code":"DENIED","message":"push access denied"}]}`))
+		default:
+			inner.ServeHTTP(w, r)
+		}
+	}))
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	if err != nil {
