@@ -59,6 +59,9 @@ declared store name or a bare registry host (when `allow_unknown_stores` is set)
 
 The guides below live in [docs/](docs/) ([index](docs/README.md)):
 
+- **[docs/examples.md](docs/examples.md)** — worked examples of the
+  remote → cache → engine flow: the two-job and routed models side by side, what
+  each job's `transfers` look like, and which flag decides the outcome.
 - **[docs/stores.md](docs/stores.md)** — store kinds, copy/proxy fill,
   `downstream_host`/`pull_host`, outbound TLS (private-CA and TPM-sealed mTLS),
   `as` names, digest pinning.

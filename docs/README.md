@@ -7,6 +7,7 @@ subsystem. The full annotated configuration lives in
 
 | Guide | Covers |
 |---|---|
+| [examples.md](examples.md) | Worked examples of the remote → cache → engine flow: the two-job model and the routed (`cache:`) model side by side, what each job's `transfers` look like in every case (warm, cold, waiting for a fill, falling back, an unreachable remote), and a reference for which flag decides the outcome. |
 | [stores.md](stores.md) | Store kinds (oci / docker / containerd), copy vs proxy fill, the cache-side reference, `downstream_host`/`pull_host`, outbound TLS (private-CA and TPM-sealed mTLS), caller-chosen `as` names, and digest pinning. |
 | [retention.md](retention.md) | Per-engine-store image GC: usage tracking, the policy cascade and evaluation order, digest counting, pins, the untagged reaper, inventory reconciliation, and the adaptive scheduler. |
 | [verification.md](verification.md) | Source-image signature verification (Notary Project / notation): enforcement modes, the trust store and policy, digest pinning, `copy_referrers`, and the `VerifyService` surface. |

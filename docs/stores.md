@@ -286,6 +286,10 @@ nothing.
 
 ## Routing a copy through a cache
 
+For end-to-end walkthroughs of this section against the two-job model — what each
+job's `transfers` look like warm, cold, waiting, falling back, or with the remote
+down — see [examples.md](examples.md).
+
 A registry can declare that another one holds copies of its content:
 
 ```yaml
