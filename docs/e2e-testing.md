@@ -72,15 +72,42 @@ Which tier automates each feature (with the test that proves it):
 | 6 | Digest pin + verbatim commit | L1 `TestDigestPin` |
 | 7 | Host substitution (`downstream_host`/`pull_host`) | L1 `TestPlanResolves`; real DNS in L3-infra |
 | 8 | Signature verification (notation, in-process) | L1 `TestVerification` |
-| 9 | Retention / GC (injected clock) | L1 `TestRetentionGC` |
+| 9 | Retention / GC (injected clock) | L1 `TestRetentionGC`; **L2 `TestL2RetentionCoversWhatARoutedPullLeftBehind` (a rule written for the origin covering what a routed pull left under the cache's host)** |
 | 10 | Dedup & `Idempotency-Key` | L1 `TestIdempotencyKey` |
 | 11 | Cancel & Retry | L1 `TestCancelRetry` |
 | 12 | Audit log | L1 `TestAuditLog`; **real restart in L3 `TestL3BlackBox`** |
 | 13 | Health & readiness | L1 `TestHealth` |
 | 14 | Runtime enforcement (quarantine) | L1 `TestEnforcement`; **real docker in `internal/enforce` (`TestEnforceDockerE2E`) + `internal/down` (`TestDockerEnforcerLive`)** |
+| 15 | Source fallback + `worker.source_wait` | L1 `TestEnginePullFallsBackToOrigin`, `TestEnginePullWithoutFallbackDoesNotTouchTheOrigin`, `TestFailedFallbackReportsTheRequestedSource`; **L2 `TestL2EnginePullFallsBackToOrigin`, `TestL2EnginePullWithoutFallbackDoesNotTouchTheOrigin`, `TestL2FallbackReportsBothAttemptsWhenNothingServes`, `TestL2SourceWaitJoinsAnInFlightFill`** |
+| 16 | Routed copy through a store's declared `cache:` | L1 `TestRoutedCopyThroughACache`, `TestPlanReportsTheRoute`; **L2 `TestL2RoutedCopy*`, `TestL2RoutedFill*`, `TestL2SecondJobJoinsAnInFlightRoutedFill`, `TestL2ScopedRouteOnlyAppliesToMatchingRepos`, `TestL2WarmCacheServesARegistryTargetWhileTheOriginIsDown`**; L3 `TestL3RoutedCopyFromYAMLConfig` |
+| 17 | `require_authority` on a routed job | **L2 `TestL2RequireAuthorityRejectsAnUnconfirmedRoute`**, paired with `TestL2WarmCacheServesARegistryTargetWhileTheOriginIsDown` for the default |
 | — | Private-CA TLS (`ca_cert`) | L1 `TestTLSCache`; real registry in L3-infra |
 | — | Graceful shutdown | L3 `TestL3BlackBox` |
+| — | Route/fallback observability (`gantry.job.route`, `gantry.job.fallback`, `EVENT_TYPE_JOB_FALLBACK`) | L3 `TestL3RoutingObservability` |
 | — | Shipped image runs (scratch base; non-root user writes the audit db) | L3 image `TestL3Image` |
+
+#### What the live tiers stage that a fake cannot
+
+The routing features are decisions gantry makes about failures, so the L2 tier
+stages the failures for real rather than injecting them:
+
+- **A miss is the registry's own 404**, arriving through the daemon's pull
+  stream. That is the error `worthAnotherSource` actually has to classify; a
+  fake engine can only return whatever the test invented.
+- **A read-only cache** is a `registry:2` whose `storage.maintenance.readonly`
+  is on, so a push is refused with a real 405 by a registry that answers every
+  read. It has to be configured with a **file**: distribution 2.x `REGISTRY_*`
+  env overrides *replace* the `storage` map rather than merging into it, so the
+  env spelling leaves the registry with no driver and it exits at startup —
+  which stages a registry that is gone, not one that refuses writes.
+- **An outage** is the origin container removed, with the harness waiting until
+  the published port stops answering.
+- **A fill in flight** is a bandwidth-throttled proxy in front of the origin, so
+  the window a second job has to observe the fill is a few seconds by
+  construction rather than by luck.
+- **`gantry.job.route`** is read off a real OTLP/gRPC export into a receiver the
+  test runs, because a declined route is invisible in the job snapshot: it looks
+  exactly like a job that was never eligible for one.
 
 ### CI
 

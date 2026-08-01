@@ -33,10 +33,12 @@ e2e-daemon:
 e2e-registries:
 	GANTRY_E2E_REGISTRY=$(REG) $(GO) test -tags e2e -race -run TestL2 ./internal/e2e/...
 
-## e2e-blackbox: L3 black-box binary (builds & runs the shipped binary; set
-## GANTRY_E2E_BIN=<path> to reuse a prebuilt binary instead of recompiling)
+## e2e-blackbox: every L3 binary tier (builds & runs the shipped binary; set
+## GANTRY_E2E_BIN=<path> to reuse a prebuilt binary instead of recompiling).
+## `-run TestL3` matches what CI's artifact job runs; the image tier self-skips
+## unless GANTRY_E2E_IMAGE names a loaded image.
 e2e-blackbox:
-	$(GO) test -tags e2e -run TestL3BlackBox ./internal/e2e/...
+	$(GO) test -tags e2e -run TestL3 ./internal/e2e/...
 
 ## e2e-image: L3 image tier — drives the actual built container image
 ## (set GANTRY_E2E_IMAGE=<ref>, e.g. one loaded from `docker buildx bake app`)
