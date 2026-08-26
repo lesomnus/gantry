@@ -19,6 +19,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,6 +140,9 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 		cacheCfg = readOnlyRegistryConfig
 	}
 	h.cache, h.cacheID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, cacheCfg)
+	if lc.readOnlyCache {
+		requireWritesRefused(t, h.cache)
+	}
 
 	edge := config.StoreConfig{Kind: "docker", Address: dockerAddr()}
 	if lc.retention != nil {
@@ -200,9 +204,49 @@ func startRegistryContainer(t *testing.T, cli *client.Client, daemonHost string,
 	return addr
 }
 
-// readOnlyRegistryConfig is the stock registry:2 config with writes disabled, so
-// a push is refused (405) by a registry that is otherwise perfectly alive and
-// answers every read.
+// registryConfigPath reports where this registry image expects its config, as a
+// tar-relative path. The entrypoint is handed that path as its argument, so the
+// image itself is the authority: distribution moved it between majors (2.x
+// /etc/docker/registry/config.yml, 3.x /etc/distribution/config.yml) and writing
+// to the wrong one is SILENT — the registry starts on its own writable default,
+// and a test that meant to stage a refusal stages nothing at all.
+func registryConfigPath(t *testing.T, cli *client.Client, regImage string) string {
+	t.Helper()
+	info, err := cli.ImageInspect(context.Background(), regImage)
+	if err != nil {
+		t.Fatalf("inspect registry image %q: %v", regImage, err)
+	}
+	for _, arg := range info.Config.Cmd {
+		if strings.HasSuffix(arg, ".yml") || strings.HasSuffix(arg, ".yaml") {
+			return strings.TrimPrefix(arg, "/")
+		}
+	}
+	t.Fatalf("registry image %q names no config file in its cmd %v; "+
+		"the read-only config would land somewhere it is never read", regImage, info.Config.Cmd)
+	return ""
+}
+
+// requireWritesRefused fails the test unless the registry refuses an upload.
+// Staging a refusal is only worth anything if it took: without this a config
+// that lands in the wrong place, or a schema that moved, turns every test built
+// on it into one that quietly proves nothing.
+func requireWritesRefused(t *testing.T, addr string) {
+	t.Helper()
+	res, err := http.Post("http://"+addr+"/v2/probe/readonly/blobs/uploads/", "", nil)
+	if err != nil {
+		t.Fatalf("probe %s for writability: %v", addr, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 400 {
+		t.Fatalf("the cache registry accepted an upload (HTTP %d); it was meant to be read-only, "+
+			"so nothing built on that refusal would be proving anything", res.StatusCode)
+	}
+}
+
+// readOnlyRegistryConfig is the stock config with writes disabled, so a push is
+// refused by a registry that is otherwise perfectly alive and answers every
+// read. The schema is common to distribution 2.x and 3.x; only the path it must
+// be written to differs, which registryConfigPath derives from the image.
 const readOnlyRegistryConfig = `version: 0.1
 log:
   fields:
@@ -243,10 +287,10 @@ func injectFile(t *testing.T, cli *client.Client, id, path, content string) {
 }
 
 // startRegistryContainerCfg is startRegistryContainer with a replacement
-// /etc/docker/registry/config.yml and the container id, which a test that
-// stages an outage needs. An empty cfgYAML keeps the image's own config.
+// registry config and the container id, which a test that stages an outage
+// needs. An empty cfgYAML keeps the image's own config.
 //
-// The config file rather than REGISTRY_* environment: distribution 2.x env
+// The config file rather than REGISTRY_* environment: distribution env
 // overrides REPLACE the `storage` map instead of merging into it, so setting
 // only the maintenance key leaves the registry with no storage driver and it
 // exits at startup — a registry that is gone, not one that refuses writes.
@@ -267,7 +311,7 @@ func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost stri
 		t.Skipf("create registry %q (is the image present?): %v", regImage, err)
 	}
 	if cfgYAML != "" {
-		injectFile(t, cli, resp.ID, "etc/docker/registry/config.yml", cfgYAML)
+		injectFile(t, cli, resp.ID, registryConfigPath(t, cli, regImage), cfgYAML)
 	}
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		t.Fatalf("start registry: %v", err)
@@ -410,17 +454,23 @@ func startForward(t *testing.T, port, target string) {
 	}()
 }
 
+// waitRegistry blocks until the registry ANSWERS, not merely until something
+// accepts a connection. Docker publishes the host port as soon as the container
+// is created, so a TCP dial succeeds while the registry process inside is still
+// starting — the next request then dies on a reset. Any HTTP status from /v2/
+// means the registry itself is up, which is the thing being waited for.
 func waitRegistry(t *testing.T, addr string) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
+	cl := &http.Client{Timeout: 2 * time.Second}
 	for {
-		c, err := net.DialTimeout("tcp", addr, time.Second)
+		res, err := cl.Get("http://" + addr + "/v2/")
 		if err == nil {
-			c.Close()
+			res.Body.Close()
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("registry %s never came up: %v", addr, err)
+			t.Fatalf("registry %s never answered: %v", addr, err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

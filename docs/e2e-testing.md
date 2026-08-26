@@ -94,12 +94,19 @@ stages the failures for real rather than injecting them:
 - **A miss is the registry's own 404**, arriving through the daemon's pull
   stream. That is the error `worthAnotherSource` actually has to classify; a
   fake engine can only return whatever the test invented.
-- **A read-only cache** is a `registry:2` whose `storage.maintenance.readonly`
-  is on, so a push is refused with a real 405 by a registry that answers every
-  read. It has to be configured with a **file**: distribution 2.x `REGISTRY_*`
-  env overrides *replace* the `storage` map rather than merging into it, so the
-  env spelling leaves the registry with no driver and it exits at startup —
-  which stages a registry that is gone, not one that refuses writes.
+- **A read-only cache** is a real registry whose `storage.maintenance.readonly`
+  is on, so a push is refused by a registry that answers every read. Two traps,
+  both of which stage *nothing* while looking like they worked, so the harness
+  probes the cache with a write and fails loudly unless it is refused:
+  - It has to be configured with a **file**, not `REGISTRY_*` env: distribution
+    env overrides *replace* the `storage` map rather than merging into it, so
+    the env spelling leaves the registry with no driver and it exits at startup
+    — a registry that is gone, not one that refuses writes.
+  - The file's **path differs by major** (2.x `/etc/docker/registry/config.yml`,
+    3.x `/etc/distribution/config.yml`), and the CI matrix runs both. Writing to
+    the wrong one is silent — the registry just starts on its own writable
+    default. The harness derives the path from the image's own `cmd` instead of
+    hardcoding it.
 - **An outage** is the origin container removed, with the harness waiting until
   the published port stops answering.
 - **A fill in flight** is a bandwidth-throttled proxy in front of the origin, so
