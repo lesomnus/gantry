@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/down"
+	"github.com/lesomnus/gantry/internal/tokenfile"
 	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/z"
 )
@@ -72,9 +73,21 @@ func NewSource(source, target config.StoreConfig) (Source, error) {
 	}
 }
 
-// registryAuth returns explicit basic auth when credentials are set, or nil to
-// fall back to the docker keychain.
+// registryAuth returns the store's explicit credential, or nil to fall back to
+// the docker keychain.
+//
+// A `token_file` store is authenticated by a bearer token read from disk and
+// re-read when it changes, which is how a credential that expires reaches a
+// running gantry; see [tokenFile]. Configuration refuses both this and
+// username/password on one store, so the order here settles nothing.
+//
+// The authenticator is built per call rather than memoized, which costs a
+// struct and keeps this a pure function of the config -- the file behind it is
+// what carries state, and it is read through the returned value.
 func registryAuth(c config.StoreConfig) authn.Authenticator {
+	if c.TokenFile != "" {
+		return tokenfile.New(c.TokenFile)
+	}
 	if c.Username != "" {
 		return &authn.Basic{Username: c.Username, Password: c.Password}
 	}

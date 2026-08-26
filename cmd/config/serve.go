@@ -364,6 +364,19 @@ type StoreConfig struct {
 	Insecure bool   `yaml:"insecure"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+	// TokenFile is a file holding a bearer token, sent as `Authorization:
+	// Bearer` instead of username/password. It is **re-read when it changes**,
+	// which is the whole reason it is a file rather than a value: a token that
+	// expires is replaced on disk by whatever mints it, and gantry picks the new
+	// one up without a restart.
+	//
+	// It is not the token a registry hands out after a `WWW-Authenticate:
+	// Bearer` challenge — that exchange is ggcr's and happens on its own, from
+	// whatever credential is configured here. This is a credential put in place
+	// out of band, for a registry that has no such endpoint.
+	//
+	// Mutually exclusive with username/password.
+	TokenFile string `yaml:"token_file"`
 	// Mode selects how gantry fills this registry when it is a copy destination:
 	// "copy" (default) pushes blobs, "proxy" reads through to self-fill.
 	Mode string `yaml:"mode"`

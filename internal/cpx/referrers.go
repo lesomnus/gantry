@@ -8,6 +8,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/tokenfile"
 	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/lesomnus/z"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -15,6 +16,24 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 )
+
+// tokenCredential carries a token file's bearer token in the credential oras
+// takes, re-read per call the way the ggcr path re-reads it per request.
+//
+// `AccessToken` and not `Password`: oras sends that as `Authorization: Bearer`,
+// which is the same header ggcr sends for the same store. A store whose two
+// libraries authenticated differently would work for a pull and fail for the
+// signature on it.
+func tokenCredential(src *tokenfile.Source) func(context.Context, string) (auth.Credential, error) {
+	return func(context.Context, string) (auth.Credential, error) {
+		token, err := src.Token()
+		if err != nil {
+			return auth.EmptyCredential, err
+		}
+
+		return auth.Credential{AccessToken: token}, nil
+	}
+}
 
 // keychainCredential resolves credentials from the docker keychain, matching
 // the copy path's authn.DefaultKeychain fallback.
@@ -46,10 +65,13 @@ func orasRepo(c config.StoreConfig, repo name.Repository) (*remote.Repository, e
 		return nil, err
 	}
 	client := &auth.Client{Cache: auth.NewCache()}
-	if c.Username != "" {
+	switch {
+	case c.TokenFile != "":
+		client.Credential = tokenCredential(tokenfile.New(c.TokenFile))
+	case c.Username != "":
 		client.Credential = auth.StaticCredential(repo.RegistryStr(),
 			auth.Credential{Username: c.Username, Password: c.Password})
-	} else {
+	default:
 		client.Credential = keychainCredential(repo)
 	}
 	// Same outbound transport as the ggcr copy path: TPM mTLS when configured, a

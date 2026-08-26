@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/tokenfile"
 	"github.com/lesomnus/gantry/internal/xport"
 	"github.com/notaryproject/notation-go"
 	notationregistry "github.com/notaryproject/notation-go/registry"
@@ -199,10 +200,13 @@ func (n *notaryVerifier) repo(from config.StoreConfig, ref name.Reference) (nota
 		return nil, err
 	}
 	client := &auth.Client{Cache: auth.NewCache()}
-	if from.Username != "" {
+	switch {
+	case from.TokenFile != "":
+		client.Credential = tokenCredential(tokenfile.New(from.TokenFile))
+	case from.Username != "":
 		client.Credential = auth.StaticCredential(ref.Context().RegistryStr(),
 			auth.Credential{Username: from.Username, Password: from.Password})
-	} else {
+	default:
 		client.Credential = keychainCredential(ref.Context())
 	}
 	rt, err := xport.Transport(from)
@@ -217,6 +221,20 @@ func (n *notaryVerifier) repo(from config.StoreConfig, ref name.Reference) (nota
 	}
 	r.Client = client
 	return notationregistry.NewRepository(r), nil
+}
+
+// tokenCredential carries a token file's bearer token in the credential oras
+// takes, re-read per call. See the note beside the copy path's copy of this:
+// the two libraries have to send the same header for the same store.
+func tokenCredential(src *tokenfile.Source) func(context.Context, string) (auth.Credential, error) {
+	return func(context.Context, string) (auth.Credential, error) {
+		token, err := src.Token()
+		if err != nil {
+			return auth.EmptyCredential, err
+		}
+
+		return auth.Credential{AccessToken: token}, nil
+	}
 }
 
 // keychainCredential resolves credentials from the docker keychain, matching

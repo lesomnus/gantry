@@ -125,8 +125,17 @@ func (c *Config) Evaluate() error {
 			if s.Mode != "copy" && s.Mode != "proxy" {
 				return z.Err(nil, "store %q: unknown mode %q", name, s.Mode)
 			}
+			// Refused rather than resolved by precedence: with both set, which
+			// one authenticated is a thing you find out from the registry's
+			// logs.
+			if s.TokenFile != "" && (s.Username != "" || s.Password != "") {
+				return z.Err(nil, "store %q: set either token_file or username/password, not both", name)
+			}
 		case "docker", "containerd":
 			// engine store; address is validated when the store is dialed
+			if s.TokenFile != "" {
+				return z.Err(nil, "store %q: token_file is a registry credential; an engine is told to pull, it does not authenticate here", name)
+			}
 		default:
 			return z.Err(nil, "store %q: unknown kind %q", name, s.Kind)
 		}

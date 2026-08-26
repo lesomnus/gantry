@@ -94,6 +94,53 @@ keychain (`~/.docker/config.json`). The cache store's own credentials therefore
 do **not** authenticate the upstream `source` pull in copy mode — that pull uses
 the source store's credentials (or the keychain).
 
+#### `token_file` — a credential that expires
+
+`username`/`password` are values in the configuration, expanded once when gantry
+starts. That is right for a password that does not change and useless for one
+that does: the process would hold a dead credential until somebody restarted it.
+
+`token_file` names a file holding a bearer token instead:
+
+```yaml
+stores:
+  fleet:
+    kind: oci
+    host: registry.example
+    token_file: /run/gantry/registry-token
+```
+
+Something else on the host mints the token and replaces the file; gantry sends
+its contents as `Authorization: Bearer` and **re-reads it when it changes**.
+Surrounding whitespace is stripped, so a token written with a trailing newline
+works.
+
+- **Noticing is a `stat`, not a watcher.** The credential is asked for once per
+  request, so it is checked there — one `stat` of a small file beside a blob
+  transfer. There is no interval to configure and no window in which a replaced
+  token is on disk and not being used.
+- **Replace the file atomically** (write a temporary file and `rename` onto it).
+  What is compared is size and modification time, so a rewrite in place of the
+  same length inside one filesystem timestamp tick would not be noticed — and a
+  reader must never see half a credential.
+- **A read that fails after one succeeded keeps the token it has**, because a
+  publisher replacing the file is briefly a file that cannot be read, and a pull
+  failing for that is a pull failing because its credential was being renewed. A
+  read that fails with nothing to fall back on is an error.
+- Mutually exclusive with `username`/`password`; setting both is a config error
+  rather than a precedence rule. Registry stores only — an engine is *told* to
+  pull and authenticates with its own configuration.
+- It applies to every library gantry reaches a registry with: blobs (ggcr),
+  referrer copies and signature verification (oras). They send the same header
+  for the same store.
+
+> [!NOTE]
+> This is **not** the token a registry hands out after a `WWW-Authenticate:
+> Bearer` challenge. That exchange happens on its own, from whatever credential
+> is configured here, and needs nothing written down. `token_file` is for a
+> registry that has no such endpoint and expects a credential obtained out of
+> band.
+
 ## Cache-side reference
 
 When a registry is a copy **target**, gantry derives the cache-side reference
@@ -712,6 +759,7 @@ keyed by name; the key is the store name (and, for `oci`, the default `host`).
 | `mode` | `copy` (default; push blobs) \| `proxy` (read-through self-fill). |
 | `insecure` | Allow plain-HTTP / self-signed (skip TLS verification). |
 | `username` / `password` | Credentials for operations against **this** store (env-expanded). Empty = docker keychain. |
+| `token_file` | File holding a bearer token, re-read when it changes. Sent as `Authorization: Bearer`. Excludes `username`/`password`. |
 | `downstream_host` | Host engines are told to pull from when pulling out of this registry (overridden per-engine by `pull_host`). |
 | `verify` | Per-source-registry override of `serve.verify.mode` (see `verification.md`). |
 
