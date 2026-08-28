@@ -38,6 +38,10 @@ message EventDetail {
   int32 reaped = 6;
   // gc_applied: per-ref removal failures.
   int32 errors = 7;
+  // image_removed: why the image was removed — a retention verdict
+  // (age_exceeded, max_n_exceeded, idle_exceeded, untagged) or "manual" for an
+  // operator-triggered StoreService.Remove.
+  string reason = 8;
 }
 
 // One entry of the append-only audit log. Written internally by gantry;
@@ -56,10 +60,12 @@ message Event {
   // What happened; selects which of the fields below are set.
   EventType type = 5 [(orm.field) = {immutable: true}];
   
-  // Image reference; a pin value for pinned/unpinned, an image ID for
-  // untagged reaps.
+  // Image reference; a pin value for pinned/unpinned. For image_removed it is
+  // the removed repo:tag (tag GC) or, for an untagged reap, a repo@digest that
+  // still named the image, falling back to the content-addressed image ID.
   string ref = 8 [(orm.field) = {immutable: true}];
-  // Verified source digest, on job_admitted.
+  // Verified source digest on job_admitted; the removed image's content digest
+  // on image_removed, when known.
   string digest = 9 [(orm.field) = {immutable: true}];
   // Type-specific payload.
   EventDetail detail = 10 [(orm.field) = {immutable: true}];

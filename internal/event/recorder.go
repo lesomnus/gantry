@@ -63,8 +63,8 @@ func (r *Recorder) GCApplied(store string, deleted, untagged, reaped, errs int) 
 	r.emit(Event{Type: GCApplied, Store: store, Detail: gcDetail(deleted, untagged, reaped, errs)})
 }
 
-func (r *Recorder) ImageRemoved(store, ref string) {
-	r.emit(Event{Type: ImageRemove, Store: store, Ref: ref})
+func (r *Recorder) ImageRemoved(store, ref, digest, reason string) {
+	r.emit(Event{Type: ImageRemove, Store: store, Ref: ref, Digest: digest, Detail: removeDetail(reason)})
 }
 
 func (r *Recorder) Pinned(store, value string, unpin bool) {

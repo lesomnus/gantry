@@ -334,6 +334,7 @@ func eventToPB(e event.Event) *pb.Event {
 			Untagged int32  `json:"untagged"`
 			Reaped   int32  `json:"reaped"`
 			Errors   int32  `json:"errors"`
+			Reason   string `json:"reason"`
 		}
 		if json.Unmarshal(e.Detail, &d) == nil {
 			b.Detail = pb.EventDetail_builder{
@@ -344,6 +345,7 @@ func eventToPB(e event.Event) *pb.Event {
 				Untagged: d.Untagged,
 				Reaped:   d.Reaped,
 				Errors:   d.Errors,
+				Reason:   d.Reason,
 			}.Build()
 		}
 	}

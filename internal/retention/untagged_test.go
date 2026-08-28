@@ -48,7 +48,9 @@ func TestEvaluateUntaggedProtectionsAndDeadline(t *testing.T) {
 		After: time.Hour,
 	}
 	del, keep := decided(evalUntagged(now, in, time.Time{}))
-	if del["sha256:due"] != "untagged" {
+	// A reap candidate is keyed by a repo@digest that named the image (its
+	// audit identity), not the opaque image ID.
+	if del["r/a@"+dg] != "untagged" {
 		t.Errorf("due image not reaped: del=%v keep=%v", del, keep)
 	}
 	if keep["sha256:young"] != "untagged_grace" {
@@ -140,7 +142,7 @@ func TestEvaluateUntaggedTagPinsCannotProtect(t *testing.T) {
 		After:     time.Hour,
 	}
 	del, _ := decided(evalUntagged(now, in, time.Time{}))
-	if del["sha256:x"] != "untagged" {
+	if del["r/a@sha256:1"] != "untagged" {
 		t.Errorf("tag-form pins must not protect a tag-less image: del=%v", del)
 	}
 }
@@ -272,7 +274,7 @@ func TestManagerReapsUntaggedAfterDeadline(t *testing.T) {
 	time.Sleep(60 * time.Millisecond)
 	dec = u.gcOnce(context.Background())
 	del, _ := decided(dec)
-	if del["sha256:x"] != "untagged" {
+	if del["r/a@sha256:1"] != "untagged" {
 		t.Fatalf("second pass past the deadline must reap: %+v", dec)
 	}
 	eng.mu.Lock()

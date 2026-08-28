@@ -292,8 +292,17 @@ func EvaluateUntagged(now time.Time, in UntaggedInput, graceUntil time.Time, dec
 			deletableAt = graceUntil
 		}
 		if !now.Before(deletableAt) {
+			// Record a repo@digest that still named the image (and its digest) so
+			// the audit event says what was reaped, not just an opaque image ID.
+			ref, digest := img.ID, ""
+			if len(img.RepoDigests) > 0 {
+				ref = img.RepoDigests[0]
+				if _, _, dg := parseRef(ref); dg != "" {
+					digest = dg
+				}
+			}
 			dec.Delete = append(dec.Delete, Candidate{
-				Ref: img.ID, ImageID: img.ID, LastUsed: fs, Reason: "untagged",
+				Ref: ref, ImageID: img.ID, Digest: digest, LastUsed: fs, Reason: "untagged",
 			})
 			continue
 		}

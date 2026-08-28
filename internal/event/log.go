@@ -237,3 +237,7 @@ func gcDetail(deleted, untagged, reaped, errs int) json.RawMessage {
 	b, _ := json.Marshal(map[string]int{"deleted": deleted, "untagged": untagged, "reaped": reaped, "errors": errs})
 	return b
 }
+
+// removeDetail carries why an image was removed (a retention verdict or
+// "manual"); the ref/digest of the image live on the Event itself.
+func removeDetail(reason string) json.RawMessage { return kv("reason", reason) }

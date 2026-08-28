@@ -188,10 +188,16 @@ func TestRingEvictionBacklog(t *testing.T) {
 
 func TestRecorderImageRemoved(t *testing.T) {
 	l := openTemp(t, 100)
-	NewRecorder(l, nil).ImageRemoved("eng", "cache.local/a:1")
+	NewRecorder(l, nil).ImageRemoved("eng", "cache.local/a:1", "sha256:abc", "age_exceeded")
 	got, _ := l.List(Filter{Type: ImageRemove})
-	if len(got) != 1 || got[0].Ref != "cache.local/a:1" || got[0].Store != "eng" {
+	if len(got) != 1 || got[0].Ref != "cache.local/a:1" || got[0].Store != "eng" || got[0].Digest != "sha256:abc" {
 		t.Errorf("image_removed = %+v", got)
+	}
+	var d struct {
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal(got[0].Detail, &d) != nil || d.Reason != "age_exceeded" {
+		t.Errorf("image_removed reason = %q, want age_exceeded (detail %s)", d.Reason, got[0].Detail)
 	}
 }
 

@@ -187,7 +187,7 @@ func (v *storeService) Remove(ctx context.Context, req *pb.StoreRemoveRequest) (
 		// Best effort: keep the retention index in sync with the engine.
 		_, _ = v.s.gc.DeleteRecord(name, ref)
 	}
-	v.s.rec.ImageRemoved(name, ref)
+	v.s.rec.ImageRemoved(name, ref, "", "manual")
 	return pb.StoreRemoveResponse_builder{
 		Untagged: res.Untagged,
 		Deleted:  res.Deleted,

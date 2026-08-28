@@ -115,7 +115,7 @@ func NewManager(stores []Store, opts ...Option) *Manager {
 // Recorder receives GC-apply and manual pin/remove audit events.
 type Recorder interface {
 	GCApplied(store string, deleted, untagged, reaped, errs int)
-	ImageRemoved(store, ref string)
+	ImageRemoved(store, ref, digest, reason string)
 	Pinned(store, value string, unpin bool)
 }
 
@@ -617,7 +617,7 @@ func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 	res := ApplyResult{Evaluated: len(dec.Delete) + len(dec.Keep)}
 	for _, c := range dec.Delete {
 		if c.ImageID != "" {
-			u.reapOne(ctx, c.ImageID, &res)
+			u.reapOne(ctx, c, &res)
 			continue
 		}
 		rr, err := u.engine.Remove(ctx, c.Ref)
@@ -629,7 +629,7 @@ func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 		res.Untagged = append(res.Untagged, rr.Untagged...)
 		_, _ = u.ix.Delete(u.name, c.Ref)
 		if u.m.rec != nil {
-			u.m.rec.ImageRemoved(u.name, c.Ref)
+			u.m.rec.ImageRemoved(u.name, c.Ref, c.Digest, c.Reason)
 		}
 	}
 	if len(res.Deleted)+len(res.Untagged)+len(res.Reaped) > 0 {
@@ -658,7 +658,8 @@ func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 // index-owned digest reference) and reports not-ok without error for a
 // transient hold — the entry stays tracked and the next pass retries; the next
 // scan drops it if the image was re-tagged.
-func (u *unit) reapOne(ctx context.Context, id string, res *ApplyResult) {
+func (u *unit) reapOne(ctx context.Context, c Candidate, res *ApplyResult) {
+	id := c.ImageID
 	if u.recon == nil {
 		return
 	}
@@ -704,7 +705,11 @@ func (u *unit) reapOne(ctx context.Context, id string, res *ApplyResult) {
 	}
 	res.Reaped = append(res.Reaped, id)
 	if u.m.rec != nil {
-		u.m.rec.ImageRemoved(u.name, id)
+		ref := c.Ref
+		if ref == "" {
+			ref = id
+		}
+		u.m.rec.ImageRemoved(u.name, ref, c.Digest, c.Reason)
 	}
 }
 

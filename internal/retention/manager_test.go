@@ -219,11 +219,15 @@ func TestManagerStatusSchedulerFields(t *testing.T) {
 type recRecorder struct {
 	gc      int
 	removed []string
+	reasons []string
 	pins    []string
 }
 
 func (r *recRecorder) GCApplied(string, int, int, int, int) { r.gc++ }
-func (r *recRecorder) ImageRemoved(_, ref string)           { r.removed = append(r.removed, ref) }
+func (r *recRecorder) ImageRemoved(_, ref, _, reason string) {
+	r.removed = append(r.removed, ref)
+	r.reasons = append(r.reasons, reason)
+}
 func (r *recRecorder) Pinned(_, value string, _ bool)       { r.pins = append(r.pins, value) }
 
 func TestApplyEmitsAuditEvents(t *testing.T) {
@@ -246,6 +250,9 @@ func TestApplyEmitsAuditEvents(t *testing.T) {
 	}
 	if len(rec.removed) != 1 || rec.removed[0] != "r/a:old" {
 		t.Errorf("image_removed = %v, want [r/a:old]", rec.removed)
+	}
+	if len(rec.reasons) != 1 || rec.reasons[0] != "age_exceeded" {
+		t.Errorf("image_removed reason = %v, want [age_exceeded]", rec.reasons)
 	}
 	if err := m.Pin("d", "r/a:new", false); err != nil {
 		t.Fatal(err)

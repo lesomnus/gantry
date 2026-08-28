@@ -94,6 +94,7 @@ type EventDetail struct {
 	xxx_hidden_Untagged int32                  `protobuf:"varint,5,opt,name=untagged"`
 	xxx_hidden_Reaped   int32                  `protobuf:"varint,6,opt,name=reaped"`
 	xxx_hidden_Errors   int32                  `protobuf:"varint,7,opt,name=errors"`
+	xxx_hidden_Reason   string                 `protobuf:"bytes,8,opt,name=reason"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -172,6 +173,13 @@ func (x *EventDetail) GetErrors() int32 {
 	return 0
 }
 
+func (x *EventDetail) GetReason() string {
+	if x != nil {
+		return x.xxx_hidden_Reason
+	}
+	return ""
+}
+
 func (x *EventDetail) SetSource(v string) {
 	x.xxx_hidden_Source = v
 }
@@ -200,6 +208,10 @@ func (x *EventDetail) SetErrors(v int32) {
 	x.xxx_hidden_Errors = v
 }
 
+func (x *EventDetail) SetReason(v string) {
+	x.xxx_hidden_Reason = v
+}
+
 type EventDetail_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -218,6 +230,10 @@ type EventDetail_builder struct {
 	Reaped int32
 	// gc_applied: per-ref removal failures.
 	Errors int32
+	// image_removed: why the image was removed — a retention verdict
+	// (age_exceeded, max_n_exceeded, idle_exceeded, untagged) or "manual" for an
+	// operator-triggered StoreService.Remove.
+	Reason string
 }
 
 func (b0 EventDetail_builder) Build() *EventDetail {
@@ -231,6 +247,7 @@ func (b0 EventDetail_builder) Build() *EventDetail {
 	x.xxx_hidden_Untagged = b.Untagged
 	x.xxx_hidden_Reaped = b.Reaped
 	x.xxx_hidden_Errors = b.Errors
+	x.xxx_hidden_Reason = b.Reason
 	return m0
 }
 
@@ -408,10 +425,12 @@ type Event_builder struct {
 	Store string
 	// What happened; selects which of the fields below are set.
 	Type EventType
-	// Image reference; a pin value for pinned/unpinned, an image ID for
-	// untagged reaps.
+	// Image reference; a pin value for pinned/unpinned. For image_removed it is
+	// the removed repo:tag (tag GC) or, for an untagged reap, a repo@digest that
+	// still named the image, falling back to the content-addressed image ID.
 	Ref string
-	// Verified source digest, on job_admitted.
+	// Verified source digest on job_admitted; the removed image's content digest
+	// on image_removed, when known.
 	Digest string
 	// Type-specific payload.
 	Detail *EventDetail
@@ -442,7 +461,7 @@ var File_gantry_event_proto protoreflect.FileDescriptor
 
 const file_gantry_event_proto_rawDesc = "" +
 	"\n" +
-	"\x12gantry/event.proto\x12\x06gantry\x1a\x10gantry/job.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xb3\x01\n" +
+	"\x12gantry/event.proto\x12\x06gantry\x1a\x10gantry/job.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\torm.proto\"\xcb\x01\n" +
 	"\vEventDetail\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x10\n" +
 	"\x03job\x18\x02 \x01(\tR\x03job\x12\x14\n" +
@@ -450,7 +469,8 @@ const file_gantry_event_proto_rawDesc = "" +
 	"\adeleted\x18\x04 \x01(\x05R\adeleted\x12\x1a\n" +
 	"\buntagged\x18\x05 \x01(\x05R\buntagged\x12\x16\n" +
 	"\x06reaped\x18\x06 \x01(\x05R\x06reaped\x12\x16\n" +
-	"\x06errors\x18\a \x01(\x05R\x06errors\"\xff\x02\n" +
+	"\x06errors\x18\a \x01(\x05R\x06errors\x12\x16\n" +
+	"\x06reason\x18\b \x01(\tR\x06reason\"\xff\x02\n" +
 	"\x05Event\x12\x1b\n" +
 	"\x03seq\x18\x01 \x01(\x04B\t\xea\x82\x16\x05(\x01\x82\x01\x00R\x03seq\x12\x1c\n" +
 	"\x05store\x18\x02 \x01(\tB\x06\xea\x82\x16\x02@\x01R\x05store\x12-\n" +
