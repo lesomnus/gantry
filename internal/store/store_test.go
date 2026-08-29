@@ -129,3 +129,32 @@ func TestEngineErrorNamesTheAlternatives(t *testing.T) {
 		t.Errorf("a declared registry should say it is not an engine, got: %v", err)
 	}
 }
+
+// TestEngineConfigAgreesWithEngine: the decision "is this target an engine" and
+// the dial that follows must read a reference the same way. They did not --
+// the decision was a name-map lookup, so a selector fell through to the
+// registry path and failed as an unknown REGISTRY, naming the wrong half of the
+// config and never reaching the engine resolution at all.
+func TestEngineConfigAgreesWithEngine(t *testing.T) {
+	s := fleet(t)
+	for _, ref := range []string{"hday", "192.168.10.34", "docker:192.168.10.34", "tcp://192.168.10.34:2376"} {
+		c, ok := s.EngineConfig(ref)
+		if !ok {
+			t.Errorf("EngineConfig(%q) = not an engine; Engine() resolves it", ref)
+			continue
+		}
+		if c.Name != "hday" {
+			t.Errorf("EngineConfig(%q).Name = %q, want hday", ref, c.Name)
+		}
+		if _, err := s.Engine(ref); err != nil {
+			t.Errorf("Engine(%q): %v", ref, err)
+		}
+	}
+	// A registry, an unknown host and an ambiguous selector are all "not an
+	// engine" here, so the caller falls through to the registry path as before.
+	for _, ref := range []string{"local", "127.0.0.1:5000", "10.9.9.9", "nope"} {
+		if c, ok := s.EngineConfig(ref); ok {
+			t.Errorf("EngineConfig(%q) = %q; want not-an-engine", ref, c.Name)
+		}
+	}
+}

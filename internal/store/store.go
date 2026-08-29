@@ -113,11 +113,36 @@ func (s *Set) Registry(ref string) (config.StoreConfig, error) {
 // daemon is a configuration somebody meant something by, and guessing which was
 // intended would be a warm that silently lands in the wrong place.
 func (s *Set) Engine(ref string) (down.Engine, error) {
-	if e, ok := s.engines[ref]; ok {
-		return e, nil
+	name, err := s.engineName(ref)
+	if err != nil {
+		return nil, err
+	}
+	return s.engines[name], nil
+}
+
+// EngineConfig is the declared config a reference resolves to, and whether it
+// resolves to an engine at all.
+//
+// It exists so that a caller deciding WHETHER a target is an engine and the
+// call that then dials it agree on what a reference means. They did not: the
+// decision was a lookup in the name map, so a selector missed it and fell
+// through to the registry path -- which then reported the reference as an
+// unknown registry, an error naming the wrong half of the config.
+func (s *Set) EngineConfig(ref string) (config.StoreConfig, bool) {
+	name, err := s.engineName(ref)
+	if err != nil {
+		return config.StoreConfig{}, false
+	}
+	return s.byName[name], true
+}
+
+// engineName resolves a reference to the name of a declared engine store.
+func (s *Set) engineName(ref string) (string, error) {
+	if _, ok := s.engines[ref]; ok {
+		return ref, nil
 	}
 	if c, declared := s.byName[ref]; declared {
-		return nil, fmt.Errorf("store %q is a %s, not an engine", ref, c.Kind)
+		return "", fmt.Errorf("store %q is a %s, not an engine", ref, c.Kind)
 	}
 
 	kind, host := parseEngineSelector(ref)
@@ -137,11 +162,11 @@ func (s *Set) Engine(ref string) (down.Engine, error) {
 		}
 		switch len(hits) {
 		case 1:
-			return s.engines[hits[0]], nil
+			return hits[0], nil
 		case 0:
 			// fall through to the not-found error below
 		default:
-			return nil, fmt.Errorf("engine selector %q matches %d stores (%s); name one of them", ref, len(hits), strings.Join(hits, ", "))
+			return "", fmt.Errorf("engine selector %q matches %d stores (%s); name one of them", ref, len(hits), strings.Join(hits, ", "))
 		}
 	}
 
@@ -152,9 +177,9 @@ func (s *Set) Engine(ref string) (down.Engine, error) {
 		}
 	}
 	if len(declaredEngines) == 0 {
-		return nil, fmt.Errorf("unknown engine store %q (no engine stores are declared)", ref)
+		return "", fmt.Errorf("unknown engine store %q (no engine stores are declared)", ref)
 	}
-	return nil, fmt.Errorf("unknown engine store %q (declared: %s)", ref, strings.Join(declaredEngines, ", "))
+	return "", fmt.Errorf("unknown engine store %q (declared: %s)", ref, strings.Join(declaredEngines, ", "))
 }
 
 // parseEngineSelector splits "docker:host", "host:port" or "host" into an

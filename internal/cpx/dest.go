@@ -56,7 +56,11 @@ type puller interface {
 // (declared oci store, or a bare host when allow_unknown_stores is set) and
 // becomes a pusher.
 func resolveDest(stores *store.Set, target string) (dest, error) {
-	if c, ok := stores.Config(target); ok && c.IsEngine() {
+	// EngineConfig rather than Config: a target may name an engine by its store
+	// name OR by the address it is declared at, and the two have to be decided
+	// the same way the dial is. A name-map lookup here sent every address down
+	// the registry path, which failed calling it an unknown registry.
+	if c, ok := stores.EngineConfig(target); ok {
 		eng, err := stores.Engine(target)
 		if err != nil {
 			return nil, err
