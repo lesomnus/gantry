@@ -256,10 +256,14 @@ func TestManagerReapsUntaggedAfterDeadline(t *testing.T) {
 		},
 		reapOK: true,
 	}
+	// The reap clock is the subject here, so the test drives it instead of
+	// sleeping: the scan stamps first-seen at now, and only an explicit advance
+	// past UntaggedAfter may turn the grace into a reap.
+	clk := newClock()
 	m := NewManager([]Store{{
 		Name: "d", Engine: eng, Index: ix,
 		Rules: blanketRules(Policy{}), UntaggedAfter: 50 * time.Millisecond,
-	}})
+	}}, WithNow(clk.now))
 	u := m.units["d"]
 
 	dec := u.gcOnce(context.Background())
@@ -271,7 +275,7 @@ func TestManagerReapsUntaggedAfterDeadline(t *testing.T) {
 		t.Errorf("scan must seed unknown tagged refs: %+v", recs)
 	}
 
-	time.Sleep(60 * time.Millisecond)
+	clk.advance(60 * time.Millisecond)
 	dec = u.gcOnce(context.Background())
 	del, _ := decided(dec)
 	if del["r/a@sha256:1"] != "untagged" {

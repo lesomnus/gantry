@@ -52,6 +52,30 @@ func (f *fakeEng) removed() []string {
 	return append([]string(nil), f.rmed...)
 }
 
+// fakeClock is advanced by hand. A test whose subject IS a deadline must own the
+// clock rather than sleep toward it: a grace window of tens of milliseconds is
+// no window at all on a loaded runner, where the gap between the scan that
+// stamps a first-seen time and the evaluation that reads it can outrun the
+// window on its own and make the very first pass look overdue.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func newClock() *fakeClock { return &fakeClock{t: time.Now()} }
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
 // mgr1 builds a single-store Manager whose only rule is a catch-all "**" carrying
 // the given Policy, so the legacy single-policy tests keep working.
 func mgr1(name string, eng down.Engine, ix *Index, p Policy, sch Schedule) *Manager {
@@ -112,22 +136,44 @@ func TestSchedulerIdlesAndWakesOnEvent(t *testing.T) {
 
 func TestSchedulerWakesAtAgeDeadline(t *testing.T) {
 	ix := openTemp(t)
-	// ages out ~80ms after start; cap is large so the wake must be deadline-driven.
-	_ = ix.Touch("d", "r/a:1", time.Now().Add(-(200*time.Millisecond - 80*time.Millisecond)))
+	// The scheduler sleeps on real timers, so this one keeps real time. It ages
+	// out untilAgeOut after start while the interval cap stays 10s away, so
+	// waking on time can only be deadline-driven, never a plain tick.
+	const maxAge = 2 * time.Second
+	const untilAgeOut = 400 * time.Millisecond
+	start := time.Now()
+	_ = ix.Touch("d", "r/a:1", start.Add(-(maxAge - untilAgeOut)))
+	ageOut := start.Add(untilAgeOut)
 	eng := &fakeEng{name: "d"}
-	m := mgr1("d", eng, ix, Policy{MaxAge: 200 * time.Millisecond}, Schedule{Interval: 10 * time.Second, MinInterval: time.Millisecond})
+	m := mgr1("d", eng, ix, Policy{MaxAge: maxAge}, Schedule{Interval: 10 * time.Second, MinInterval: time.Millisecond})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go m.StartScheduler(ctx)
 
-	time.Sleep(40 * time.Millisecond)
-	if got := eng.removed(); len(got) != 0 {
-		t.Errorf("deleted too early: %v", got)
+	// Read the engine first and the clock second: if the clock still says we are
+	// short of the age-out, anything the engine had already removed was removed
+	// early. A loaded runner can instead deschedule us past the age-out, and
+	// then the reading is evidence of nothing and must not fail the test.
+	time.Sleep(untilAgeOut / 5)
+	early := eng.removed()
+	if time.Now().Before(ageOut) && len(early) != 0 {
+		t.Errorf("deleted before the age deadline: %v", early)
 	}
-	time.Sleep(200 * time.Millisecond) // past the age deadline
-	if got := eng.removed(); len(got) != 1 || got[0] != "r/a:1" {
-		t.Errorf("scheduler did not wake at the age deadline: removed=%v", got)
+	// Poll well inside the 10s cap: a scheduler that ignored NextAgeOut and slept
+	// to the cap still fails here, however slow the machine is.
+	giveUp := time.Now().Add(3 * time.Second)
+	for {
+		if got := eng.removed(); len(got) != 0 {
+			if len(got) != 1 || got[0] != "r/a:1" {
+				t.Fatalf("scheduler removed = %v, want [r/a:1]", got)
+			}
+			return
+		}
+		if time.Now().After(giveUp) {
+			t.Fatal("scheduler never woke at the age deadline; it slept toward the interval cap")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -228,7 +274,7 @@ func (r *recRecorder) ImageRemoved(_, ref, _, reason string) {
 	r.removed = append(r.removed, ref)
 	r.reasons = append(r.reasons, reason)
 }
-func (r *recRecorder) Pinned(_, value string, _ bool)       { r.pins = append(r.pins, value) }
+func (r *recRecorder) Pinned(_, value string, _ bool) { r.pins = append(r.pins, value) }
 
 func TestApplyEmitsAuditEvents(t *testing.T) {
 	ix := openTemp(t)
