@@ -67,7 +67,10 @@ func resolveDest(stores *store.Set, target string) (dest, error) {
 		}
 		return &engineDest{cfg: c, eng: eng}, nil
 	}
-	c, err := stores.Registry(target)
+	// No repository: a destination is a place, and a meta store is a policy.
+	// Registry refuses one here rather than picking a route, which is what makes
+	// "target: remote" a legible error instead of a copy into a surprising host.
+	c, err := stores.Registry(target, "")
 	if err != nil {
 		return nil, err
 	}

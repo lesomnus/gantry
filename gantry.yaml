@@ -79,6 +79,25 @@ stores:
   #       # after it is unreachable, which the loader rejects.
   # A job no route covers reads its source directly.
 
+  # A `meta` store is one name in front of several registries, picked by the
+  # repository. It is NOT a cache: the stores behind it hold DIFFERENT content
+  # and gantry never writes to them, where a cache is a second copy of one
+  # registry's content that gantry fills. Source only, no host, no credential
+  # of its own. See docs/stores.md#meta-stores-one-name-several-registries.
+  #
+  # This is how one config stays right in two places: which registry holds an
+  # image is a property of the image, so a robot that only ever asks for
+  # `dist/**` takes the CDN route wherever it is, and nothing is edited on the
+  # way out of the building.
+  #   remote:
+  #     kind: "meta"
+  #     routes:
+  #       - for_repos: ["dist/**"]     # repository PATH patterns; no host
+  #         store: "cdn"
+  #       - store: "internal"          # unscoped: the default, and must come last
+  #   cdn: { kind: "oci", host: "registry.example.com", token_file: "/var/lib/gantry/token" }
+  #   internal: { kind: "oci", host: "cr.internal" }
+
   # Cache registry gantry fills and engines pull from.
   cache:
     kind: "oci"

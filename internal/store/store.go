@@ -56,11 +56,25 @@ func (s *Set) Close() error {
 
 // Registry resolves a from/to reference (a declared store name or, when allowed,
 // a bare registry host) to a registry store config.
-func (s *Set) Registry(ref string) (config.StoreConfig, error) {
+//
+// repo is the repository PATH the job names ("dist/hday/cove"), and it is what
+// a `meta` store routes on. It is not needed to resolve an ordinary store and
+// callers that have none pass "" -- which then makes a meta store an error
+// rather than a guess, and that is the right answer for the one caller in that
+// position: a copy DESTINATION cannot be a policy, because "push it to
+// whichever of these holds it" has no meaning.
+//
+// A meta store never leaves this function. Everything downstream reads .Host,
+// .Cred, .Mode off what it gets back, so what it gets back is always a store
+// that has them.
+func (s *Set) Registry(ref, repo string) (config.StoreConfig, error) {
 	if ref == "" {
 		return config.StoreConfig{}, fmt.Errorf("empty registry reference")
 	}
 	if c, ok := s.byName[ref]; ok {
+		if c.IsMeta() {
+			return s.route(c, repo)
+		}
 		if !c.IsRegistry() {
 			return config.StoreConfig{}, fmt.Errorf("store %q is a %s, not a registry", ref, c.Kind)
 		}
@@ -81,6 +95,35 @@ func (s *Set) Registry(ref string) (config.StoreConfig, error) {
 		Host: ref,
 		Mode: "copy",
 	}, nil
+}
+
+// route picks the registry a meta store's policy selects for repo.
+//
+// The two failures are told apart because they are different mistakes. No repo
+// is a caller asking a policy something a policy cannot answer; no matching
+// route is a config that does not cover this image, and the message says which
+// image and what the store does cover, since the operator is about to go read
+// exactly that.
+func (s *Set) route(c config.StoreConfig, repo string) (config.StoreConfig, error) {
+	if repo == "" {
+		return config.StoreConfig{}, fmt.Errorf("store %q is a meta store: it selects a registry by repository, so it can only be a source", c.Name)
+	}
+	to := c.RouteFor(repo)
+	if to == "" {
+		var covers []string
+		for _, r := range c.Routes {
+			covers = append(covers, fmt.Sprintf("%s -> %s", strings.Join(r.ForRepos, ","), r.Store))
+		}
+		return config.StoreConfig{}, fmt.Errorf("store %q has no route for repository %q (routes: %s)", c.Name, repo, strings.Join(covers, "; "))
+	}
+	// Evaluate has already checked that every route names a declared registry,
+	// so this lookup cannot miss -- and if it ever does, saying so beats
+	// returning a zero-valued store that fails later as a connection error.
+	d, ok := s.byName[to]
+	if !ok || !d.IsRegistry() {
+		return config.StoreConfig{}, fmt.Errorf("store %q routes %q to %q, which is not a declared registry", c.Name, repo, to)
+	}
+	return d, nil
 }
 
 // Engine resolves a reference to a declared engine store.
@@ -302,7 +345,7 @@ type Caps struct {
 // Status is one GET /v1/store row.
 type Status struct {
 	Name         string `json:"name"`
-	Kind         string `json:"kind" enums:"oci,docker,containerd"`
+	Kind         string `json:"kind" enums:"oci,docker,containerd,meta"`
 	Host         string `json:"host,omitempty"`
 	Address      string `json:"address,omitempty"`
 	Namespace    string `json:"namespace,omitempty"`
@@ -320,6 +363,15 @@ func (s *Set) StoreStatuses(ctx context.Context) []Status {
 	for _, name := range s.order {
 		c := s.byName[name]
 		st := Status{Name: c.Name, Kind: c.Kind}
+		if c.IsMeta() {
+			// No host, and nothing to probe: a meta store is ready when the
+			// stores it routes to are, and those are rows of their own in this
+			// same list. Reporting it ready here would be reporting theirs twice.
+			st.Ready = true
+			st.Capabilities = Caps{Read: true}
+			out = append(out, st)
+			continue
+		}
 		if c.IsRegistry() {
 			st.Host = c.Host
 			st.Mode = c.Mode

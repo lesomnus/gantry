@@ -37,7 +37,7 @@ func (v *verifyService) srcRef(ref, source string) (config.StoreConfig, name.Ref
 	if sourceKey == "" {
 		sourceKey = base.Context().RegistryStr()
 	}
-	sourceStore, err := v.s.stores.Registry(sourceKey)
+	sourceStore, err := v.s.stores.Registry(sourceKey, base.Context().RepositoryStr())
 	if err != nil {
 		return config.StoreConfig{}, nil, err
 	}
