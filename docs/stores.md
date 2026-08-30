@@ -16,7 +16,7 @@ for the health probe that reports store reachability.
 
 ## Store kinds
 
-Every store sets `kind`. There are three:
+Every store sets `kind`. There are four:
 
 - **`oci`** — an OCI distribution registry gantry reads blobs from and writes
   blobs to (`StoreConfig.IsRegistry`). It can be a job **source** (gantry pulls
@@ -29,6 +29,10 @@ Every store sets `kind`. There are three:
   Reported capabilities are `pull` and `gc`; it has no `reconcile` capability —
   gantry drops the pull-created digest record after retagging, so containerd's
   own GC reclaims replaced content (see `retention.md`).
+- **`meta`** — not a place bytes live, but a **policy over other registries**
+  (`IsMeta`). Source only. It has no host, no credential and no retention; it
+  carries `routes`, and a job naming it reads from whichever route covers the
+  repository. See [Meta stores](#meta-stores-one-name-several-registries).
 
 `docker` and `containerd` are collectively **engine** stores. A job's `source`
 must resolve to a registry; its `target` may be any declared store. The move
@@ -55,6 +59,82 @@ Registry readiness is reported from config (always `ready`, never probed — a
 remote like `docker.io` need not be reachable *from* gantry). Engine readiness
 is a live daemon probe. See `observability.md` for the cached `StoreService.Health`
 probe.
+
+## Meta stores: one name, several registries
+
+A `meta` store puts several registries behind one name and picks between them by
+**repository path**:
+
+```yaml
+stores:
+  remote:                      # this is what jobs name as `source`
+    kind: meta
+    routes:
+      - for_repos: ["dist/**"]
+        store: cdn             # released images are published through the CDN
+      - store: internal        # everything else lives on the internal registry
+
+  cdn:
+    kind: oci
+    host: registry.hday.io
+    token_file: /var/lib/gantry/registry-token
+
+  internal:
+    kind: oci
+    host: cr.hday.io
+```
+
+**First match wins**, and a route with no `for_repos` matches everything — so an
+unscoped route placed last reads as the default. An unscoped route placed
+*earlier* makes every route after it dead, which the loader rejects rather than
+let it look like working config.
+
+### Why this is not `cache`
+
+Both scope by `for_repos` and there the resemblance ends.
+
+A **cache** is a second copy of one registry's content: the source is the
+authority, gantry *fills* the cache when it does not already hold the image, and
+either end can answer for the same image. A **meta store's** routes hold
+*different* content — one registry has `dist/**` and the other does not — and
+gantry never writes to any of them. Reaching for `cache` here would have gantry
+attempt a push into a registry it is only ever meant to read.
+
+### Why route on the repository
+
+Because which registry holds an image is a property of the **image**, not of the
+site gantry runs at. That is what makes one config correct in both places: a
+robot on the internal network can reach either registry, and a robot at a
+customer site can only reach the CDN — but it only ever asks for `dist/**`, so
+the internal route is never taken. Nothing is edited on the way out, which is
+the failure this replaces: a config hand-swapped for one environment is a config
+that is wrong in the other one, and nobody finds out until the robot is there.
+
+The scope is the repository and **not** the target, which `caches` also offers. A
+meta store answers "where does this image live", and an answer that depended on
+where the image is going would give one image two homes. It is also the only
+scope every caller can supply — signature verification resolves a source with no
+target in hand at all.
+
+### What it cannot be
+
+- **A target.** Pushing into a policy has no meaning, so `target: remote` is
+  refused (`store %q is a meta store: it selects a registry by repository, so it
+  can only be a source`) rather than resolved to the first route.
+- **A route's destination.** A route names an `oci` store. Routing is one level:
+  a meta store pointing at another would be a chain nobody could read off the
+  config, and the check that forbids it is also what means there is no cycle to
+  detect.
+- **A holder of anything.** `host`, `mode`, `insecure`, `downstream_host`,
+  credentials, `ca_cert`, `retention` and `cache`/`caches` are each refused by
+  name on a meta store — a credential an operator writes and gantry never
+  presents is worse than a startup error.
+
+A meta store is resolved away at lookup: everything downstream receives the
+`oci` config a route selected, so nothing else in gantry knows meta stores
+exist. In `GET /v1/store` it appears as its own row with no host, `ready: true`
+and capability `read` — the stores it routes to are rows of their own, and their
+readiness is reported there.
 
 ## OCI fill modes: copy vs proxy
 
@@ -742,7 +822,7 @@ keyed by name; the key is the store name (and, for `oci`, the default `host`).
 
 | Key | Applies to | Meaning |
 |---|---|---|
-| `kind` | all | `oci` \| `docker` \| `containerd`. Required. |
+| `kind` | all | `oci` \| `docker` \| `containerd` \| `meta`. Required. |
 | `cred` | all | Client-mTLS credential block; omit for no client certificate. |
 | `cred.kind` | all | `tpm` (key sealed in a TPM) \| `file` (PEM key pair on disk). Required. |
 | `cred.cert` | all | Client certificate (leaf + chain), PEM; public key must match the private key. Required. |
@@ -762,6 +842,17 @@ keyed by name; the key is the store name (and, for `oci`, the default `host`).
 | `token_file` | File holding a bearer token, re-read when it changes. Sent as `Authorization: Bearer`. Excludes `username`/`password`. |
 | `downstream_host` | Host engines are told to pull from when pulling out of this registry (overridden per-engine by `pull_host`). |
 | `verify` | Per-source-registry override of `serve.verify.mode` (see `verification.md`). |
+
+### `meta` store
+
+| Key | Meaning |
+|---|---|
+| `routes` | Ordered list of routes; the first one covering the repository is used. Required (at least one). |
+| `routes[].store` | Declared `oci` store to read from. Required. |
+| `routes[].for_repos` | Doublestar patterns over the repository **path** (`dist/**`), not host-qualified. Empty matches every repository. |
+
+No other key is accepted: a meta store has no host, credential, mode, cache or
+retention of its own.
 
 ### `docker` / `containerd` engine
 

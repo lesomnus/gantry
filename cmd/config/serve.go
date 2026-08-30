@@ -406,6 +406,25 @@ type StoreConfig struct {
 	// serves, rather than a chain (routing is one level deep — see docs/stores.md).
 	Caches []CacheRoute `yaml:"caches"`
 
+	// --- meta store ---
+	// Routes are the registries a `meta` store stands in front of, in order:
+	// the first route whose scope covers the repository is the one the job
+	// reads from. A route with no scope matches everything, so an unscoped
+	// route placed last reads as the default.
+	//
+	// This is not `caches` with a different name. A cache is a SECOND COPY of
+	// one registry's content and gantry fills it; the stores behind a meta
+	// store hold DIFFERENT content and gantry never writes to them. What the
+	// two share is only the shape of a scope, so they share `for_repos`.
+	//
+	// It exists because which registry holds an image is a property of the
+	// image, not of the site: `dist/**` is published through the CDN and
+	// everything else lives on the internal registry. Written as a route, one
+	// config is correct both inside the office and at a customer site — a
+	// production robot only ever asks for `dist/**`, so the internal route is
+	// simply never taken, and nothing has to be edited on the way out.
+	Routes []Route `yaml:"routes"`
+
 	// Retention configures per-repo image GC for this store (engine stores only).
 	// nil disables GC for the store. See StoreRetention.
 	Retention *StoreRetention `yaml:"retention"`
@@ -436,6 +455,11 @@ func (s StoreConfig) IsRegistry() bool { return s.Kind == "oci" }
 
 // IsEngine reports whether the store is a daemon gantry triggers to pull.
 func (s StoreConfig) IsEngine() bool { return s.Kind == "docker" || s.Kind == "containerd" }
+
+// IsMeta reports whether the store is a policy over other registries rather
+// than a place bytes live. A meta store is resolved away before anything reads
+// or writes, so no code outside store.Set ever holds one.
+func (s StoreConfig) IsMeta() bool { return s.Kind == "meta" }
 
 // CredConfig is a store's client-mTLS credential — how gantry proves its
 // identity to the store. kind selects where the private key lives; cert is
@@ -606,6 +630,53 @@ func (r CacheRoute) matches(target, repo string) bool {
 		}
 	}
 	return false
+}
+
+// Route is one branch of a meta store: the registry to read from, and the
+// repositories that branch covers.
+//
+// It scopes by repository and not by target, which `caches` also offers. A
+// meta store answers the question "where does this image live", and the answer
+// cannot depend on where the image is going without the same image having two
+// homes. It is also the only scope every caller can supply: signature
+// verification resolves a source with no target in hand at all.
+type Route struct {
+	// Store is the declared registry to read from. Required.
+	Store string `yaml:"store"`
+	// ForRepos limits the route to repositories matching one of these
+	// doublestar patterns, e.g. "dist/**". Empty matches every repository. The
+	// pattern is matched against the repository PATH alone ("dist/hday/cove") —
+	// a meta store has no host of its own, and the hosts behind it differ per
+	// route, so a host-qualified pattern could only ever be wrong.
+	ForRepos []string `yaml:"for_repos"`
+}
+
+// matches reports whether this route covers repo.
+func (r Route) matches(repo string) bool {
+	if len(r.ForRepos) == 0 {
+		return true
+	}
+	for _, p := range r.ForRepos {
+		if ok, err := doublestar.Match(p, repo); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// RouteFor is the store a job reading repo from this meta store should read
+// from, or "" when no declared route covers it. First match wins.
+//
+// Empty is a real answer and not a fallback: a meta store that routes only
+// `dist/**` is a deliberate statement that nothing else is servable here, and
+// the caller reports it as such rather than guessing a store.
+func (c StoreConfig) RouteFor(repo string) string {
+	for _, r := range c.Routes {
+		if r.matches(repo) {
+			return r.Store
+		}
+	}
+	return ""
 }
 
 // CacheFor is the store a job delivering repo to target should be read through,

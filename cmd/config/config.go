@@ -131,6 +131,29 @@ func (c *Config) Evaluate() error {
 			if s.TokenFile != "" && (s.Username != "" || s.Password != "") {
 				return z.Err(nil, "store %q: set either token_file or username/password, not both", name)
 			}
+		case "meta":
+			// A meta store is a policy, not a place. Every field below belongs to
+			// a store that bytes actually move through, and silently ignoring one
+			// here would mean a credential an operator wrote and gantry never
+			// presents — so each is refused by name.
+			if s.Host != "" {
+				return z.Err(nil, "store %q: a meta store has no host of its own; the hosts are the ones its routes name", name)
+			}
+			if s.TokenFile != "" || s.Username != "" || s.Password != "" || s.Cred != nil || s.CACert != "" {
+				return z.Err(nil, "store %q: a meta store holds no credential; gantry never connects to it, only to the store a route selects", name)
+			}
+			if s.Mode != "" || s.DownstreamHost != "" || s.Insecure {
+				return z.Err(nil, "store %q: mode/downstream_host/insecure describe a registry connection; set them on the stores the routes name", name)
+			}
+			if s.Retention != nil {
+				return z.Err(nil, "store %q: retention collects images off an engine; a meta store holds none", name)
+			}
+			if s.Cache != "" || len(s.Caches) > 0 {
+				return z.Err(nil, "store %q: a meta store selects between registries and does not cache; declare `cache` on the store a route names", name)
+			}
+			if len(s.Routes) == 0 {
+				return z.Err(nil, "store %q: a meta store is its routes; declare at least one", name)
+			}
 		case "docker", "containerd":
 			// engine store; address is validated when the store is dialed
 			if s.TokenFile != "" {
@@ -138,6 +161,9 @@ func (c *Config) Evaluate() error {
 			}
 		default:
 			return z.Err(nil, "store %q: unknown kind %q", name, s.Kind)
+		}
+		if len(s.Routes) > 0 && !s.IsMeta() {
+			return z.Err(nil, "store %q: `routes` selects between registries and belongs to a meta store; a %s store is one place, and it is where its own config says", name, s.Kind)
 		}
 		// A cred (client mTLS) applies to both registry (pull/push) and engine
 		// (daemon) connections, so validate and default the device for any store
@@ -214,6 +240,52 @@ func (c *Config) Evaluate() error {
 				return z.Err(nil, "store %q: cache route %d is unreachable; route %d matches every job", name, i, unscoped)
 			}
 			if len(r.ForTargets) == 0 && len(r.ForRepos) == 0 {
+				unscoped = i
+			}
+		}
+	}
+
+	// A meta store's routes name other stores, so they can only be checked once
+	// every store is known. Routing is one level: a route names a registry, and a
+	// registry has no routes, so there is no graph to walk and no cycle to detect.
+	for name, s := range c.Stores {
+		if !s.IsMeta() {
+			continue
+		}
+		unscoped := -1
+		for i, r := range s.Routes {
+			if r.Store == "" {
+				return z.Err(nil, "store %q: route %d names no store", name, i)
+			}
+			if r.Store == name {
+				return z.Err(nil, "store %q: route %d names the meta store itself", name, i)
+			}
+			to, declared := c.Stores[r.Store]
+			if !declared {
+				return z.Err(nil, "store %q: route %d names %q, which is not a declared store", name, i, r.Store)
+			}
+			if !to.IsRegistry() {
+				// Including another meta store: one level is what keeps this a
+				// lookup rather than a graph, and a chain of policies is a thing
+				// nobody could read off the config.
+				return z.Err(nil, "store %q: route %d names %q, which is a %s; a route selects a registry to read from", name, i, r.Store, to.Kind)
+			}
+			for _, pat := range r.ForRepos {
+				if !doublestar.ValidatePattern(pat) {
+					return z.Err(nil, "store %q: route %d has an invalid repository pattern %q", name, i, pat)
+				}
+				if strings.Contains(pat, "://") || strings.Contains(strings.SplitN(pat, "/", 2)[0], ".") {
+					// Matched against the repository path alone, so a host-qualified
+					// pattern silently never matches — and a route that never matches
+					// sends every image to the wrong registry without saying so.
+					return z.Err(nil, "store %q: route %d pattern %q looks host-qualified; match the repository path alone, e.g. %q", name, i, pat, "dist/**")
+				}
+			}
+			// An unscoped route matches everything, so anything after it is dead.
+			if unscoped >= 0 {
+				return z.Err(nil, "store %q: route %d is unreachable; route %d matches every repository", name, i, unscoped)
+			}
+			if len(r.ForRepos) == 0 {
 				unscoped = i
 			}
 		}

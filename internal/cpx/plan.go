@@ -282,7 +282,7 @@ func (w *Copier) plan(ctx context.Context, req Request) (*execPlan, error) {
 	if sourceKey == "" {
 		sourceKey = base.Context().RegistryStr()
 	}
-	if p.source, err = w.stores.Registry(sourceKey); err != nil {
+	if p.source, err = w.stores.Registry(sourceKey, p.repo); err != nil {
 		return nil, z.Err(err, "source")
 	}
 	if p.authorityRef, err = name.ParseReference(p.source.Host+"/"+p.repo+p.id, w.refOpts(p.source)...); err != nil {
@@ -528,7 +528,7 @@ func (w *Copier) bindDelivery(ctx context.Context, p *execPlan, st *execStep, or
 		return nil
 	}
 
-	origin, err := w.stores.Registry(originHost)
+	origin, err := w.stores.Registry(originHost, p.repo)
 	if err != nil {
 		return unavailable(z.Err(err, "fallback origin"))
 	}

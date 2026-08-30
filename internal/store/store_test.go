@@ -158,3 +158,109 @@ func TestEngineConfigAgreesWithEngine(t *testing.T) {
 		}
 	}
 }
+
+// routed is the fleet this feature exists for: one name a job points at, and
+// two registries behind it that hold different things.
+func routed(t *testing.T) *Set {
+	t.Helper()
+	s, err := NewSet(map[string]config.StoreConfig{
+		"remote": {Kind: "meta", Routes: []config.Route{
+			{ForRepos: []string{"dist/**"}, Store: "cdn"},
+			{Store: "internal"},
+		}},
+		"cdn":      {Kind: "oci", Host: "registry.hday.io"},
+		"internal": {Kind: "oci", Host: "cr.hday.io"},
+	}, false)
+	if err != nil {
+		t.Fatalf("NewSet: %v", err)
+	}
+	return s
+}
+
+// The whole point: the same store name answers with a different registry
+// depending on the repository, and the caller gets a config it can connect to.
+func TestMetaRoutesByRepository(t *testing.T) {
+	s := routed(t)
+	for _, tc := range []struct{ repo, want string }{
+		{"dist/hday/cove", "registry.hday.io"},
+		{"dist/infra", "registry.hday.io"},
+		{"stage/hday/cove", "cr.hday.io"},
+		{"hday/kamino", "cr.hday.io"},
+	} {
+		c, err := s.Registry("remote", tc.repo)
+		if err != nil {
+			t.Fatalf("Registry(remote, %q): %v", tc.repo, err)
+		}
+		if c.Host != tc.want {
+			t.Errorf("repo %q routed to %q, want %q", tc.repo, c.Host, tc.want)
+		}
+		if c.IsMeta() {
+			t.Errorf("repo %q resolved to a meta store; meta must never leave Registry", tc.repo)
+		}
+	}
+}
+
+// A destination has no repository to route on, and a policy is not a place to
+// push to. The error has to say so rather than pick the first route.
+func TestMetaIsNotADestination(t *testing.T) {
+	s := routed(t)
+	_, err := s.Registry("remote", "")
+	if err == nil {
+		t.Fatal("a meta store resolved with no repository")
+	}
+	if !strings.Contains(err.Error(), "only be a source") {
+		t.Errorf("error does not say why: %v", err)
+	}
+}
+
+// A meta store that covers only some repositories is a deliberate config, so
+// the uncovered case is an error naming the repository and what is covered.
+func TestMetaWithoutAMatchingRouteSaysWhatItCovers(t *testing.T) {
+	s, err := NewSet(map[string]config.StoreConfig{
+		"remote": {Kind: "meta", Routes: []config.Route{
+			{ForRepos: []string{"dist/**"}, Store: "cdn"},
+		}},
+		"cdn": {Kind: "oci", Host: "registry.hday.io"},
+	}, false)
+	if err != nil {
+		t.Fatalf("NewSet: %v", err)
+	}
+	_, err = s.Registry("remote", "stage/hday/cove")
+	if err == nil {
+		t.Fatal("an uncovered repository resolved")
+	}
+	if !strings.Contains(err.Error(), "stage/hday/cove") || !strings.Contains(err.Error(), "dist/**") {
+		t.Errorf("error names neither the repository nor the routes: %v", err)
+	}
+}
+
+// A meta store is not an engine and must not answer an engine lookup, the same
+// way a registry does not.
+func TestMetaIsNotAnEngine(t *testing.T) {
+	s := routed(t)
+	if _, ok := s.EngineConfig("remote"); ok {
+		t.Fatal("a meta store answered an engine lookup")
+	}
+}
+
+// StoreStatuses walks every store, and a meta store has no engine to probe --
+// the branch that assumed everything not a registry is one used to panic here.
+func TestMetaStatusDoesNotProbe(t *testing.T) {
+	s := routed(t)
+	var seen bool
+	for _, st := range s.StoreStatuses(t.Context()) {
+		if st.Name != "remote" {
+			continue
+		}
+		seen = true
+		if st.Host != "" {
+			t.Errorf("meta store reports host %q; it has none", st.Host)
+		}
+		if !st.Ready {
+			t.Errorf("meta store is not ready: %s", st.Error)
+		}
+	}
+	if !seen {
+		t.Fatal("meta store is missing from the status list")
+	}
+}
