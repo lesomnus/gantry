@@ -1,7 +1,10 @@
 package cpx
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -310,4 +313,63 @@ func startStatusRegistry(t *testing.T, status int) string {
 		t.Fatal(err)
 	}
 	return u.Host
+}
+
+// halfLayer hands out a body that breaks part-way on the first ask and a whole
+// one on the second, which is what the registry client sees when an upload is
+// cut and it retries by requesting the body again.
+type halfLayer struct {
+	v1.Layer
+	body []byte
+	n    int
+}
+
+func (l *halfLayer) Compressed() (io.ReadCloser, error) {
+	l.n++
+	if l.n == 1 {
+		return io.NopCloser(io.MultiReader(
+			bytes.NewReader(l.body[:len(l.body)/2]),
+			errReader{errors.New("read tcp: connection reset by peer")},
+		)), nil
+	}
+	return io.NopCloser(bytes.NewReader(l.body)), nil
+}
+
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
+
+// A re-sent body must not be counted twice. The registry client retries a
+// broken upload below Fill — the caller never sees an error — so if the count
+// only goes up, a blob cut in half reports the layer as more than complete and
+// the transfer as having moved bytes that never landed.
+func TestABodyAskedForTwiceIsCountedOnce(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), 1000)
+	sink := &testSink{}
+	cl := &countingLayer{Layer: &halfLayer{body: body}, sink: sink}
+
+	rc, err := cl.Compressed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, rc); err == nil {
+		t.Fatal("the first body must break")
+	}
+	if got := sink.bytes.Load(); got != 500 {
+		t.Fatalf("after the broken attempt = %d, want 500", got)
+	}
+
+	rc, err = cl.Compressed() // the retry asks again
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, rc); err != nil {
+		t.Fatal(err)
+	}
+	if got := sink.bytes.Load(); got != int64(len(body)) {
+		t.Errorf("total counted = %d, want %d (the broken attempt's 500 must be taken back)", got, len(body))
+	}
+	if got := cl.moved.Load(); got != int64(len(body)) {
+		t.Errorf("moved = %d, want %d", got, len(body))
+	}
 }

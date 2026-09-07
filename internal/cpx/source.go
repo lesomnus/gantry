@@ -349,7 +349,15 @@ type countingLayer struct {
 	moved atomic.Int64
 }
 
+// Compressed opens the body. Asking for it a second time is a RE-SEND: the
+// registry client retries a broken upload by requesting the body again, and it
+// starts from zero, so whatever the last attempt reported never landed. Without
+// taking those bytes back, a blob cut in half reports a layer as more than
+// complete — and the re-send happens down here, below Fill, where the caller's
+// own re-attempt cannot see it.
 func (c *countingLayer) Compressed() (io.ReadCloser, error) {
+	c.sink.Rewind()
+	c.moved.Store(0)
 	rc, err := c.Layer.Compressed()
 	if err != nil {
 		return nil, err
