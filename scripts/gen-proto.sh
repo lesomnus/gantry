@@ -13,34 +13,71 @@ set -o pipefail
 # The protobuf-orm tools are built from a local checkout of the
 # github.com/protobuf-orm repositories (protobuf-merge is not fetchable as a
 # Go module). Point ORM_ROOT at the directory that contains them.
+#
+# They are built at the commits scripts/orm-tools.lock names, taken out of the
+# checkout's object store, so the checkout may sit wherever its other users
+# need it and the output here stays the output that is committed. Bumping a
+# generator is a deliberate edit of that file; see its header.
+#
+# Both passes write through a staging area, and the committed protos and pb/
+# are put back if any step fails: a half-finished run used to leave the tree
+# with pb/ deleted and the service protos already replaced.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ORM_ROOT="${ORM_ROOT:-/workspaces/github.com/protobuf-orm}"
 BUF="${BUF:-go run github.com/bufbuild/buf/cmd/buf@v1.71.0}"
 
 BIN="$ROOT/.gen/bin"
+SRC="$ROOT/.gen/src"
 SVC="$ROOT/.gen/svc"
 MERGED="$ROOT/.gen/merged"
+BACKUP="$ROOT/.gen/backup"
+LOCK="$ROOT/scripts/orm-tools.lock"
 
-TOOLS=(protoc-gen-orm-service protoc-gen-orm-go protobuf-merge)
+# Restore whatever the run had already replaced. Armed before the first write
+# and disarmed on success, so an interrupted run leaves the tree as it found it
+# rather than half-generated.
+restore() {
+	local rc=$?
+	if [ "$rc" -eq 0 ]; then
+		return 0
+	fi
+	if [ -d "$BACKUP" ]; then
+		echo "gen-proto failed (exit $rc); restoring the committed protos and pb/" >&2
+		rm -f "$ROOT"/proto/gantry/*_svc.g.proto
+		cp "$BACKUP"/proto/*.proto "$ROOT/proto/gantry/"
+		rm -rf "$ROOT/pb"
+		cp -r "$BACKUP/pb" "$ROOT/pb"
+	fi
+	return "$rc"
+}
 
-for repo in protobuf-orm "${TOOLS[@]}"; do
-	if [ ! -d "$ORM_ROOT/$repo" ]; then
+rm -rf "$SRC"
+mkdir -p "$BIN"
+
+# Build each tool from the commit the lock file names. The checkout supplies the
+# objects and nothing else: its working tree, branch and cleanliness do not
+# reach the output.
+while read -r repo rev; do
+	case "$repo" in '' | '#'*) continue ;; esac
+
+	src="$ORM_ROOT/$repo"
+	if [ ! -d "$src" ]; then
 		echo "ORM_ROOT=$ORM_ROOT does not contain the $repo repository." >&2
-		echo "Clone github.com/protobuf-orm/{protobuf-orm,protoc-gen-orm-service,protoc-gen-orm-go,protobuf-merge}" >&2
+		echo "Clone github.com/protobuf-orm/{protoc-gen-orm-service,protoc-gen-orm-go,protobuf-merge}" >&2
 		echo "next to each other and set ORM_ROOT to their parent directory." >&2
 		exit 1
 	fi
-	if [ -n "$(git -C "$ORM_ROOT/$repo" status --porcelain 2>/dev/null)" ]; then
-		echo "WARN: $ORM_ROOT/$repo has uncommitted changes;" \
-			"the generated output may not be reproducible from a pushed state." >&2
+	if ! git -C "$src" cat-file -e "$rev^{commit}" 2>/dev/null; then
+		echo "$src does not have commit $rev, which scripts/orm-tools.lock pins $repo to." >&2
+		echo "Run: git -C $src fetch" >&2
+		exit 1
 	fi
-done
 
-mkdir -p "$BIN"
-for tool in "${TOOLS[@]}"; do
-	go build -C "$ORM_ROOT/$tool" -o "$BIN/$tool" .
-done
+	mkdir -p "$SRC/$repo"
+	git -C "$src" archive "$rev" | tar -x -C "$SRC/$repo"
+	go build -C "$SRC/$repo" -o "$BIN/$repo" .
+done <"$LOCK"
 export PATH="$BIN:$PATH"
 
 cd "$ROOT"
@@ -79,6 +116,13 @@ for overlay in "$ROOT"/proto.svc/gantry/*_svc.proto; do
 	fi
 done
 
+# Everything that could still fail has passed; from here the tree is written to.
+rm -rf "$BACKUP"
+mkdir -p "$BACKUP/proto"
+cp "$ROOT"/proto/gantry/*_svc.g.proto "$BACKUP/proto/"
+cp -r "$ROOT/pb" "$BACKUP/pb"
+trap restore EXIT
+
 rm -f "$ROOT"/proto/gantry/*_svc.g.proto
 cp "$MERGED"/*_svc.g.proto "$ROOT/proto/gantry/"
 
@@ -92,3 +136,6 @@ fi
 $BUF generate --template buf.gen.yaml
 
 gofmt -w "$ROOT/pb"
+
+trap - EXIT
+rm -rf "$BACKUP"

@@ -1,0 +1,18 @@
+# The protobuf-orm generators that reproduce this repository's committed
+# generated output, one "<repository> <commit>" per line.
+#
+# The generators are separate repositories on their own release schedule, and
+# their output is committed here. Building whatever the local checkout happens
+# to be at makes the pipeline produce something else -- a newer one adds RPCs
+# and moves field numbers, which is a change to gantry's contract rather than a
+# regeneration of it. So scripts/gen-proto.sh builds these commits out of the
+# checkout's object store (`git archive`) and never looks at its working tree.
+#
+# To take a newer generator: bump the line, run scripts/gen-proto.sh, and read
+# the diff -- it is the contract change, and it belongs in the same commit as
+# the bump. `git -C $ORM_ROOT/<repository> fetch` first if the commit is not
+# there yet.
+
+protoc-gen-orm-service 9e20de913f6d84aade658ff4f41beb60bf3250b8
+protoc-gen-orm-go      d2fb40a9425bf2d887fa42462cac0ba53cc2781f
+protobuf-merge         5ad3f89671df286d1a57673b7941c35c3fa5f031

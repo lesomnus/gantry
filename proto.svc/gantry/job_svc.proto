@@ -10,11 +10,29 @@ import "gantry/store_svc.g.proto";
 import "google/protobuf/timestamp.proto";
 
 // Add/Get/Erase (merged in from the orm crud option) plus the actions below are
-// the client surface. The crud-generated Patch is intentionally NOT a client
-// operation — a submitted job is fixed, labels included. It is retained in the
-// generated API only as a test affordance, so a harness can seed or rewrite a
-// job's initial state; production keeps it off the client surface.
+// the client surface. Add and Get are restated here only to carry what gantry's
+// versions of them do beyond the generated one-liner; a comment written into the
+// generated file itself is lost on the next run.
+//
+// The crud-generated Patch is intentionally NOT a client operation — a submitted
+// job is fixed, labels included. It is retained in the generated API only as a
+// test affordance, so a harness can seed or rewrite a job's initial state;
+// production keeps it off the client surface.
 service JobService {
+  // Add submits a move. It coalesces onto an identical in-flight job; the dedup
+  // key is (ref, platforms, source, target, as, fallback_to_origin,
+  // require_authority) — what may be SERVED, not only what is moved. A tag is
+  // treated as stable for the life of an active job, so a tag re-pushed mid-job
+  // does not start a second move until the first finishes — and with digest
+  // pinning the first job carries the digest resolved at admission (the
+  // pre-repush image).
+  rpc Add(JobAddRequest) returns (Job);
+  // Get retrieves a Job from the live, in-memory registry: only jobs seen since
+  // the process started, emptied on restart. A job's durable lifecycle
+  // (job_admitted -> job_done, correlated by job id) lives in the audit log,
+  // queried after a restart through EventService. gantry does not resume
+  // interrupted jobs on restart; re-submit to continue.
+  rpc Get(JobGetRequest) returns (Job);
   // List returns jobs newest-first from the same live registry as Get, so it too
   // holds only jobs since process start; use EventService for job history.
   rpc List(JobListRequest) returns (JobListResponse);
