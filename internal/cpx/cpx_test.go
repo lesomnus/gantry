@@ -3,12 +3,15 @@ package cpx
 import (
 	"context"
 	"errors"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/store"
 )
@@ -33,6 +36,9 @@ func newCopier(t *testing.T, stores []config.StoreConfig, allowUnknown bool) (*C
 	js := NewMemStore()
 	w := NewCopier(set, js, c.Worker)
 	w.srcOpts = []name.Option{name.Insecure}
+	// Re-attempt delays are real seconds in production; tests assert what the
+	// attempts do, not how long they wait for each other.
+	w.backoff = func(int) time.Duration { return time.Millisecond }
 	return w, js
 }
 
@@ -396,5 +402,142 @@ func TestLayerFailureSealsTheJobOnTheEarlyReturn(t *testing.T) {
 	}
 	if _, ok := js.Active("k"); ok {
 		t.Error("a failing job must stop being a coalescing target on every exit path")
+	}
+}
+
+// flakySource breaks one blob part-way through its body, the way a reset
+// connection does: some bytes are reported, then the copy fails. It succeeds
+// once it has failed failFor times.
+type flakySource struct {
+	mu       sync.Mutex
+	attempts map[string]int
+	failFor  int
+	partial  int64 // reported before breaking
+	total    int64 // reported by an attempt that completes
+	err      error // what a broken attempt returns (nil = a stream reset)
+}
+
+func (s *flakySource) Resolve(context.Context, name.Reference, name.Reference, []string) (*Plan, error) {
+	return nil, nil
+}
+
+func (s *flakySource) Commit(context.Context, name.Reference, name.Reference, []string, bool) (v1.Hash, error) {
+	return v1.Hash{}, nil
+}
+
+func (s *flakySource) count(digest string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.attempts[digest]
+}
+
+func (s *flakySource) Fill(_ context.Context, _, _ name.Repository, l PlannedLayer, sink ProgressSink) error {
+	s.mu.Lock()
+	if s.attempts == nil {
+		s.attempts = map[string]int{}
+	}
+	s.attempts[l.Digest]++
+	n := s.attempts[l.Digest]
+	s.mu.Unlock()
+
+	if n <= s.failFor {
+		sink.Add(s.partial) // the body that did arrive before the break
+		if s.err != nil {
+			return s.err
+		}
+		return errors.New("push blob: stream error: stream ID 1135; INTERNAL_ERROR; received from peer")
+	}
+	sink.Add(s.total)
+	sink.SetState("copied")
+	return nil
+}
+
+// A blob that breaks part-way is attempted again, and the partial body of the
+// broken attempt does not count toward the transfer: it never arrived, and the
+// next attempt sends it again. Progress that only counted up would report the
+// layer as more than complete and the transfer as having moved bytes it did not.
+func TestABrokenBlobIsAttemptedAgain(t *testing.T) {
+	w, js := newCopier(t, nil, true)
+	w.wc.LayerAttempts = 3
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	job := NewJob("job_r", "a/b:1", nil, time.Now())
+	job.ctx, job.cancel = ctx, cancel
+	lp := &LayerProgress{Total: 100}
+	tr := &Transfer{BytesTotal: 100, Layers: []*LayerProgress{lp}}
+	job.Transfers = []*Transfer{tr}
+	if err := js.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
+	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
+	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1", Size: 100}}}
+	src := &flakySource{failFor: 1, partial: 40, total: 100}
+
+	if err := w.copyLayers(job.ctx, job, tr, src, plan, src_ref.Context(), dst_ref.Context()); err != nil {
+		t.Fatalf("a blob that succeeds on its second attempt must not fail the transfer: %v", err)
+	}
+	if got := src.count("sha256:1"); got != 2 {
+		t.Errorf("attempts = %d, want 2", got)
+	}
+	if got := lp.Done.Load(); got != 100 {
+		t.Errorf("layer done = %d, want 100 (the 40 that never arrived must not count)", got)
+	}
+	if got := tr.BytesDone.Load(); got != 100 {
+		t.Errorf("transfer done = %d, want 100", got)
+	}
+}
+
+// A registry that ANSWERED has said what it holds, and asking again gets the
+// same answer. Re-attempting it would only delay the fallback to another source
+// by the whole backoff.
+func TestADefiniteAnswerIsNotAttemptedAgain(t *testing.T) {
+	w, js := newCopier(t, nil, true)
+	w.wc.LayerAttempts = 3
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	job := NewJob("job_a", "a/b:1", nil, time.Now())
+	job.ctx, job.cancel = ctx, cancel
+	tr := &Transfer{Layers: []*LayerProgress{{}}}
+	job.Transfers = []*Transfer{tr}
+	if err := js.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	src_ref, _ := name.ParseReference("up.local/a/b:1", name.Insecure)
+	dst_ref, _ := name.ParseReference("cache.local/a/b:1", name.Insecure)
+	plan := &Plan{Layers: []PlannedLayer{{Digest: "sha256:1"}}}
+	src := &flakySource{failFor: 99, err: &transport.Error{StatusCode: http.StatusNotFound}}
+
+	if err := w.copyLayers(job.ctx, job, tr, src, plan, src_ref.Context(), dst_ref.Context()); err == nil {
+		t.Fatal("a 404 must still fail the transfer")
+	}
+	if got := src.count("sha256:1"); got != 1 {
+		t.Errorf("attempts = %d, want 1: a definite answer is not re-attempted", got)
+	}
+}
+
+func TestWorthAnotherAttempt(t *testing.T) {
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tt := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"a reset connection", context.Background(), errors.New("stream error: INTERNAL_ERROR"), true},
+		{"a 500", context.Background(), &transport.Error{StatusCode: 500}, true},
+		{"a rate limit", context.Background(), &transport.Error{StatusCode: http.StatusTooManyRequests}, true},
+		{"not found", context.Background(), &transport.Error{StatusCode: http.StatusNotFound}, false},
+		{"unauthorized", context.Background(), &transport.Error{StatusCode: http.StatusUnauthorized}, false},
+		{"forbidden", context.Background(), &transport.Error{StatusCode: http.StatusForbidden}, false},
+		{"a cancelled job", dead, errors.New("stream error"), false},
+		{"the cancellation itself", context.Background(), context.Canceled, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := worthAnotherAttempt(tt.ctx, tt.err); got != tt.want {
+				t.Errorf("worthAnotherAttempt = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

@@ -94,6 +94,7 @@ func (c *Config) Evaluate() error {
 	z.FallbackP((*time.Duration)(&c.Serve.ShutdownGrace), 15*time.Second)
 	z.FallbackP(&c.Worker.MaxConcurrentJobs, 2)
 	z.FallbackP(&c.Worker.MaxConcurrentLayers, 4)
+	z.FallbackP(&c.Worker.LayerAttempts, 3)
 	z.FallbackP(&c.Worker.QueueSize, 256)
 	z.FallbackP((*time.Duration)(&c.Worker.JobTTL), 30*time.Minute)
 	z.FallbackP((*time.Duration)(&c.Worker.AdmissionTimeout), 10*time.Second)

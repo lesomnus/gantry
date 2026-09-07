@@ -26,6 +26,7 @@ type testSink struct {
 
 func (s *testSink) Add(n int64)        { s.bytes.Add(n) }
 func (s *testSink) SetState(st string) { s.state.Store(st) }
+func (s *testSink) Rewind()            { s.bytes.Store(0) }
 func (s *testSink) lastState() string {
 	v, _ := s.state.Load().(string)
 	return v
