@@ -55,12 +55,32 @@ func newDockerEngine(c config.StoreConfig) (*dockerEngine, error) {
 	if err != nil {
 		return nil, z.Err(err, "docker client transport")
 	}
-	if rt != nil {
-		// Must precede WithHost: WithHost runs sockets.ConfigureTransport on this
-		// client's transport, so the client has to be installed first.
-		opts = append(opts, client.WithHTTPClient(&http.Client{Transport: rt}))
+	if base := xport.Base(rt); base != nil {
+		// The docker client wants the concrete *http.Transport and reaches into it
+		// twice: WithHost runs sockets.ConfigureTransport on it, and the scheme is
+		// decided by whether it carries a TLS config. Neither survives a wrapper —
+		// the first errors out, the second quietly picks http and the daemon
+		// answers "client sent an HTTP request to an HTTPS server".
+		//
+		// So configure through the concrete transport, say the scheme rather than
+		// letting it be inferred, and install the store's actual round tripper
+		// last, since opts are applied in order. What that costs is the client's
+		// own handle on a *http.Transport: it cannot close idle connections at
+		// Close, and its hijack dialer falls back to a plain one. gantry hijacks
+		// nothing (no attach/exec), and idle connections outlive nothing but the
+		// process.
+		scheme := "http"
+		if base.TLSClientConfig != nil {
+			scheme = "https"
+		}
+		opts = append(opts,
+			client.WithHTTPClient(&http.Client{Transport: base}),
+			client.WithHost(dockerHost(c.Address)),
+			client.WithScheme(scheme),
+			client.WithHTTPClient(&http.Client{Transport: rt}))
+	} else {
+		opts = append(opts, client.WithHost(dockerHost(c.Address)))
 	}
-	opts = append(opts, client.WithHost(dockerHost(c.Address)))
 
 	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
