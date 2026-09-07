@@ -35,9 +35,19 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type JobServiceClient interface {
-	// Add creates a new Job
+	// Add submits a move. It coalesces onto an identical in-flight job; the dedup
+	// key is (ref, platforms, source, target, as, fallback_to_origin,
+	// require_authority) — what may be SERVED, not only what is moved. A tag is
+	// treated as stable for the life of an active job, so a tag re-pushed mid-job
+	// does not start a second move until the first finishes — and with digest
+	// pinning the first job carries the digest resolved at admission (the
+	// pre-repush image).
 	Add(ctx context.Context, in *JobAddRequest, opts ...grpc.CallOption) (*Job, error)
-	// Get retrieves a Job
+	// Get retrieves a Job from the live, in-memory registry: only jobs seen since
+	// the process started, emptied on restart. A job's durable lifecycle
+	// (job_admitted -> job_done, correlated by job id) lives in the audit log,
+	// queried after a restart through EventService. gantry does not resume
+	// interrupted jobs on restart; re-submit to continue.
 	Get(ctx context.Context, in *JobGetRequest, opts ...grpc.CallOption) (*Job, error)
 	// Patch updates an existing Job
 	Patch(ctx context.Context, in *JobPatchRequest, opts ...grpc.CallOption) (*Job, error)
@@ -172,9 +182,19 @@ func (c *jobServiceClient) Retry(ctx context.Context, in *JobRef, opts ...grpc.C
 // All implementations must embed UnimplementedJobServiceServer
 // for forward compatibility.
 type JobServiceServer interface {
-	// Add creates a new Job
+	// Add submits a move. It coalesces onto an identical in-flight job; the dedup
+	// key is (ref, platforms, source, target, as, fallback_to_origin,
+	// require_authority) — what may be SERVED, not only what is moved. A tag is
+	// treated as stable for the life of an active job, so a tag re-pushed mid-job
+	// does not start a second move until the first finishes — and with digest
+	// pinning the first job carries the digest resolved at admission (the
+	// pre-repush image).
 	Add(context.Context, *JobAddRequest) (*Job, error)
-	// Get retrieves a Job
+	// Get retrieves a Job from the live, in-memory registry: only jobs seen since
+	// the process started, emptied on restart. A job's durable lifecycle
+	// (job_admitted -> job_done, correlated by job id) lives in the audit log,
+	// queried after a restart through EventService. gantry does not resume
+	// interrupted jobs on restart; re-submit to continue.
 	Get(context.Context, *JobGetRequest) (*Job, error)
 	// Patch updates an existing Job
 	Patch(context.Context, *JobPatchRequest) (*Job, error)

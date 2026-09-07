@@ -9,7 +9,13 @@ import "google/protobuf/timestamp.proto";
 option go_package = "github.com/lesomnus/gantry/pb";
 
 service JobService {
-  // Add creates a new Job
+  // Add submits a move. It coalesces onto an identical in-flight job; the dedup
+  // key is (ref, platforms, source, target, as, fallback_to_origin,
+  // require_authority) — what may be SERVED, not only what is moved. A tag is
+  // treated as stable for the life of an active job, so a tag re-pushed mid-job
+  // does not start a second move until the first finishes — and with digest
+  // pinning the first job carries the digest resolved at admission (the
+  // pre-repush image).
   rpc Add(JobAddRequest) returns (Job);
   // Get retrieves a Job from the live, in-memory registry: only jobs seen since
   // the process started, emptied on restart. A job's durable lifecycle
@@ -39,12 +45,6 @@ service JobService {
   rpc Retry(JobRef) returns (Job);
 }
 
-// JobAddRequest submits a move. Add coalesces onto an identical in-flight job; the
-// dedup key is (ref, platforms, source, target, as, fallback_to_origin,
-// require_authority) — what may be SERVED, not only what is moved. A tag is
-// treated as stable for the life of an active job, so a tag re-pushed mid-job does
-// not start a second move until the first finishes — and with digest pinning the
-// first job carries the digest resolved at admission (the pre-repush image).
 message JobAddRequest {
   string id = 1;
   map<string, string> labels = 7;

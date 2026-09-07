@@ -321,11 +321,28 @@ The pipeline (see the script header for detail):
 
 The `protobuf-orm` tools are built from a local checkout (`protobuf-merge` is not
 fetchable as a Go module); point `ORM_ROOT` at the directory holding the
-`github.com/protobuf-orm/{protobuf-orm,protoc-gen-orm-service,protoc-gen-orm-go,protobuf-merge}`
+`github.com/protobuf-orm/{protoc-gen-orm-service,protoc-gen-orm-go,protobuf-merge}`
 repositories (default `/workspaces/github.com/protobuf-orm`, which the devcontainer
 mounts). `VerifyService` is hand-written (`proto.svc`/`verify_svc.proto`), not
 orm-generated, which is why it is registered separately from `pb.RegisterServer`
 — see [api.md](api.md).
+
+Each tool is built at the commit [`scripts/orm-tools.lock`](../scripts/orm-tools.lock)
+names, read out of the checkout's object store, so the checkout can sit wherever
+its other users need it — its branch and working tree do not reach the output.
+The generators are separate projects on their own schedule, and a newer one adds
+RPCs and moves field numbers: that is a change to gantry's contract rather than a
+regeneration of it. Taking one is a deliberate bump of that file, run, and read
+the diff; `git -C $ORM_ROOT/<repository> fetch` first if the commit is not there.
+A run that fails puts the committed protos and `pb/` back, so an interrupted
+regeneration does not leave a half-written tree.
+
+**A comment on a generated RPC belongs in the overlay**, not in the
+`*_svc.g.proto` it lands in — the next run overwrites that file. `protobuf-merge`
+carries an RPC's comment from `proto.svc/gantry/` onto the generated
+declaration, so restate the RPC there (with its generated signature) and write
+the comment on it; `JobService.Add` and `Get` are the examples. Message-level
+comments are not carried, so say it on the RPC that takes the message.
 
 ## Conventions
 
