@@ -123,7 +123,7 @@ func TestMTLSTransportFullHandshake(t *testing.T) {
 	defer srv.Close()
 
 	// clientKey stands in for the TPM signer (both are crypto.Signer).
-	rt, err := mtlsTransport("the key at the TPM handle", clientCertPEM, caPEM, clientKey, false)
+	rt, err := mtlsTransport("the key at the TPM handle", "cred.cert", clientCertPEM, caPEM, clientKey, false)
 	if err != nil {
 		t.Fatalf("build transport: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestMTLSTransportKeyMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mtlsTransport("the key at the TPM handle", certPEM, nil, otherKey, false); err == nil {
+	if _, err := mtlsTransport("the key at the TPM handle", "cred.cert", certPEM, nil, otherKey, false); err == nil {
 		t.Error("expected error when signer does not match the certificate key")
 	}
 }
@@ -155,7 +155,7 @@ func TestMTLSTransportRejectsBadCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mtlsTransport("the key at the TPM handle", []byte("not a pem"), nil, key, false); err == nil {
+	if _, err := mtlsTransport("the key at the TPM handle", "cred.cert", []byte("not a pem"), nil, key, false); err == nil {
 		t.Error("expected error for a certificate file with no CERTIFICATE block")
 	}
 }
@@ -163,7 +163,7 @@ func TestMTLSTransportRejectsBadCert(t *testing.T) {
 func TestMTLSTransportRejectsBadCA(t *testing.T) {
 	ca, caKey, _ := genCA(t)
 	certPEM, key := issueCert(t, ca, caKey, "client", false)
-	if _, err := mtlsTransport("the key at the TPM handle", certPEM, []byte("garbage ca"), key, false); err == nil {
+	if _, err := mtlsTransport("the key at the TPM handle", "cred.cert", certPEM, []byte("garbage ca"), key, false); err == nil {
 		t.Error("expected error for an unparseable ca_cert")
 	}
 }
