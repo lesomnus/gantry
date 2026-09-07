@@ -48,8 +48,17 @@ Each store runs a usage watcher (started by `StartWatchers`):
    containers so the index reflects live usage the moment gantry starts.
 2. **Watch loop** — `WatchUsage` streams "image used" events; each stamps
    `date_last_used` and pokes the scheduler (see below). When the stream ends the
-   watcher marks itself disconnected, backs off 2s, **re-seeds** to catch the gap,
+   watcher marks itself disconnected, backs off, **re-seeds** to catch the gap,
    and reconnects.
+
+The backoff starts at 2s and doubles up to 2m. What resets it is the **seed**
+answering, not the stream ending: a stream ends on every idle timeout, whereas a
+seed that returns means the daemon took a request. So a blip reconnects in 2s,
+while an engine that is not there — a refused TLS handshake, a daemon that is
+gone — is retried twice a minute instead of eighteen hundred times an hour.
+Reachability is logged on its **transitions** (one warning naming the reason when
+the engine stops answering, one line when it returns) so that the ten-minute
+lines which name the cause are not buried under retry lines that do not.
 
 The watcher's health is exposed on `StoreService.GcStatus` (and metrics): whether
 it is `connected`, `watching_since`, `date_last_event`, `date_last_seed`, the

@@ -177,6 +177,34 @@ func TestSchedulerWakesAtAgeDeadline(t *testing.T) {
 	}
 }
 
+// The reconnect delay is the whole point of the backoff, so it is tested as the
+// policy it is rather than by sleeping through one: waiting out a doubling
+// sequence in a test would take minutes and would still only prove the machine
+// was not descheduled.
+func TestWatchBackoffGrowsAndResets(t *testing.T) {
+	// Unreachable: doubles from the floor and stops at the ceiling.
+	d := watchBackoffMin
+	for i, want := range []time.Duration{
+		2 * watchBackoffMin,
+		4 * watchBackoffMin,
+		8 * watchBackoffMin,
+	} {
+		if d = nextWatchBackoff(d, false); d != want {
+			t.Fatalf("step %d: backoff = %v, want %v", i, d, want)
+		}
+	}
+	for range 20 {
+		d = nextWatchBackoff(d, false)
+	}
+	if d != watchBackoffMax {
+		t.Errorf("backoff ran past its ceiling: %v, want %v", d, watchBackoffMax)
+	}
+	// One answer from the engine puts the next blip back at the floor.
+	if d = nextWatchBackoff(d, true); d != watchBackoffMin {
+		t.Errorf("a reachable engine left the backoff at %v, want %v", d, watchBackoffMin)
+	}
+}
+
 func TestWatcherStampsIndex(t *testing.T) {
 	ix := openTemp(t)
 	ts := time.Now()

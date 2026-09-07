@@ -428,6 +428,30 @@ func (m *Manager) registerGauges(ctx context.Context) {
 		metric.WithDescription("per-ref GC removal failures"))
 }
 
+// Reconnect backoff for the usage watcher. A stream that ends because the
+// daemon idled it out is back at watchBackoffMin, while an engine that is not
+// there at all — a refused TLS handshake, a daemon that is gone — is retried at
+// watchBackoffMax instead of eighteen hundred times an hour, each attempt a
+// full handshake that the peer logs too.
+const (
+	watchBackoffMin = 2 * time.Second
+	watchBackoffMax = 2 * time.Minute
+)
+
+// nextWatchBackoff doubles the delay while the engine stays out of reach and
+// resets it the moment one answers. Reachability is read from the SEED, not
+// from the watch stream ending: a stream ends on every idle timeout, whereas a
+// seed that returns means the engine took a request and answered it.
+func nextWatchBackoff(d time.Duration, reachable bool) time.Duration {
+	if reachable {
+		return watchBackoffMin
+	}
+	if d *= 2; d > watchBackoffMax {
+		return watchBackoffMax
+	}
+	return d
+}
+
 func (u *unit) watch(ctx context.Context) {
 	name, eng := u.name, u.engine
 	seed := func() bool {
@@ -440,8 +464,37 @@ func (u *unit) watch(ctx context.Context) {
 		u.mu.Unlock()
 		return err == nil
 	}
+	// The reachability TRANSITIONS are what carry information, so they are what
+	// gets logged: one line when the engine stops answering (carrying the reason)
+	// and one when it comes back (carrying how long it was gone). Logging every
+	// attempt instead buries the ten-minute lines that name the cause under
+	// hundreds of two-second lines that do not.
+	var lostAt time.Time // zero while the engine is answering
+	note := func(reachable bool, retryIn time.Duration) {
+		switch {
+		case !reachable && lostAt.IsZero():
+			lostAt = u.m.now()
+			u.mu.Lock()
+			why := u.watcher.LastError
+			u.mu.Unlock()
+			log.From(ctx).Warn("usage watcher lost the engine",
+				slog.String("engine", name), slog.String("error", why),
+				slog.Duration("retry_in", retryIn))
+		case reachable && !lostAt.IsZero():
+			u.mu.Lock()
+			n := u.watcher.Reconnects
+			u.mu.Unlock()
+			log.From(ctx).Info("usage watcher has the engine back",
+				slog.String("engine", name), slog.Duration("gone", u.m.now().Sub(lostAt)),
+				slog.Int64("reconnects", n))
+			lostAt = time.Time{}
+		}
+	}
+
 	log.From(ctx).Info("usage watcher started", slog.String("engine", name))
 	reachable := seed()
+	wait := watchBackoffMin
+	note(reachable, wait)
 	for ctx.Err() == nil {
 		if reachable {
 			u.mu.Lock()
@@ -468,13 +521,16 @@ func (u *unit) watch(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		log.From(ctx).Debug("usage watcher reconnecting", slog.String("engine", name))
+		log.From(ctx).Debug("usage watcher reconnecting",
+			slog.String("engine", name), slog.Duration("after", wait))
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(2 * time.Second): // backoff, then re-seed to catch the gap
+		case <-time.After(wait): // backoff, then re-seed to catch the gap
 		}
 		reachable = seed()
+		wait = nextWatchBackoff(wait, reachable)
+		note(reachable, wait)
 	}
 }
 
