@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/tpm"
@@ -166,7 +167,7 @@ func buildTPMTransport(c config.StoreConfig) (http.RoundTripper, io.Closer, erro
 			return nil, nil, z.Err(err, "read ca_cert %q", c.CACert)
 		}
 	}
-	rt, err := mtlsTransport("the key at the TPM handle", certPEM, caPEM, signer, c.Insecure)
+	rt, err := mtlsTransport("the key at the TPM handle", c.Cred.Cert, certPEM, caPEM, signer, c.Insecure)
 	if err != nil {
 		_ = dev.Close()
 		return nil, nil, err
@@ -197,16 +198,16 @@ func buildKeyPairTransport(c config.StoreConfig) (http.RoundTripper, error) {
 			return nil, z.Err(err, "read ca_cert %q", c.CACert)
 		}
 	}
-	return mtlsTransport("cred.key", certPEM, caPEM, signer, c.Insecure)
+	return mtlsTransport("cred.key", c.Cred.Cert, certPEM, caPEM, signer, c.Insecure)
 }
 
 // mtlsTransport builds an HTTPS transport that presents cert (leaf + chain) with
 // signer as the private key. signer is any crypto.Signer — the TPM signer or a
 // file-loaded key in production, an in-memory key in tests — so the private key
 // material need never be present. caPEM (optional) verifies the server; insecure
-// skips verification. keyName describes where the private key lives, for error
-// messages.
-func mtlsTransport(keyName string, certPEM, caPEM []byte, signer crypto.Signer, insecure bool) (*http.Transport, error) {
+// skips verification. keyName describes where the private key lives, and
+// certName where the certificate came from, for error messages.
+func mtlsTransport(keyName, certName string, certPEM, caPEM []byte, signer crypto.Signer, insecure bool) (http.RoundTripper, error) {
 	chain, leaf, err := parseCertChain(certPEM)
 	if err != nil {
 		return nil, err
@@ -234,7 +235,7 @@ func mtlsTransport(keyName string, certPEM, caPEM []byte, signer crypto.Signer, 
 
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.TLSClientConfig = tc
-	return t, nil
+	return &certAnnotator{inner: t, name: certName, win: chainWindow(chain), now: time.Now}, nil
 }
 
 // parseCertChain decodes every CERTIFICATE block from a PEM file (leaf first,

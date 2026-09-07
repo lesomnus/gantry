@@ -345,6 +345,27 @@ Validation and lifecycle:
   missing TPM or key file does not block startup for stores that do not use it.
   Devices are released at server shutdown.
 
+**When a peer refuses the certificate**, gantry appends what it can see about
+what it presented:
+
+```
+image list: error during connect: Head "https://10.0.0.2:2376/_ping":
+  remote error: tls: expired certificate
+  (we presented /opt/gantry/docker-client.crt, valid 2026-09-07T04:21:10Z..2066-08-28T04:21:10Z,
+   now 2026-09-07T04:28:49Z: by our clock it is valid, and became valid 7m39s ago;
+   a peer whose clock is behind ours rejects a not-yet-valid certificate with this same alert)
+```
+
+The alert on its own reads as "renew the certificate", and that is often the
+wrong end: TLS sends the same alert 45 for *not yet valid*, and `crypto/x509`
+gives both the same `Expired` reason, so **a peer whose clock is behind reports
+a brand-new certificate as expired**. The window shown is the narrowest the
+presented chain agrees on (latest `notBefore`, earliest `notAfter`), and the
+time is gantry's own — enough to tell whether the certificate is the problem
+before anyone goes looking at it. A certificate *gantry* rejects needs no such
+note: those errors come from `crypto/x509`, which already prints both the window
+and the current time.
+
 ## Caller-chosen `as` names
 
 For an **engine** target, `as` records the pulled image under caller-chosen names
