@@ -123,16 +123,22 @@ var verifyModeToPB = map[string]pb.VerifyMode{
 	"require":           pb.VerifyMode_VERIFY_MODE_REQUIRE,
 }
 
+// Every kind store.Status declares must appear in both maps: a missing entry is
+// not a build error, it is a store that goes out as STORE_KIND_UNSPECIFIED and
+// a filter that cannot name it back. TestEveryStoreKindConverts holds them to
+// the declaration.
 var storeKindToPB = map[string]pb.StoreKind{
 	"oci":        pb.StoreKind_STORE_KIND_OCI,
 	"docker":     pb.StoreKind_STORE_KIND_DOCKER,
 	"containerd": pb.StoreKind_STORE_KIND_CONTAINERD,
+	"meta":       pb.StoreKind_STORE_KIND_META,
 }
 
 var storeKindFromPB = map[pb.StoreKind]string{
 	pb.StoreKind_STORE_KIND_OCI:        "oci",
 	pb.StoreKind_STORE_KIND_DOCKER:     "docker",
 	pb.StoreKind_STORE_KIND_CONTAINERD: "containerd",
+	pb.StoreKind_STORE_KIND_META:       "meta",
 }
 
 var storeModeToPB = map[string]pb.StoreMode{

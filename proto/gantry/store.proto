@@ -12,6 +12,10 @@ enum StoreKind {
   STORE_KIND_OCI = 1; // OCI registry: gantry reads/writes blobs.
   STORE_KIND_DOCKER = 2; // Docker engine: the daemon pulls.
   STORE_KIND_CONTAINERD = 3; // containerd engine: the daemon pulls.
+  // Meta store: a policy, not a place. It selects a registry by repository, so
+  // it can only ever be a source; gantry never connects to it, only to the
+  // store one of its routes names.
+  STORE_KIND_META = 4;
 }
 
 // How gantry fills a registry store as a copy destination.
@@ -44,7 +48,8 @@ message StoreCapabilities {
 message Store {
   // Unique name from configuration; the key clients address stores by.
   string name = 1 [(orm.field) = {key: true}];
-  // Registry (oci) or engine (docker/containerd).
+  // Registry (oci), engine (docker/containerd), or a meta store that routes
+  // between registries.
   StoreKind kind = 2 [(orm.field) = {immutable: true}];
 
   // Registry (oci) stores only: the registry host.
