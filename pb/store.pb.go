@@ -28,6 +28,10 @@ const (
 	StoreKind_STORE_KIND_OCI         StoreKind = 1 // OCI registry: gantry reads/writes blobs.
 	StoreKind_STORE_KIND_DOCKER      StoreKind = 2 // Docker engine: the daemon pulls.
 	StoreKind_STORE_KIND_CONTAINERD  StoreKind = 3 // containerd engine: the daemon pulls.
+	// Meta store: a policy, not a place. It selects a registry by repository, so
+	// it can only ever be a source; gantry never connects to it, only to the
+	// store one of its routes names.
+	StoreKind_STORE_KIND_META StoreKind = 4
 )
 
 // Enum value maps for StoreKind.
@@ -37,12 +41,14 @@ var (
 		1: "STORE_KIND_OCI",
 		2: "STORE_KIND_DOCKER",
 		3: "STORE_KIND_CONTAINERD",
+		4: "STORE_KIND_META",
 	}
 	StoreKind_value = map[string]int32{
 		"STORE_KIND_UNSPECIFIED": 0,
 		"STORE_KIND_OCI":         1,
 		"STORE_KIND_DOCKER":      2,
 		"STORE_KIND_CONTAINERD":  3,
+		"STORE_KIND_META":        4,
 	}
 )
 
@@ -406,7 +412,8 @@ type Store_builder struct {
 
 	// Unique name from configuration; the key clients address stores by.
 	Name string
-	// Registry (oci) or engine (docker/containerd).
+	// Registry (oci), engine (docker/containerd), or a meta store that routes
+	// between registries.
 	Kind StoreKind
 	// Registry (oci) stores only: the registry host.
 	Host string
@@ -463,12 +470,13 @@ const file_gantry_store_proto_rawDesc = "" +
 	"\tnamespace\x18\x06 \x01(\tR\tnamespace\x12\x14\n" +
 	"\x05ready\x18\a \x01(\bR\x05ready\x12\x14\n" +
 	"\x05error\x18\b \x01(\tR\x05error\x12=\n" +
-	"\fcapabilities\x18\t \x01(\v2\x19.gantry.StoreCapabilitiesR\fcapabilities:\b\xca\xfc\x15\x04\x12\x02\x10\x01*m\n" +
+	"\fcapabilities\x18\t \x01(\v2\x19.gantry.StoreCapabilitiesR\fcapabilities:\b\xca\xfc\x15\x04\x12\x02\x10\x01*\x82\x01\n" +
 	"\tStoreKind\x12\x1a\n" +
 	"\x16STORE_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTORE_KIND_OCI\x10\x01\x12\x15\n" +
 	"\x11STORE_KIND_DOCKER\x10\x02\x12\x19\n" +
-	"\x15STORE_KIND_CONTAINERD\x10\x03*R\n" +
+	"\x15STORE_KIND_CONTAINERD\x10\x03\x12\x13\n" +
+	"\x0fSTORE_KIND_META\x10\x04*R\n" +
 	"\tStoreMode\x12\x1a\n" +
 	"\x16STORE_MODE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSTORE_MODE_COPY\x10\x01\x12\x14\n" +
