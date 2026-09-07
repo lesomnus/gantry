@@ -26,6 +26,10 @@ import (
 type ProgressSink interface {
 	Add(n int64)
 	SetState(state string)
+	// Rewind takes back every byte this sink has reported. A re-attempted blob
+	// starts its body again from zero, and progress that only ever counts up
+	// would report a layer as more than complete.
+	Rewind()
 }
 
 // Source fills blobs into the cache. copy mode pulls from upstream and pushes

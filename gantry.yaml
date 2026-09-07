@@ -168,6 +168,12 @@ worker:
   max_concurrent_jobs: 2
   # Max layers moved at once during a job's registry copy (tier-2).
   max_concurrent_layers: 4
+  # How many times one blob is attempted before the transfer gives up on it. A
+  # blob is streamed from the source straight into the destination, so a
+  # connection that breaks mid-body fails a transfer that nothing was wrong
+  # with. Only a failure that could go differently is re-attempted — a definite
+  # answer (not found, forbidden, unauthorized) is not. Set 1 to disable.
+  layer_attempts: 3
   # Buffered depth of the pending-job queue; a full queue rejects the job
   # (RESOURCE_EXHAUSTED).
   queue_size: 256

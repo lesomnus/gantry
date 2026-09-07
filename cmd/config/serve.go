@@ -544,6 +544,15 @@ type WorkerConfig struct {
 	MaxConcurrentJobs int `yaml:"max_concurrent_jobs"`
 	// MaxConcurrentLayers caps how many layers one transfer moves at once (tier-2).
 	MaxConcurrentLayers int `yaml:"max_concurrent_layers"`
+	// LayerAttempts is how many times one blob is attempted before the transfer
+	// gives up on it. A blob is streamed from the source straight into the
+	// destination, so a connection that breaks mid-body ends the write short and
+	// fails a transfer that nothing was wrong with; the source layer is lazy, so
+	// attempting it again is a fresh read rather than a replay of a spent one.
+	// Only a failure that could go differently is re-attempted: a definite answer
+	// (not found, forbidden, unauthorized) fails the same way however often it is
+	// asked. Default 3; 1 disables re-attempts.
+	LayerAttempts int `yaml:"layer_attempts"`
 	// QueueSize is the buffered depth of the pending-job channel.
 	QueueSize int `yaml:"queue_size"`
 	// JobTTL is how long a finished job record is retained.

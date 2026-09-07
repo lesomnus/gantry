@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/lesomnus/gantry/cmd/config"
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/store"
@@ -130,9 +133,10 @@ type Copier struct {
 	idgen    func() string
 	srcOpts  []name.Option // parse options for the source ref (tests inject name.Insecure)
 	metrics  *metrics
-	pullHook func(engine, ref string) // notified after a successful engine-destination pull (retention)
-	verifier verify.Verifier          // source-signature verification (nil = disabled)
-	rec      Recorder                 // audit log (nil = disabled)
+	pullHook func(engine, ref string)        // notified after a successful engine-destination pull (retention)
+	backoff  func(attempt int) time.Duration // wait before re-attempting a blob (nil = the default below)
+	verifier verify.Verifier                 // source-signature verification (nil = disabled)
+	rec      Recorder                        // audit log (nil = disabled)
 
 	// waitSlots bounds how many running jobs may be parked waiting for another
 	// job to fill their source. Sized below the worker count so a worker is
@@ -641,7 +645,7 @@ func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 			defer func() { <-sem }()
 			w.store.Update(job.ID, func(*Job) { lp.State = "pulling" })
 			sink := &layerSink{w: w, jobID: job.ID, t: t, lp: lp}
-			if err := src.Fill(lctx, srcRepo, dstRepo, pl, sink); err != nil {
+			if err := w.fillLayer(lctx, src, srcRepo, dstRepo, pl, sink); err != nil {
 				w.store.Update(job.ID, func(*Job) { lp.State = "failed" })
 				once.Do(func() {
 					firstErr = err
@@ -656,6 +660,80 @@ func (w *Copier) copyLayers(ctx context.Context, job *Job, t *Transfer, src Sour
 	}
 	wg.Wait()
 	return firstErr
+}
+
+// fillLayer moves one blob, re-attempting a failure that could go differently.
+//
+// This is the only layer at which a broken transfer can be recovered. Below it,
+// the http transport cannot: a blob upload's body is an io.Reader streamed from
+// the source with no GetBody, so re-issuing the same request re-sends nothing.
+// Above it, the attempt loop only knows how to read the image from a DIFFERENT
+// source, which a single-source job does not have — one reset connection ends
+// the whole transfer. Here the source layer is lazy, so asking for it again
+// opens a new body, and a destination write begins by checking whether the blob
+// is already there, so an attempt never re-pushes what landed.
+//
+// It also belongs under the sibling abort rather than over it: a layer that
+// recovers on its second attempt must not have killed its siblings on its
+// first, and the abort is raised by the caller only once this returns.
+func (w *Copier) fillLayer(ctx context.Context, src Source, srcRepo, dstRepo name.Repository, pl PlannedLayer, sink ProgressSink) error {
+	attempts := w.wc.LayerAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var err error
+	for i := 1; ; i++ {
+		if err = src.Fill(ctx, srcRepo, dstRepo, pl, sink); err == nil {
+			return nil
+		}
+		if i >= attempts || !worthAnotherAttempt(ctx, err) {
+			return err
+		}
+		log.From(ctx).Info("re-attempting a blob",
+			slog.String("digest", pl.Digest), slog.Int("attempt", i+1), slog.Int("of", attempts),
+			slog.String("error", err.Error()))
+		// The broken attempt's partial body is not progress toward this blob, and
+		// the next attempt starts it again from zero.
+		sink.Rewind()
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(w.layerBackoff(i)):
+		}
+	}
+}
+
+// layerBackoff waits a moment before re-attempting a blob: a break is usually
+// something momentary passing (a peer under load, a link contended by gantry's
+// own other layers), and going straight back at it is how a moment becomes a
+// pattern. It grows with the attempt so the second wait outlasts the first.
+func (w *Copier) layerBackoff(attempt int) time.Duration {
+	if w.backoff != nil {
+		return w.backoff(attempt)
+	}
+	return time.Duration(attempt) * time.Second
+}
+
+// worthAnotherAttempt reports whether err could come out differently next time.
+//
+// A registry that ANSWERED has told the truth about itself, and it will tell it
+// again: not found, forbidden, unauthorized, a malformed request. Everything
+// else — a reset connection, a stream error, a timeout, a 5xx, a rate limit —
+// is the transfer failing to complete rather than a verdict on what it was
+// carrying. Cancellation is the job ending and is nobody's fault.
+func worthAnotherAttempt(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var te *transport.Error
+	if errors.As(err, &te) {
+		switch te.StatusCode {
+		case http.StatusRequestTimeout, http.StatusTooManyRequests:
+			return true // an answer, but one that says to come back
+		}
+		return te.StatusCode < 400 || te.StatusCode >= 500
+	}
+	return true
 }
 
 func (w *Copier) failTransfer(job *Job, t *Transfer, err error) error {
@@ -703,11 +781,23 @@ type layerSink struct {
 	jobID string
 	t     *Transfer
 	lp    *LayerProgress
+	added atomic.Int64 // what this sink has reported, for Rewind
 }
 
 func (s *layerSink) Add(n int64) {
+	s.added.Add(n)
 	s.lp.Done.Add(n)
 	s.t.BytesDone.Add(n)
+}
+
+// Rewind un-reports the partial body of an attempt that broke, so the next one
+// counts from zero. BytesDone is therefore what the transfer has DELIVERED, not
+// what crossed the wire — bytes sent twice are counted once, which is the number
+// a progress bar and a completion check both need.
+func (s *layerSink) Rewind() {
+	n := s.added.Swap(0)
+	s.lp.Done.Add(-n)
+	s.t.BytesDone.Add(-n)
 }
 
 func (s *layerSink) SetState(state string) {
