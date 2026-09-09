@@ -40,6 +40,23 @@ func (a *certAnnotator) RoundTrip(r *http.Request) (*http.Response, error) {
 	return res, fmt.Errorf("%w (%s)", err, a.explain(a.now()))
 }
 
+// Base returns the *http.Transport a store's round tripper is built on, or nil
+// if it is not built on one.
+//
+// It exists for the docker engine dial. The docker client configures the
+// transport it is handed — unix-socket dialing, TLS timeouts — and can only do
+// that to the concrete type, so the engine path hands it this and installs the
+// wrapper afterwards. Every other caller takes the RoundTripper as it comes.
+func Base(rt http.RoundTripper) *http.Transport {
+	switch t := rt.(type) {
+	case *http.Transport:
+		return t
+	case *certAnnotator:
+		return Base(t.inner)
+	}
+	return nil
+}
+
 // certWindow is the validity the whole presented chain agrees on: the latest
 // notBefore and the earliest notAfter across leaf and intermediates. One pair
 // answers the question a peer's alert makes people ask — is what we presented

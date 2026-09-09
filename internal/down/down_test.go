@@ -2,8 +2,20 @@ package down
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lesomnus/gantry/cmd/config"
 )
@@ -141,6 +153,93 @@ func TestNewDockerEngineTLSWiring(t *testing.T) {
 	if err == nil {
 		t.Error("a missing ca_cert should fail docker engine construction")
 	}
+	// A cred: the store transport may be a WRAPPER round tripper rather than the
+	// bare *http.Transport, and the docker client configures the concrete type
+	// (client.WithHost -> sockets.ConfigureTransport). An engine that hands it
+	// the wrapper fails to build at all — "cannot apply host to transport" — so
+	// every mTLS docker store is dead at startup. That is not visible from
+	// xport's own tests, which never build a docker client.
+	cert, key := writeKeyPair(t)
+	if _, err := newDockerEngine(config.StoreConfig{
+		Name: "mtls", Kind: "docker", Address: "tcp://127.0.0.1:2376",
+		Cred: &config.CredConfig{Kind: "file", Cert: cert, Key: key},
+	}); err != nil {
+		t.Errorf("an mTLS docker engine should build: %v", err)
+	}
+}
+
+// A docker daemon on a TLS port has to be spoken to over TLS. The store's
+// transport may be a wrapper (xport annotates certificate alerts with what
+// gantry presented), and the docker client reads the concrete *http.Transport
+// to decide the scheme — so a wrapper it cannot see through makes it dial
+// https-over-http and the daemon answers "client sent an HTTP request to an
+// HTTPS server". Nothing about that is visible until a real TLS daemon is on
+// the other end, which is what this test is.
+func TestDockerEngineSpeaksTLSToATLSDaemon(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Api-Version", "1.51")
+		w.Header().Set("Ostype", "linux")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// The server signs for itself, so its certificate is also its CA.
+	dir := t.TempDir()
+	caPath := filepath.Join(dir, "ca.crt")
+	if err := os.WriteFile(caPath,
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cert, key := writeKeyPair(t)
+
+	eng, err := newDockerEngine(config.StoreConfig{
+		Name: "tls", Kind: "docker",
+		Address: "tcp://" + srv.Listener.Addr().String(),
+		CACert:  caPath,
+		Cred:    &config.CredConfig{Kind: "file", Cert: cert, Key: key},
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := eng.Ready(context.Background()); err != nil {
+		t.Fatalf("ping over TLS: %v", err)
+	}
+}
+
+// writeKeyPair writes a self-signed certificate and its key, and returns the
+// two paths.
+func writeKeyPair(t *testing.T) (certPath, keyPath string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "docker client"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	certPath = filepath.Join(dir, "client.crt")
+	keyPath = filepath.Join(dir, "client.key")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
 }
 
 func TestOCIPlatformNormalization(t *testing.T) {
