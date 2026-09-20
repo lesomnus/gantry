@@ -43,10 +43,12 @@ type Source interface {
 	Fill(ctx context.Context, src, dst name.Repository, l PlannedLayer, sink ProgressSink) error
 	// Commit publishes the manifest(s) under the cache tag and returns the
 	// committed digest (zero when unknown, e.g. proxy mode). copy mode pushes a
-	// platform-filtered index referencing the blobs Fill uploaded — or, with
-	// verbatim, the source manifest/index byte-for-byte so its digest (and any
-	// signature over it) is preserved; proxy mode is a no-op (resolving +
-	// reading already populated the cache).
+	// platform-filtered index referencing the blobs Fill uploaded — or the child
+	// manifest alone when platforms narrowed it to one, keeping the source's own
+	// digest so a signature over that platform still applies — or, with verbatim,
+	// the source manifest/index byte-for-byte so its digest (and any signature
+	// over it) is preserved; proxy mode is a no-op (resolving + reading already
+	// populated the cache).
 	Commit(ctx context.Context, src, dst name.Reference, platforms []string, verbatim bool) (v1.Hash, error)
 }
 

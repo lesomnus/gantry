@@ -146,6 +146,14 @@ An `oci` copy target sets `mode` to one of two values (`copy` is the default):
   image is pushed byte-for-byte; a multi-platform index is rebuilt to reference
   **only the copied platforms**, so unwanted architectures are not pulled into
   the cache — unless the commit is `verbatim` (see below).
+
+  When `platforms` narrows the copy to **exactly one** platform, the child
+  manifest is committed *unwrapped* rather than inside a one-entry index. What
+  the target holds is then a digest the **source published**: a signature over
+  that platform manifest verifies against the copy, its referrers have a subject
+  that exists there, and an engine that pulls it records a digest that can be
+  checked later. (An index that merely happens to hold one child — how buildx
+  publishes a single-platform image — is not a narrowing and stays an index.)
 - **`proxy`** — gantry reads the image *through* the target so a pull-through
   cache fetches and persists it from upstream itself. The manifest is resolved
   against the cache and every blob is read to EOF (a `HEAD` or partial read would
