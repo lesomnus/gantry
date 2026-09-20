@@ -43,10 +43,12 @@ type Source interface {
 	Fill(ctx context.Context, src, dst name.Repository, l PlannedLayer, sink ProgressSink) error
 	// Commit publishes the manifest(s) under the cache tag and returns the
 	// committed digest (zero when unknown, e.g. proxy mode). copy mode pushes a
-	// platform-filtered index referencing the blobs Fill uploaded — or, with
-	// verbatim, the source manifest/index byte-for-byte so its digest (and any
-	// signature over it) is preserved; proxy mode is a no-op (resolving +
-	// reading already populated the cache).
+	// platform-filtered index referencing the blobs Fill uploaded — or the child
+	// manifest alone when platforms narrowed it to one, keeping the source's own
+	// digest so a signature over that platform still applies — or, with verbatim,
+	// the source manifest/index byte-for-byte so its digest (and any signature
+	// over it) is preserved; proxy mode is a no-op (resolving + reading already
+	// populated the cache).
 	Commit(ctx context.Context, src, dst name.Reference, platforms []string, verbatim bool) (v1.Hash, error)
 }
 
@@ -214,6 +216,53 @@ func holdsDigest(ctx context.Context, store config.StoreConfig, ref name.Digest)
 		return false, err
 	}
 	return true, nil
+}
+
+// childManifest resolves the single child an index names for one platform, so a
+// hop can anchor to the manifest the source published for that platform rather
+// than to the index over all of them.
+//
+// ("", nil) is the ordinary "there is nothing to narrow to" answer: ref is not
+// an index, names no child for this platform, or names more than one. The caller
+// then carries the whole image, which is what it would have done anyway — a
+// source that cannot be narrowed is not an error here, only a route that stays
+// wide. The selection MUST agree with copySource.Commit's: a plan anchored to a
+// digest the commit does not produce would read a manifest that is not there.
+func childManifest(ctx context.Context, store config.StoreConfig, ref name.Reference, platform string) (string, error) {
+	want, err := parsePlatforms([]string{platform})
+	if err != nil {
+		return "", err
+	}
+	rt, err := xport.Transport(store)
+	if err != nil {
+		return "", err
+	}
+	desc, err := remote.Get(ref, baseOpts(ctx, registryAuth(store), rt)...)
+	if err != nil {
+		return "", z.Err(err, "get %q at %q", ref.Name(), store.Name)
+	}
+	if !desc.MediaType.IsIndex() {
+		return "", nil
+	}
+	idx, err := desc.ImageIndex()
+	if err != nil {
+		return "", z.Err(err, "image index")
+	}
+	im, err := idx.IndexManifest()
+	if err != nil {
+		return "", z.Err(err, "index manifest")
+	}
+	found := ""
+	for _, m := range im.Manifests {
+		if m.Platform == nil || m.Platform.OS == "unknown" || !selected(m.Platform, want) {
+			continue
+		}
+		if found != "" {
+			return "", nil // several match; a commit would build an index over them
+		}
+		found = m.Digest.String()
+	}
+	return found, nil
 }
 
 // fetchAnchor fetches the raw manifest/index bytes the digest reference names

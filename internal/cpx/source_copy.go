@@ -2,6 +2,7 @@ package cpx
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -61,6 +62,10 @@ func (s *copySource) Fill(ctx context.Context, src, dst name.Repository, l Plann
 // only the copied platforms so unwanted arches are not pulled into the cache —
 // unless verbatim, which pushes every child manifest and then the original
 // index bytes so the source digest (and any signature over it) is preserved.
+//
+// A narrowed copy that lands on exactly one child commits that CHILD MANIFEST
+// itself rather than a one-entry index wrapped around it (see commitChild), so
+// what the cache holds is a digest the source already published.
 func (s *copySource) Commit(ctx context.Context, src, dst name.Reference, platforms []string, verbatim bool) (v1.Hash, error) {
 	desc, err := remote.Get(src, s.pullOpts(ctx)...)
 	if err != nil {
@@ -92,11 +97,28 @@ func (s *copySource) Commit(ctx context.Context, src, dst name.Reference, platfo
 	if err != nil {
 		return v1.Hash{}, z.Err(err, "index manifest")
 	}
-	idx := v1.ImageIndex(empty.Index)
+	var sel []v1.Descriptor
 	for _, m := range im.Manifests {
 		if m.Platform == nil || m.Platform.OS == "unknown" || !selected(m.Platform, want) {
 			continue
 		}
+		sel = append(sel, m)
+	}
+	if len(sel) == 0 {
+		// Resolve rejects this first on the normal path, so reaching it means the
+		// index changed under the copy. Pushing the empty index this loop would
+		// otherwise build would publish an image with no platforms at all.
+		return v1.Hash{}, fmt.Errorf("no manifest matched the requested platforms for %q", src.Name())
+	}
+	// A request that narrowed to a single platform: commit the child itself.
+	// `platforms` must be non-empty for this — an index that happens to hold one
+	// child is not a narrowing, and flattening it would change the digest of a
+	// copy the caller asked to take whole.
+	if len(platforms) > 0 && len(sel) == 1 {
+		return s.commitChild(ctx, dst, srcIdx, sel[0])
+	}
+	idx := v1.ImageIndex(empty.Index)
+	for _, m := range sel {
 		img, err := srcIdx.Image(m.Digest)
 		if err != nil {
 			return v1.Hash{}, z.Err(err, "index image %s", m.Digest)
@@ -114,6 +136,35 @@ func (s *copySource) Commit(ctx context.Context, src, dst name.Reference, platfo
 		return v1.Hash{}, z.Err(err, "index digest")
 	}
 	return dg, nil
+}
+
+// commitChild publishes one platform's child manifest under the cache tag,
+// unwrapped. The digest it returns is therefore one the SOURCE published rather
+// than one gantry authored, and that is what it buys: a signature over that
+// child verifies against this copy, the referrers carrying it have a subject
+// that exists here, and an engine that pulls it records a digest something else
+// can check. A rebuilt one-entry index has none of those properties.
+//
+// Byte-identity is the whole point, so what ggcr is about to write is checked
+// against the descriptor the index named. A re-serialized manifest would still
+// push — under a digest the source never had, and nothing downstream would
+// notice until a signature failed to verify.
+func (s *copySource) commitChild(ctx context.Context, dst name.Reference, idx v1.ImageIndex, m v1.Descriptor) (v1.Hash, error) {
+	img, err := idx.Image(m.Digest)
+	if err != nil {
+		return v1.Hash{}, z.Err(err, "index image %s", m.Digest)
+	}
+	dg, err := img.Digest()
+	if err != nil {
+		return v1.Hash{}, z.Err(err, "child digest %s", m.Digest)
+	}
+	if dg != m.Digest {
+		return v1.Hash{}, fmt.Errorf("child manifest for %s re-serialized to %s, which the source never published (indexed as %s)", m.Platform, dg, m.Digest)
+	}
+	if err := remote.Write(dst, img, s.pushOpts(ctx)...); err != nil {
+		return v1.Hash{}, z.Err(err, "push child manifest %s", m.Digest)
+	}
+	return m.Digest, nil
 }
 
 // commitVerbatim pushes the source index unmodified: every child manifest first

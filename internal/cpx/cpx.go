@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -137,6 +138,11 @@ type Copier struct {
 	backoff  func(attempt int) time.Duration // wait before re-attempting a blob (nil = the default below)
 	verifier verify.Verifier                 // source-signature verification (nil = disabled)
 	rec      Recorder                        // audit log (nil = disabled)
+	// enforced are the engine stores serve.enforce polices. Admission needs them
+	// because enforcement re-derives its verdict LATER, offline, from the digest
+	// the node recorded — so a hop that changes which digest that is has to know
+	// whether anything will ask about it.
+	enforced []string
 
 	// waitSlots bounds how many running jobs may be parked waiting for another
 	// job to fill their source. Sized below the worker count so a worker is
@@ -178,6 +184,15 @@ func (w *Copier) SetPullHook(fn func(engine, ref string)) { w.pullHook = fn }
 // SetVerifier enables source-signature verification at job admission. Must be
 // set before Start/Submit.
 func (w *Copier) SetVerifier(v verify.Verifier) { w.verifier = v }
+
+// SetEnforcedStores names the engine stores serve.enforce polices. Must be set
+// before Start/Submit.
+func (w *Copier) SetEnforcedStores(names []string) { w.enforced = names }
+
+// enforces reports whether what a node in this store runs is re-verified later
+// against the digest it recorded. It is the one question that decides whether a
+// hop may hand a node a digest whose signature does not travel with it.
+func (w *Copier) enforces(store string) bool { return slices.Contains(w.enforced, store) }
 
 // Recorder receives audit events for admitted and finished jobs. Its methods
 // must not fail the operation they record.

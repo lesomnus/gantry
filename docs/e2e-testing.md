@@ -67,7 +67,7 @@ Which tier automates each feature (with the test that proves it):
 | 1 | Registry→registry copy + incremental blob skip | L1 `TestCopyRemoteToCache`, L2 `TestL2CopyAndEnginePull` |
 | 2 | Engine pull (cache→daemon) | L1 `TestEnginePull` (fake), **L2 `TestL2CopyAndEnginePull` (real daemon)** |
 | 3 | Proxy-mode pull-through | L3-infra (compose `cache-proxy`) |
-| 4 | Platform selection | L1 `TestPlatformSelection` |
+| 4 | Platform selection | L1 `TestPlatformSelection`; narrowing to one platform commits the source's own child manifest — L1 `TestCommitNarrowedToOnePlatformCommitsTheChild`, `TestNarrowedCommitCarriesTheChildSignature`, routed in `TestRoutedEngineFillCarriesOnlyTheDeliveredPlatform`; **L2 `TestL2RoutedFillCarriesOnlyTheDeliveredPlatform`, `TestL2RoutedFillCarriesEveryPlatformWhenAsked`, `TestL2RegistryRejectsAnIndexMissingChildren` (why a filtered index is not an option at all)** |
 | 5 | Caller-chosen `as` names | L1 `TestAsNames` |
 | 6 | Digest pin + verbatim commit | L1 `TestDigestPin` |
 | 7 | Host substitution (`downstream_host`/`pull_host`) | L1 `TestPlanResolves`; real DNS in L3-infra |
@@ -389,6 +389,13 @@ plan '{"ref":"library/busybox:1.36","source":{"name":"remote"},"target":{"name":
 
 **Expect** — `Plan`'s `platforms` reflects the choice without moving anything.
 Narrowing to a platform the source lacks fails admission (`INVALID_ARGUMENT`).
+
+A copy narrowed to exactly one platform lands in the target as the **source's own
+child manifest** for it, not a one-entry index — so `crane digest <cache>/…` after
+the copy matches the platform's digest at the origin. A routed fill feeding an
+engine narrows itself the same way and publishes `…:1.36-linux-arm64`; `caches:
+[{store: …, all_platforms: true}]` keeps the whole image instead. See
+[stores.md](stores.md#what-the-fill-copies).
 
 ## 5. Caller-chosen `as` names
 

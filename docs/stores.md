@@ -146,6 +146,14 @@ An `oci` copy target sets `mode` to one of two values (`copy` is the default):
   image is pushed byte-for-byte; a multi-platform index is rebuilt to reference
   **only the copied platforms**, so unwanted architectures are not pulled into
   the cache — unless the commit is `verbatim` (see below).
+
+  When `platforms` narrows the copy to **exactly one** platform, the child
+  manifest is committed *unwrapped* rather than inside a one-entry index. What
+  the target holds is then a digest the **source published**: a signature over
+  that platform manifest verifies against the copy, its referrers have a subject
+  that exists there, and an engine that pulls it records a digest that can be
+  checked later. (An index that merely happens to hold one child — how buildx
+  publishes a single-platform image — is not a narrowing and stays an index.)
 - **`proxy`** — gantry reads the image *through* the target so a pull-through
   cache fetches and persists it from upstream itself. The manifest is resolved
   against the cache and every blob is read to EOF (a `HEAD` or partial read would
@@ -546,22 +554,58 @@ not work is not a failure** — it costs one abandoned attempt and the direct co
 runs. That is why there is no switch for "may gantry write to the cache": the
 answer is whether it works.
 
-### The fill copies everything, verbatim
+### What the fill copies
 
-The fill hop commits the authority's manifest **byte for byte** and copies **every
-platform**, whatever the job asked for. Both are required rather than chosen:
+Whatever it copies, the fill publishes a manifest the **source itself published**.
+It may never rebuild an index: a platform-filtered index is a digest that exists
+nowhere upstream, so no probe could ask for it and no signature could cover it.
+That leaves exactly two shapes.
 
-- A rebuilt (platform-filtered) index is a *different digest for the same tag*, so
-  the cache would never satisfy the probe and would never be read.
-- A verbatim commit references every child manifest, and a registry rejects an
-  index whose children are missing.
+**Delivering to an engine: only that platform.** An engine pulls exactly one
+platform, so the others would cross the billed link for nobody. The fill commits
+the source's own **child manifest** for the delivered platform, and everything
+touching the cache moves to that digest — the probe, the delivery hop, and the
+digest the node records. It lands under a **platform-suffixed tag**
+(`app:1-linux-amd64`), because what it publishes is not the image the plain tag
+names and two engines of different architectures must not overwrite each other's
+copy.
 
-So a narrowed routed copy still fills the cache completely. The caller's own hop
-keeps the narrowing; only the shared cache is filled whole, which for a shared
-cache is the desirable trade.
+**Otherwise: the whole image, verbatim.** The manifest is committed byte for byte
+and every platform travels, whatever the job asked for, so the authority's own
+index digest resolves from the cache. A registry rejects an index whose children
+are missing, so verbatim and all-platforms are one decision, not two.
 
-The fill lands under the **tag**, so both the tag and the authority's digest resolve
-from the cache afterwards — the digest is what the next job probes for.
+Narrowing is the default for an engine delivery. It gives way — to the wide,
+verbatim fill, which is a route that still works — when:
+
+- the route sets **`all_platforms: true`** (below);
+- the **target is a registry**, whose caller may have asked for every platform;
+- there is **nothing to narrow to**: the source is not an index, or names no
+  single manifest for the platform;
+- the job uses **digest `as` names**, which are validated against its own pin;
+- the target is **policed by `serve.enforce`** and the platform manifest carries
+  no Notary Project signature. Enforcement re-derives its verdict later, offline,
+  from the digest the node recorded — and narrowing makes that the child manifest,
+  so a source that signs only the index would have the node quarantined for
+  running exactly what gantry told it to. See
+  [enforcement.md](enforcement.md#multi-arch-images-and-platform-narrowing).
+
+`gantry.job.route` carries a `narrowed` dimension, so a route that quietly stopped
+narrowing — the image stopped being multi-arch, a signature went missing — is
+visible rather than merely expensive.
+
+```yaml
+stores:
+  cloud:
+    kind: "oci"
+    caches:
+      - store: "site"
+        all_platforms: true   # default false
+```
+
+Set `all_platforms` when the cache is meant to hold the whole image: other
+architectures will be delivered from it later, or the origin's own index digest
+has to resolve there. It only ever forces narrowing off; it cannot force it on.
 
 ### When it does not route
 
