@@ -212,8 +212,9 @@ worker:
   # does not is usually the point of having one.
   require_authority: false
   # Bounds the registry requests admission makes before a job is created: settling
-  # a tag at its authority and probing a cache for the digest. An unresponsive
-  # registry then delays one submit rather than holding it open indefinitely.
+  # a tag at its authority, reading the index to find the platform a narrowed
+  # route delivers, and probing a cache for the digest. An unresponsive registry
+  # then delays one submit rather than holding it open indefinitely.
   admission_timeout: "10s"
 
 # Server configuration (used by the `serve` subcommand).

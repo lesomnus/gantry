@@ -163,6 +163,10 @@ type execPlan struct {
 	// still reads it there. Only the hops that touch the cache move to this one,
 	// because it is all the cache has.
 	narrowDigest string
+	// narrowPlatform is the platform narrowDigest is the manifest for. Carried
+	// alongside rather than read back off the delivery step, so the tag the fill
+	// publishes and the platform it carries cannot drift apart.
+	narrowPlatform string
 	// cache is the store this job would be routed through: the first route the
 	// source declares whose scope covers this job's target and repository, or ""
 	// when none does. Resolved once, at admission, because two things need it —
@@ -223,7 +227,7 @@ func (p *execPlan) fillPlatforms() []string {
 	if p.narrowDigest == "" {
 		return nil
 	}
-	return []string{p.platforms[0]}
+	return []string{p.narrowPlatform}
 }
 
 // fills are the references this job's steps publish into their targets.
@@ -339,7 +343,7 @@ const maxTagLen = 128
 func (w *Copier) cacheTagRef(p *execPlan, cache config.StoreConfig) (name.Reference, error) {
 	id := p.id
 	if p.narrowDigest != "" {
-		id = ":" + narrowTag(p.id, p.platforms[0])
+		id = ":" + narrowTag(p.id, p.narrowPlatform)
 	}
 	ref, err := name.ParseReference(cache.Host+"/"+p.repo+id, w.refOpts(cache)...)
 	if err != nil {
@@ -1037,7 +1041,7 @@ func (w *Copier) narrowRoute(ctx context.Context, p *execPlan, deliver *execStep
 			return nil
 		}
 	}
-	p.narrowDigest = child
+	p.narrowDigest, p.narrowPlatform = child, platform
 	l.Debug("narrowing the route to the platform being delivered",
 		slog.String("platform", platform), slog.String("child", child))
 	return nil
