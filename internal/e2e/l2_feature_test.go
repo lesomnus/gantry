@@ -456,10 +456,17 @@ func TestL2RoutedCopyStillDeliversWhenTheCacheRefusesWrites(t *testing.T) {
 // platform still leaves the whole index in the cache, under the authority's own
 // digest. A rebuilt index would have a different digest and satisfy neither the
 // next job's probe nor a signature over it.
-func TestL2RoutedFillIsVerbatimAcrossPlatforms(t *testing.T) {
+// An engine pulls one platform, so a routed fill that feeds one carries only
+// that platform — and publishes the ORIGIN'S OWN manifest for it, under a
+// platform-suffixed tag. Against a real registry this is the shape that is
+// actually available: a rebuilt index would be a digest the origin never had,
+// and an index missing its other children is rejected outright (see
+// TestL2RegistryRejectsAnIndexMissingChildren).
+func TestL2RoutedFillCarriesOnlyTheDeliveredPlatform(t *testing.T) {
 	h := newL2Harness(t, l2WithRemoteCache("cache"))
-	want := seedPlatformIndex(t, h.remote, "lib/multi", "1", "linux/amd64", "linux/arm64")
+	index := seedPlatformIndex(t, h.remote, "lib/multi", "1", "linux/amd64", "linux/arm64")
 	h.removeImage(h.cache + "/lib/multi:1")
+	want := platformChild(t, h.remote, "lib/multi", "1", "linux/amd64")
 
 	job := h.waitDone(h.add(pb.JobAddRequest_builder{
 		Ref:       h.remote + "/lib/multi:1",
@@ -473,6 +480,41 @@ func TestL2RoutedFillIsVerbatimAcrossPlatforms(t *testing.T) {
 	}
 	if n := len(job.GetTransfers()); n != 2 {
 		t.Fatalf("transfers = %d [%s], want a fill and a delivery", n, describe(job))
+	}
+	got, err := digestOf(t, h.cache, "lib/multi", "1-linux-amd64")
+	if err != nil {
+		t.Fatalf("the cache does not hold the platform tag the fill publishes: %v", err)
+	}
+	if got != want {
+		t.Errorf("cache holds %v, want the origin's own amd64 manifest %v", got, want)
+	}
+	if got == index {
+		t.Error("the cache holds the index; the fill was not narrowed")
+	}
+	// The plain tag is what a WIDE fill publishes, so its absence is the
+	// difference being asserted, not an accident of naming.
+	if _, err := digestOf(t, h.cache, "lib/multi", "1"); err == nil {
+		t.Error("the cache published the plain tag; the fill carried the whole image")
+	}
+}
+
+// all_platforms is how an operator says the cache must hold the whole image —
+// and then the old shape is back: the origin's index, verbatim, under the plain
+// tag, with every child present.
+func TestL2RoutedFillCarriesEveryPlatformWhenAsked(t *testing.T) {
+	h := newL2Harness(t, l2WithRoutes(config.CacheRoute{Store: "cache", AllPlatforms: true}))
+	want := seedPlatformIndex(t, h.remote, "lib/multi", "1", "linux/amd64", "linux/arm64")
+	h.removeImage(h.cache + "/lib/multi:1")
+
+	job := h.waitDone(h.add(pb.JobAddRequest_builder{
+		Ref:       h.remote + "/lib/multi:1",
+		Source:    pb.StoreByName("remote"),
+		Target:    pb.StoreByName("edge"),
+		Platforms: []string{"linux/amd64"},
+	}.Build()).GetId())
+
+	if job.GetState() != pb.JobState_JOB_STATE_DONE {
+		t.Fatalf("state=%v error=%q [%s]", job.GetState(), job.GetError(), describe(job))
 	}
 	got, err := digestOf(t, h.cache, "lib/multi", "1")
 	if err != nil {
@@ -490,7 +532,41 @@ func TestL2RoutedFillIsVerbatimAcrossPlatforms(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := len(im.Manifests); n != 2 {
-		t.Errorf("cache index lists %d manifests, want both — the fill honored the job's platform filter", n)
+		t.Errorf("cache index lists %d manifests, want both", n)
+	}
+}
+
+// The premise of committing a child manifest rather than a filtered index: a
+// real registry will not accept an index whose children it does not have, so
+// "keep the origin's index but only fetch one platform's blobs" is not a shape
+// that exists. An in-memory registry performs no such validation, which is why
+// this has to run against a real one.
+func TestL2RegistryRejectsAnIndexMissingChildren(t *testing.T) {
+	h := newL2Harness(t)
+	seedPlatformIndex(t, h.remote, "lib/partial", "1", "linux/amd64", "linux/arm64")
+	desc, err := remote.Get(insecureTag(t, h.remote, "lib/partial", "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := desc.ImageIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	im, err := idx.IndexManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One child in full, the rest never uploaded.
+	dst := insecureTag(t, h.cache, "lib/partial", "1")
+	img, err := idx.Image(im.Manifests[0].Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(dst.Context().Digest(im.Manifests[0].Digest.String()), img); err != nil {
+		t.Fatalf("push the one child: %v", err)
+	}
+	if err := remote.Put(dst, desc); err == nil {
+		t.Error("the registry accepted an index whose other children are absent")
 	}
 }
 

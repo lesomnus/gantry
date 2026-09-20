@@ -197,6 +197,15 @@ probed by digest and found empty, so gantry fills it and then delivers from it:
 The remote's image content crosses the billed link **once**, into the cache; the
 node pulls it over the LAN.
 
+For a **multi-arch** image it crosses once for **one architecture**: the node
+pulls a single platform, so the fill carries that one and commits the remote's
+own manifest for it, under `cache.rack1.internal/team/app:1-linux-amd64`. The
+other architectures are never fetched — on a five-platform image that is most of
+the transfer, and all of it sits in front of the node's pull. `all_platforms:
+true` on the route fills the whole image instead; so does a target policed by
+`serve.enforce` whose platform manifest is unsigned. See
+[stores.md](stores.md#what-the-fill-copies).
+
 ### B2 — warm cache: one hop, the remote serves one manifest
 
 A later job for the same image finds the cache warm. The remote is asked what the
@@ -322,6 +331,10 @@ What decides where a submitted job's bytes come from, in order:
 | `worker.fallback_to_origin` | `false` | turn on (or set per job) to make the cache an optimization, not a dependency (A4) |
 | `worker.require_authority` | `false` | turn on to refuse a routed job whose remote could not confirm the reference, rather than serve the cache on faith — only ever consulted for a routed **registry**-target job |
 | `cache:` / `caches:` on a store | unset (no routing) | declare the local cache so a single `source: cloud` job routes itself (Part B) |
+| `all_platforms` on a route | `false` (fill only the delivered platform) | turn on when other architectures will be delivered from this cache later, or the remote's own index digest has to resolve there (B1) |
 
 Every setting above defaults to the pre-cache behavior, so an existing deployment
-behaves exactly as before until it opts in.
+behaves exactly as before until it opts in — with one exception: once a route is
+declared, an engine delivery narrows its fill by default, so the cache holds a
+per-platform manifest rather than the remote's index. `all_platforms: true`
+restores the old shape.
