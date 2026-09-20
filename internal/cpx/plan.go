@@ -2,9 +2,12 @@ package cpx
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -150,11 +153,23 @@ type execPlan struct {
 	// express is an error the caller hears about while an inherited server default
 	// simply does not apply to this job.
 	fallbackAsked bool
+	// narrowDigest is the child manifest a narrowed route delivers: the source's
+	// own manifest for the single platform this job's engine pulls. Empty when the
+	// route was not narrowed, which is every unrouted job and every route that
+	// carries the whole image.
+	//
+	// It is a SECOND anchor, not a replacement for the plan's own: the source
+	// still holds the index at p.digest() and every attempt that reads the source
+	// still reads it there. Only the hops that touch the cache move to this one,
+	// because it is all the cache has.
+	narrowDigest string
 	// cache is the store this job would be routed through: the first route the
 	// source declares whose scope covers this job's target and repository, or ""
 	// when none does. Resolved once, at admission, because two things need it —
 	// the dedup key's narrowing of strictAuthority, and route() itself.
 	cache string
+	// cacheRoute is the route cache came from, for the settings that live on it.
+	cacheRoute config.CacheRoute
 	// strictAuthority is the effective require_authority decision. It is part of
 	// the dedup key: a caller that refused content the authority never confirmed
 	// must not be handed a job that accepted it.
@@ -178,6 +193,37 @@ func (p *execPlan) digest() string {
 		return dg.DigestStr()
 	}
 	return ""
+}
+
+// cacheDigest is what a hop touching the cache is anchored to: the child
+// manifest for the delivered platform when the route narrowed, the authority's
+// own digest otherwise.
+func (p *execPlan) cacheDigest() string {
+	if p.narrowDigest != "" {
+		return p.narrowDigest
+	}
+	return p.digest()
+}
+
+// authoritySubject is the digest AT THE SOURCE whose referrers a routed read has
+// to find, so "does the cache hold everything the authority has over this image"
+// asks about the same artifact on both sides.
+func (p *execPlan) authoritySubject() (name.Digest, bool) {
+	if dg := p.cacheDigest(); dg != "" {
+		return p.authorityRef.Context().Digest(dg), true
+	}
+	return name.Digest{}, false
+}
+
+// fillPlatforms is what a fill of the cache carries: the one delivered platform
+// when the route narrowed, and otherwise nothing — a wide fill commits verbatim,
+// which writes every child manifest whatever this says, so nil is the only
+// honest value there.
+func (p *execPlan) fillPlatforms() []string {
+	if p.narrowDigest == "" {
+		return nil
+	}
+	return []string{p.platforms[0]}
 }
 
 // fills are the references this job's steps publish into their targets.
@@ -259,15 +305,82 @@ func (p *execPlan) validate() error {
 // under src's OWN name options: http-vs-https is baked into a parsed reference,
 // so an insecure cache must not lend its scheme to a TLS origin nor the reverse.
 func (w *Copier) planAttemptRef(p *execPlan, src config.StoreConfig) (name.Reference, error) {
+	return w.planAttemptRefAt(p, src, p.digest())
+}
+
+// planAttemptRefAt is planAttemptRef anchored to a given digest, for the one hop
+// whose store holds something other than what the plan is pinned to: a narrowed
+// route's cache holds the child manifest, never the index over it.
+func (w *Copier) planAttemptRefAt(p *execPlan, src config.StoreConfig, digest string) (name.Reference, error) {
 	id := p.id
-	if dg := p.digest(); dg != "" {
-		id = "@" + dg
+	if digest != "" {
+		id = "@" + digest
 	}
 	ref, err := name.ParseReference(src.Host+"/"+p.repo+id, w.refOpts(src)...)
 	if err != nil {
 		return nil, z.Err(err, "source ref at %q", src.Name)
 	}
 	return ref, nil
+}
+
+// maxTagLen is the OCI limit: a tag is [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}.
+const maxTagLen = 128
+
+// cacheTagRef is the reference a fill publishes at the cache. Normally the
+// source's own identifier under the cache's host, which is the contract a
+// two-job client relies on — but a narrowed fill appends the platform, because
+// what it publishes is NOT the image the plain tag names, and two engines of
+// different architectures reading the same origin must not overwrite each
+// other's copy of it.
+//
+// A digest-identified job has no tag to append to, so one is synthesized from
+// the digest: leaving the manifest untagged would hide it from retention on the
+// cache and give a later job's fill nothing to wait on.
+func (w *Copier) cacheTagRef(p *execPlan, cache config.StoreConfig) (name.Reference, error) {
+	id := p.id
+	if p.narrowDigest != "" {
+		id = ":" + narrowTag(p.id, p.platforms[0])
+	}
+	ref, err := name.ParseReference(cache.Host+"/"+p.repo+id, w.refOpts(cache)...)
+	if err != nil {
+		return nil, z.Err(err, "cache ref at %q", cache.Name)
+	}
+	return ref, nil
+}
+
+// narrowTag builds the tag a narrowed fill publishes under, from the job's
+// identifier (":tag" or "@sha256:…") and the platform it carries. Deterministic,
+// because it is computed independently by the fill that writes it and by every
+// later job that waits on or reads it.
+func narrowTag(id, platform string) string {
+	base := strings.TrimPrefix(id[1:], "sha256:")
+	if id[0] == '@' {
+		base = "sha256-" + base
+	}
+	tag := tagSafe(base) + "-" + tagSafe(platform)
+	if len(tag) <= maxTagLen {
+		return tag
+	}
+	// Too long to name in full. Truncating alone could collide two tags that
+	// share a long prefix — exactly what a date- or commit-stamped tag scheme
+	// produces — so what is dropped is replaced by a digest of the whole thing.
+	sum := sha256.Sum256([]byte(tag))
+	return tag[:maxTagLen-13] + "-" + hex.EncodeToString(sum[:6])
+}
+
+// tagSafe maps a string into the tag charset. A platform carries "/" (and ":"
+// with an os.version), and a digest ":"; none of them are legal in a tag.
+func tagSafe(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		case r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '-'
+		}
+	}, s)
 }
 
 // plan resolves a request into the plan that will run it.
@@ -315,7 +428,8 @@ func (w *Copier) plan(ctx context.Context, req Request) (*execPlan, error) {
 	// the effective value it is what the dedup key uses, so two submits that differ
 	// only in a flag that cannot affect either of them still coalesce instead of
 	// running the same image copy twice.
-	p.cache = p.source.CacheFor(p.target.Name(), p.repo)
+	p.cacheRoute, _ = p.source.CacheRouteFor(p.target.Name(), p.repo)
+	p.cache = p.cacheRoute.Store
 	p.strictAuthority = w.wc.RequireAuthority
 	if req.RequireAuthority != nil {
 		p.strictAuthority = *req.RequireAuthority
@@ -598,6 +712,12 @@ func (w *Copier) route(ctx context.Context, p *execPlan, req Request) error {
 		attribute.String("decision", decision),
 		attribute.String("source", p.source.Name),
 		attribute.String("cache", p.cache),
+		// Whether the fill carried one platform or all of them. A route that
+		// silently stopped narrowing — the platform's signature went missing, or
+		// the image stopped being multi-arch — costs the whole point of the
+		// feature while still reporting a healthy decision, so it is a dimension of
+		// the same counter rather than a log line.
+		attribute.Bool("narrowed", p.narrowDigest != ""),
 	}
 	if reason != "" {
 		attrs = append(attrs, attribute.String("reason", reason))
@@ -750,7 +870,17 @@ func (w *Copier) routeDecision(ctx context.Context, p *execPlan, req Request) (d
 		return routeProxy, "", w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
 	}
 
-	cacheRef, err := w.planAttemptRef(p, cacheCfg)
+	// What this route will put in the cache — the whole image, or only the platform
+	// being delivered. After the proxy branch, which cannot narrow (its fill IS the
+	// read, so the daemon would be pointed at a tag the proxy has no upstream for),
+	// and before everything below, each of which is about a reference whose shape
+	// this decides: what the probe asks for, what the fill publishes, and what the
+	// engine is told to pull.
+	if err := w.narrowRoute(ctx, p, deliver, p.cacheRoute); err != nil {
+		return routeRejected, "plan", err
+	}
+
+	cacheRef, err := w.planAttemptRefAt(p, cacheCfg, p.cacheDigest())
 	if err != nil {
 		return routeRejected, "plan", err
 	}
@@ -779,13 +909,16 @@ func (w *Copier) routeDecision(ctx context.Context, p *execPlan, req Request) (d
 		return routeWarm, "", w.addRouteAttempt(ctx, p, deliver, cacheCfg, nil)
 	}
 
-	// Cold: fill it first. The fill lands under the TAG, committed verbatim, so the
-	// authority's digest resolves from the cache too — which is what the next job's
-	// probe asks about, and what anchors every later hop. A rebuilt
-	// (platform-filtered) index would have a different digest and satisfy neither.
-	tagRef, err := name.ParseReference(cacheCfg.Host+"/"+p.repo+p.id, w.refOpts(cacheCfg)...)
+	// Cold: fill it first. The fill lands under a TAG, so a digest resolves from
+	// the cache too — which is what the next job's probe asks about, and what
+	// anchors every later hop. Which digest that is depends on the shape: a wide
+	// fill commits verbatim so the authority's own index digest resolves, and a
+	// narrowed one commits the platform's child manifest, whose digest the
+	// authority published too. What neither may do is REBUILD an index: that
+	// digest exists nowhere upstream, so nothing could probe for it or verify it.
+	tagRef, err := w.cacheTagRef(p, cacheCfg)
 	if err != nil {
-		return routeRejected, "plan", z.Err(err, "cache ref at %q", cacheName)
+		return routeRejected, "plan", err
 	}
 	// Unless somebody is already filling it. A second fill would stream the whole
 	// image out of the authority again — the egress this feature exists to spend
@@ -801,8 +934,12 @@ func (w *Copier) routeDecision(ctx context.Context, p *execPlan, req Request) (d
 	}
 	fill := &execStep{
 		dst: cacheDest, ref: tagRef,
-		verbatim:  true, // so the authority's digest resolves from the cache
-		platforms: nil,  // a verbatim commit writes every child manifest
+		// Wide: commit verbatim so the authority's digest resolves from the cache,
+		// which a verbatim commit achieves by writing every child manifest — so the
+		// platforms the job asked for do not narrow this hop. Narrowed: carry the one
+		// platform, which Commit publishes as the source's own child manifest.
+		verbatim:  p.narrowDigest == "",
+		platforms: p.fillPlatforms(),
 		fills:     tagRef.Name(),
 		optional:  true, // gantry added this step for itself
 		// Referrers travel on THIS hop, from the authority that has them, whatever
@@ -829,6 +966,83 @@ func (w *Copier) routeDecision(ctx context.Context, p *execPlan, req Request) (d
 	return routeFilled, "", w.addRouteAttempt(ctx, p, deliver, cacheCfg, []int{fill.idx})
 }
 
+// notarySignature is the artifact type a Notary Project signature carries. The
+// narrow decision asks for it by name rather than for referrers in general: an
+// SBOM over a platform manifest is not something enforcement can decide with,
+// and counting it would narrow a route that then quarantines the node.
+const notarySignature = "application/vnd.cncf.notary.signature"
+
+// narrowRoute decides whether this route carries only the platform being
+// delivered, and anchors the cache-side hops to that platform's own manifest
+// when it does.
+//
+// An engine pulls exactly one platform, so every other architecture a fill
+// carries crosses the billed link for nobody — which is why narrowing is the
+// default and the cases below are the ones where it would cost something real.
+// Each of them leaves narrowDigest empty, and an empty narrowDigest is exactly
+// the pre-narrowing plan, so every "no" here is a route that still works.
+func (w *Copier) narrowRoute(ctx context.Context, p *execPlan, deliver *execStep, route config.CacheRoute) error {
+	l := log.From(ctx)
+	if route.AllPlatforms {
+		return nil // this cache is meant to hold the whole image
+	}
+	if _, isPuller := deliver.dst.(puller); !isPuller {
+		// A registry delivery hands on what it received, and its caller may have
+		// asked for every platform. The request already says what to carry; nothing
+		// here knows better than it does.
+		return nil
+	}
+	if p.asDigest {
+		// A digest `as` name is registered over the pulled content, and is validated
+		// against the digest the JOB is pinned to — the index. A narrowed read
+		// delivers the child manifest, so the name would resolve to bytes it does
+		// not describe. The caller asked for that name; the narrowing is gantry's
+		// own idea, so the narrowing is what gives way.
+		return nil
+	}
+	platform := deliver.platform()
+	if platform == "" || p.digest() == "" {
+		// Nothing to narrow to, or nothing to anchor it with. An unanchored cache is
+		// read by tag, and a tag over one platform's manifest is not something a
+		// later job could tell apart from a tag over the index.
+		return nil
+	}
+	child, err := childManifest(ctx, p.source, p.authorityRef, platform)
+	if err != nil {
+		return err
+	}
+	if child == "" {
+		return nil // not an index, or no single child for this platform
+	}
+	// Enforcement re-derives its verdict later, offline, from the digest the node
+	// recorded — and narrowing makes that digest the child manifest. A source that
+	// signs only the index leaves that manifest unsigned wherever it is read from,
+	// so the node would be quarantined for running exactly what gantry told it to.
+	// Carry the whole image instead: the route still works and the index signature
+	// still travels; only the narrowing is given up.
+	if w.enforces(p.target.Name()) {
+		subject := p.authorityRef.Context().Digest(child)
+		signed, err := countReferrers(ctx, p.source, subject, notarySignature)
+		if err != nil {
+			// Not knowing is not a "no" to the route, only to the narrowing: the wide
+			// fill this falls back to is what the job would have done anyway.
+			l.Debug("not narrowing: the source's signatures could not be listed",
+				slog.String("source", p.source.Name), slog.String("error", err.Error()))
+			return nil
+		}
+		if signed == 0 {
+			l.Info("not narrowing: the target polices what it runs and this platform's manifest is unsigned",
+				slog.String("target", p.target.Name()), slog.String("platform", platform),
+				slog.String("child", child))
+			return nil
+		}
+	}
+	p.narrowDigest = child
+	l.Debug("narrowing the route to the platform being delivered",
+		slog.String("platform", platform), slog.String("child", child))
+	return nil
+}
+
 // cacheServesReferrers reports whether reading the cache instead of the authority
 // would deliver everything the authority has over this digest.
 //
@@ -841,11 +1055,14 @@ func (w *Copier) routeDecision(ctx context.Context, p *execPlan, req Request) (d
 // case cheap: an image with no referrers costs one listing and routes.
 func (w *Copier) cacheServesReferrers(ctx context.Context, p *execPlan, cache config.StoreConfig, dg name.Digest) bool {
 	l := log.From(ctx)
-	authority, ok := p.authorityRef.(name.Digest)
+	// The subject is the artifact the CACHE will be read for, asked about on the
+	// authority's side too: a narrowed route reads the platform's child manifest,
+	// and the index's referrers say nothing about whether that one travelled.
+	authority, ok := p.authoritySubject()
 	if !ok {
 		return false // unpinned: there is nothing to compare against
 	}
-	want, err := countReferrers(ctx, p.source, authority)
+	want, err := countReferrers(ctx, p.source, authority, "")
 	if err != nil {
 		l.Debug("could not list the authority's referrers",
 			slog.String("source", p.source.Name), slog.String("error", err.Error()))
@@ -854,7 +1071,7 @@ func (w *Copier) cacheServesReferrers(ctx context.Context, p *execPlan, cache co
 	if want == 0 {
 		return true // nothing to drop, so nothing to check for
 	}
-	have, err := countReferrers(ctx, cache, dg)
+	have, err := countReferrers(ctx, cache, dg, "")
 	if err != nil {
 		l.Debug("could not list the cache's referrers",
 			slog.String("cache", cache.Name), slog.String("error", err.Error()))
@@ -875,6 +1092,10 @@ func (w *Copier) unreadableCache(p *execPlan, st *execStep, cache config.StoreCo
 	if !ok {
 		return "", true
 	}
+	// The plain identifier on purpose, even for a route that will narrow: the
+	// question here is whether the daemon reaches the cache at a different HOST
+	// than the other sources, and comparing two refs that differ only by a tag
+	// suffix would answer "yes" to a collapse that is still a collapse.
 	tagRef, err := name.ParseReference(cache.Host+"/"+p.repo+p.id, w.refOpts(cache)...)
 	if err != nil {
 		return err.Error(), false
@@ -895,14 +1116,19 @@ func (w *Copier) unreadableCache(p *execPlan, st *execStep, cache config.StoreCo
 // attempts, ahead of the source the caller named.
 func (w *Copier) addRouteAttempt(ctx context.Context, p *execPlan, st *execStep, cache config.StoreConfig, needs []int) error {
 	at := &execAttempt{src: cache, why: whyRoute, needs: needs}
-	ref, err := w.planAttemptRef(p, cache)
+	// Anchored to what the CACHE holds, which a narrowed route makes the child
+	// manifest rather than the index. Every other attempt keeps the plan's own
+	// anchor: they read the source, which holds the index.
+	ref, err := w.planAttemptRefAt(p, cache, p.cacheDigest())
 	if err != nil {
 		return err
 	}
 	at.ref = ref
 	// The reference a fill of the cache publishes, so a read of it that misses can
-	// wait for a job filling it right now.
-	if tagRef, err := name.ParseReference(cache.Host+"/"+p.repo+p.id, w.refOpts(cache)...); err == nil {
+	// wait for a job filling it right now. Built the same way the fill builds it —
+	// a narrowed fill publishes a platform-suffixed tag, and a wait keyed on the
+	// plain one would hang on a reference nobody is going to write.
+	if tagRef, err := w.cacheTagRef(p, cache); err == nil {
 		at.waitFill = tagRef.Name()
 		if pd, ok := st.dst.(puller); ok {
 			// Reachability was settled by unreadableCache before anything was filled.
