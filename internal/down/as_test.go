@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,7 @@ type tagDaemon struct {
 	tags    []string // "repo:tag" per /tag call
 	deleted []string // per DELETE /images/{name}
 	loads   [][]byte // request body per /images/load call
+	ops     []string // "load", "tag <source> <repo:tag>", "delete <name>", in call order
 }
 
 func (f *tagDaemon) handler() http.HandlerFunc {
@@ -55,17 +57,23 @@ func (f *tagDaemon) handler() http.HandlerFunc {
 			body, _ := io.ReadAll(r.Body)
 			f.mu.Lock()
 			f.loads = append(f.loads, body)
+			f.ops = append(f.ops, "load")
 			f.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("{\"stream\":\"Loaded image\"}\n"))
 		case strings.HasSuffix(r.URL.Path, "/tag"):
 			f.mu.Lock()
-			f.tags = append(f.tags, r.URL.Query().Get("repo")+":"+r.URL.Query().Get("tag"))
+			dst := r.URL.Query().Get("repo") + ":" + r.URL.Query().Get("tag")
+			f.tags = append(f.tags, dst)
+			src := strings.TrimSuffix(r.URL.Path[strings.Index(r.URL.Path, "/images/")+len("/images/"):], "/tag")
+			f.ops = append(f.ops, "tag "+src+" "+dst)
 			f.mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/images/"):
 			f.mu.Lock()
-			f.deleted = append(f.deleted, strings.TrimPrefix(r.URL.Path[strings.Index(r.URL.Path, "/images/"):], "/images/"))
+			name := strings.TrimPrefix(r.URL.Path[strings.Index(r.URL.Path, "/images/"):], "/images/")
+			f.deleted = append(f.deleted, name)
+			f.ops = append(f.ops, "delete "+name)
 			f.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("[]"))
@@ -301,6 +309,109 @@ func TestDockerPullDigestAsValidation(t *testing.T) {
 	defer d.mu.Unlock()
 	if len(d.loads) != 0 {
 		t.Errorf("nothing must be loaded on refusal, got %d", len(d.loads))
+	}
+}
+
+// platformIndex is an index over the given child digests, as raw bytes and the
+// anchor that carries them.
+func platformIndex(t *testing.T, children ...string) *AnchorBlob {
+	t.Helper()
+	var ms []map[string]any
+	for _, c := range children {
+		ms = append(ms, map[string]any{
+			"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": c, "size": 100,
+			"platform": map[string]string{"os": "linux", "architecture": "amd64"},
+		})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": ms,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	return &AnchorBlob{
+		MediaType: "application/vnd.oci.image.index.v1+json",
+		Digest:    "sha256:" + hex.EncodeToString(sum[:]),
+		Bytes:     raw,
+	}
+}
+
+// A routed job that narrowed its fill pulls one platform's own manifest, while
+// its digest names carry the index the job was pinned to. Every name has to
+// resolve to that index — the digest names are loaded over it, and the tags are
+// taken from them rather than from the pull — and the record the pull made,
+// named after the platform manifest, must not survive: a container started from
+// it would be judged by a digest no index signature covers.
+func TestDockerPullDigestAsOverIndex(t *testing.T) {
+	child := "sha256:" + strings.Repeat("c", 64)
+	anchor := platformIndex(t, child)
+	d := &tagDaemon{}
+	eng := tagEngine(t, d)
+	as := []string{"cr.example.com/team/app@" + anchor.Digest, "docker.io/team/app:1"}
+
+	recorded, err := eng.Pull(context.Background(), "cache.local/team/app:1-linux-amd64", child, "linux/amd64", as, anchor, nopSink{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.pullTag != child {
+		t.Errorf("pull tag = %q, want the platform manifest %s", d.pullTag, child)
+	}
+	want := []string{
+		"load",
+		"tag " + as[0] + " " + as[1],
+		"delete cache.local/team/app@" + child,
+	}
+	if strings.Join(d.ops, "\n") != strings.Join(want, "\n") {
+		t.Errorf("daemon calls:\n  %s\nwant:\n  %s", strings.Join(d.ops, "\n  "), strings.Join(want, "\n  "))
+	}
+	names, blob := parseThinArchive(t, d.loads[0])
+	if len(names) != 1 || names[0] != as[0] {
+		t.Errorf("loaded names = %v, want [%s]", names, as[0])
+	}
+	if !bytes.Equal(blob, anchor.Bytes) {
+		t.Error("the loaded blob is not the index")
+	}
+	if len(recorded) != 2 || recorded[0] != as[0] || recorded[1] != as[1] {
+		t.Errorf("recorded = %v, want the digest name then the tag", recorded)
+	}
+}
+
+// An anchor that is not what was pulled must at least be an index that lists
+// it; anything else would name the image after bytes that do not describe it.
+// Refused before the pull, since it fails identically after.
+func TestDockerPullDigestAsForeignIndex(t *testing.T) {
+	anchor := platformIndex(t, "sha256:"+strings.Repeat("a", 64))
+	other := "sha256:" + strings.Repeat("b", 64)
+	tampered := platformIndex(t, other)
+	tampered.Bytes = append([]byte(nil), anchor.Bytes...) // a digest its bytes do not hash to
+
+	for name, tc := range map[string]struct {
+		anchor *AnchorBlob
+		want   string
+	}{
+		"index without the pulled manifest":    {anchor, "does not list"},
+		"bytes that do not hash to the digest": {tampered, "hashes to"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := &tagDaemon{}
+			eng := tagEngine(t, d)
+			_, err := eng.Pull(context.Background(), "cache.local/team/app:1-linux-amd64", other, "linux/amd64",
+				[]string{"cr.example.com/team/app@" + tc.anchor.Digest}, tc.anchor, nopSink{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.want)
+			}
+			if !errors.Is(err, ErrEngine) {
+				t.Errorf("err = %v, want ErrEngine: another source would fail the same way", err)
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if d.pullTag != "" || len(d.ops) != 0 {
+				t.Errorf("must fail before the pull; pullTag=%q ops=%v", d.pullTag, d.ops)
+			}
+		})
 	}
 }
 

@@ -5,13 +5,18 @@
 package down
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/z"
 )
 
 // ErrEngine marks a failure that belongs to the engine rather than to the
@@ -48,15 +53,71 @@ type RemoveResult struct {
 }
 
 // AnchorBlob is the raw manifest/index the digest-named `as` references point
-// at: the exact bytes whose sha256 is the pull's anchor digest, fetched from
+// at: the exact bytes whose sha256 is the digest those names carry, fetched from
 // whichever store served the pull — the job's source (the cache) unless the job
 // fell back to the origin. Engines that register digest-named references
 // out-of-band (docker with the containerd image store) need the bytes; engines
 // that only need the descriptor (containerd) use the digest/size/media type.
+//
+// The anchor is normally exactly what was pulled. It may instead be the INDEX
+// over it, when a routed job narrowed its cache fill to the delivered platform:
+// the cache then holds only that platform's own manifest, so the pull is
+// anchored to it while the names still describe the index the job was pinned
+// to. See covers.
 type AnchorBlob struct {
 	MediaType string
-	Digest    string // "sha256:...", equals the pull's anchor digest
+	Digest    string // "sha256:...", the digest the `as` names carry
 	Bytes     []byte // raw manifest/index; sha256(Bytes) == Digest
+}
+
+// covers reports whether names over this anchor may be registered after a pull
+// anchored to digest: the anchor either IS what was pulled, or is an index that
+// lists it. Anything else would name the node's image after bytes that do not
+// describe it.
+//
+// The hash is checked here too, not only where the bytes were fetched: an index
+// anchor is read at admission and carried on the plan, and the names are about
+// to be registered under this digest.
+func (a *AnchorBlob) covers(digest string) error {
+	if got := fmt.Sprintf("sha256:%x", sha256.Sum256(a.Bytes)); got != a.Digest {
+		return fmt.Errorf("anchor manifest for %s hashes to %s", a.Digest, got)
+	}
+	if a.Digest == digest {
+		return nil
+	}
+	if !types.MediaType(a.MediaType).IsIndex() {
+		return fmt.Errorf("anchor manifest is %s, pull anchored to %s", a.Digest, digest)
+	}
+	im, err := v1.ParseIndexManifest(bytes.NewReader(a.Bytes))
+	if err != nil {
+		return z.Err(err, "parse anchor index %s", a.Digest)
+	}
+	for _, m := range im.Manifests {
+		if m.Digest.String() == digest {
+			return nil
+		}
+	}
+	return fmt.Errorf("anchor index %s does not list %s, which the pull is anchored to", a.Digest, digest)
+}
+
+// overIndex reports whether this anchor names the index over what a pull
+// anchored to digest fetched, rather than the pulled manifest itself.
+func (a *AnchorBlob) overIndex(digest string) bool {
+	return a != nil && a.Digest != digest
+}
+
+// IndexNamer is an Engine that can name an image after the index over what it
+// pulled: given a pull anchored to one platform's own manifest and an anchor
+// holding an index that lists it, every `as` name resolves to that index, and
+// nothing the engine keeps for the job is named after the platform manifest.
+//
+// That is the shape a daemon leaves anyway when it pulls a multi-arch image by
+// its index digest for one platform — the index and one child — which is what
+// lets a routed fill carry one platform without changing what the node records.
+// An engine without it still receives a whole image (the Copier does not narrow
+// a fill for it), so the capability is optional.
+type IndexNamer interface {
+	NamesOverIndex() bool
 }
 
 // Engine is a daemon gantry triggers to pull from — and, for retention, observes

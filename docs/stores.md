@@ -409,7 +409,10 @@ The anchor manifest's raw bytes back the digest name. gantry fetches them from
 the store the attempt pulls from — normally the job's **source** (the cache), so
 the origin registry is **never contacted**; the one exception is a
 `fallback_to_origin` attempt, which fetches the anchor from the origin along with
-the content (see [Falling back to the origin](#falling-back-to-the-origin)).
+the content (see [Falling back to the origin](#falling-back-to-the-origin)). A
+routed delivery that [narrowed](#what-the-fill-copies) reads a cache holding only
+the platform's own manifest, so its anchor is the index the authority served at
+admission instead, and the node pulls the child under the index's name.
 Either way the bytes are hashed against the reference's digest (sha256 only)
 rather than trusting the transport, because they are about to be registered on a
 node under that digest's name. The fetch happens **before** the pull, so a source
@@ -582,13 +585,25 @@ verbatim fill, which is a route that still works — when:
 - the **target is a registry**, whose caller may have asked for every platform;
 - there is **nothing to narrow to**: the source is not an index, or names no
   single manifest for the platform;
-- the job uses **digest `as` names**, which are validated against its own pin;
-- the target is **policed by `serve.enforce`** and the platform manifest carries
-  no Notary Project signature. Enforcement re-derives its verdict later, offline,
-  from the digest the node recorded — and narrowing makes that the child manifest,
-  so a source that signs only the index would have the node quarantined for
-  running exactly what gantry told it to. See
+- the job uses **digest `as` names** and the target engine cannot register them
+  over an index (a `containerd` engine; `docker` can);
+- the target is **policed by `serve.enforce`**, the job names no digest `as`, and
+  the platform manifest carries no Notary Project signature. Enforcement
+  re-derives its verdict later, offline, from the digest the node recorded — and
+  narrowing makes that the child manifest, so a source that signs only the index
+  would have the node quarantined for running exactly what gantry told it to. See
   [enforcement.md](enforcement.md#multi-arch-images-and-platform-narrowing).
+
+**A digest `as` name survives the narrowing.** The name carries the index the job
+is pinned to, and the cache holds only a child of it, so gantry keeps the index it
+read from the authority at admission — it had to read it to find the child — and
+hands it to the engine as the anchor. The daemon pulls the child from the cache,
+registers every `as` name over the index (tags included), and drops the record the
+pull made under the child's digest. The node ends up in the shape a daemon leaves
+when it pulls a multi-arch image by its index for one platform: the index, one
+child, and only the names the caller asked for. `docker image inspect
+repo@sha256:INDEX` resolves locally, and the digest the node records — and
+enforcement reads — is the index's, so an index signature is enough.
 
 `gantry.job.route` carries a `narrowed` dimension, so a route that quietly stopped
 narrowing — the image stopped being multi-arch, a signature went missing — is

@@ -220,37 +220,39 @@ func holdsDigest(ctx context.Context, store config.StoreConfig, ref name.Digest)
 
 // childManifest resolves the single child an index names for one platform, so a
 // hop can anchor to the manifest the source published for that platform rather
-// than to the index over all of them.
+// than to the index over all of them. It also returns the index it read: a node
+// named after the index needs its bytes (anchorOf), and a cache the hop narrowed
+// will never hold them.
 //
-// ("", nil) is the ordinary "there is nothing to narrow to" answer: ref is not
-// an index, names no child for this platform, or names more than one. The caller
-// then carries the whole image, which is what it would have done anyway — a
-// source that cannot be narrowed is not an error here, only a route that stays
+// ("", nil, nil) is the ordinary "there is nothing to narrow to" answer: ref is
+// not an index, names no child for this platform, or names more than one. The
+// caller then carries the whole image, which is what it would have done anyway —
+// a source that cannot be narrowed is not an error here, only a route that stays
 // wide. The selection MUST agree with copySource.Commit's: a plan anchored to a
 // digest the commit does not produce would read a manifest that is not there.
-func childManifest(ctx context.Context, store config.StoreConfig, ref name.Reference, platform string) (string, error) {
+func childManifest(ctx context.Context, store config.StoreConfig, ref name.Reference, platform string) (string, *remote.Descriptor, error) {
 	want, err := parsePlatforms([]string{platform})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	rt, err := xport.Transport(store)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	desc, err := remote.Get(ref, baseOpts(ctx, registryAuth(store), rt)...)
 	if err != nil {
-		return "", z.Err(err, "get %q at %q", ref.Name(), store.Name)
+		return "", nil, z.Err(err, "get %q at %q", ref.Name(), store.Name)
 	}
 	if !desc.MediaType.IsIndex() {
-		return "", nil
+		return "", nil, nil
 	}
 	idx, err := desc.ImageIndex()
 	if err != nil {
-		return "", z.Err(err, "image index")
+		return "", nil, z.Err(err, "image index")
 	}
 	im, err := idx.IndexManifest()
 	if err != nil {
-		return "", z.Err(err, "index manifest")
+		return "", nil, z.Err(err, "index manifest")
 	}
 	found := ""
 	for _, m := range im.Manifests {
@@ -258,22 +260,21 @@ func childManifest(ctx context.Context, store config.StoreConfig, ref name.Refer
 			continue
 		}
 		if found != "" {
-			return "", nil // several match; a commit would build an index over them
+			return "", nil, nil // several match; a commit would build an index over them
 		}
 		found = m.Digest.String()
 	}
-	return found, nil
+	if found == "" {
+		return "", nil, nil
+	}
+	return found, desc, nil
 }
 
 // fetchAnchor fetches the raw manifest/index bytes the digest reference names
 // from the store the attempt is pulling from — normally the job's source (the
 // cache), keeping the two-hop promise that the origin registry is never
 // contacted; a fallback attempt passes the origin here, which is the point of
-// falling back. The bytes are hashed here against the reference's digest rather
-// than trusting the transport (ggcr skips content verification for some legacy
-// media types), because they are about to be registered on a node under that
-// digest's name — so an anchor is only ever as trustworthy as its digest, never
-// as the host that served it.
+// falling back.
 func fetchAnchor(ctx context.Context, source config.StoreConfig, ref name.Digest) (*down.AnchorBlob, error) {
 	rt, err := xport.Transport(source)
 	if err != nil {
@@ -283,6 +284,15 @@ func fetchAnchor(ctx context.Context, source config.StoreConfig, ref name.Digest
 	if err != nil {
 		return nil, z.Err(err, "get anchor manifest %q", ref.Name())
 	}
+	return anchorOf(ref, desc)
+}
+
+// anchorOf makes the manifest ref resolved to into an anchor. The bytes are
+// hashed here against the reference's digest rather than trusting the transport
+// (ggcr skips content verification for some legacy media types), because they
+// are about to be registered on a node under that digest's name — so an anchor
+// is only ever as trustworthy as its digest, never as the host that served it.
+func anchorOf(ref name.Digest, desc *remote.Descriptor) (*down.AnchorBlob, error) {
 	if !strings.HasPrefix(ref.DigestStr(), "sha256:") {
 		return nil, fmt.Errorf("digest `as` supports sha256 references; got %q", ref.DigestStr())
 	}

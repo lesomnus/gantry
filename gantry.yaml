@@ -90,7 +90,9 @@ stores:
   # Narrowing also gives way on its own, to the same whole-image fill, when it
   # cannot be done safely — notably for a target listed in serve.enforce.stores
   # whose platform manifest carries no signature, since enforcement would then
-  # quarantine the node. See docs/stores.md#what-the-fill-copies.
+  # quarantine the node. A job with a digest `as` name is exempt: the node is
+  # named after the index, so the index signature is the one that counts. See
+  # docs/stores.md#what-the-fill-copies.
 
   # A `meta` store is one name in front of several registries, picked by the
   # repository. It is NOT a cache: the stores behind it hold DIFFERENT content

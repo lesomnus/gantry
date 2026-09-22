@@ -49,6 +49,9 @@ type puller interface {
 	// hostPlatform is the daemon host's platform in OCI form ("linux/amd64"),
 	// the default platform when a job does not name one.
 	hostPlatform(ctx context.Context) (string, error)
+	// namesOverIndex reports whether digest `as` names can be registered over an
+	// index when the pull fetched only one of its children (down.IndexNamer).
+	namesOverIndex() bool
 }
 
 // resolveDest resolves a job's `target` into a destination: a declared engine
@@ -129,6 +132,11 @@ func (d *engineDest) pull(ctx context.Context, ref, digest, platform string, as 
 
 func (d *engineDest) hostPlatform(ctx context.Context) (string, error) {
 	return d.eng.Platform(ctx)
+}
+
+func (d *engineDest) namesOverIndex() bool {
+	n, ok := d.eng.(down.IndexNamer)
+	return ok && n.NamesOverIndex()
 }
 
 // rewriteHost replaces the registry host of ref, preserving repo path and tag/digest.

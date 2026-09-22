@@ -126,10 +126,19 @@ Notary Project signature, and falls back to the wide verbatim fill when it does
 not. So an index-only signing scheme keeps working — it simply does not get the
 narrowing.
 
+**Unless the job names the image by digest.** A job with a digest `as` name
+(`repo@sha256:<index>`, what a digest-pinned deployment asks for) leaves the node
+holding the index under that name, over the child it pulled, and nothing named
+after the child — see [stores.md](stores.md#what-the-fill-copies). The container's
+`RepoDigest` is then the index digest, exactly as for a wide fill, so the index
+signature is the one enforcement reads and the route narrows without a signature
+on the child.
+
 **Enabling enforcement over a cache that was already filled by narrowed jobs is
-not safe.** Those platform manifests were never checked for a signature, because
-nothing was going to ask; turning `serve.enforce` on makes something ask, and the
-containers running them are quarantined. Sign the children first, or set
+not safe** when those jobs named no digest `as`. Their nodes record the platform
+manifests, which were never checked for a signature, because nothing was going to
+ask; turning `serve.enforce` on makes something ask, and the containers running
+them are quarantined. Sign the children first, or set
 `all_platforms: true` on the route and let the cache refill.
 
 ## The verdict cache
