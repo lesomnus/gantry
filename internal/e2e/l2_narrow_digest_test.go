@@ -73,6 +73,24 @@ func seedRunnableIndex(t *testing.T, cli *client.Client, host, repo, tag string)
 	return index, child, own.String()
 }
 
+// requireContainerdStore skips on a daemon running the classic graph store,
+// which cannot hold a digest name over local content at all: gantry rejects a
+// digest `as` there before pulling, routed or not (TestDockerPullDigestAsClassic
+// covers that rejection).
+func requireContainerdStore(t *testing.T, cli *client.Client) {
+	t.Helper()
+	info, err := cli.Info(context.Background())
+	if err != nil {
+		t.Fatalf("docker info: %v", err)
+	}
+	for _, kv := range info.DriverStatus {
+		if len(kv) == 2 && kv[0] == "driver-type" && kv[1] == "io.containerd.snapshotter.v1" {
+			return
+		}
+	}
+	t.Skip("the daemon uses the classic image store; digest `as` names need the containerd image store")
+}
+
 // The whole of what a narrowed routed fill has to preserve for a node that is
 // named by digest and policed at run time.
 //
@@ -97,6 +115,7 @@ func TestL2NarrowedDigestNameRunsUnderEnforcement(t *testing.T) {
 	trust := writeTrustStore(t, root.Cert)
 	h := newL2Harness(t, l2WithRemoteCache("cache"), l2WithEnforce(trust))
 	ctx := context.Background()
+	requireContainerdStore(t, h.cli)
 
 	index, child, platform := seedRunnableIndex(t, h.cli, h.remote, "lib/run", "1")
 	signRef(t, h.remote+"/lib/run@"+index.String(), root, leaf)
