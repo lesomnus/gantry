@@ -1,7 +1,9 @@
 package cpx
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -269,6 +271,124 @@ func TestNarrowingSurvivesAnEnforcedTargetWithASignedPlatform(t *testing.T) {
 	}
 	if got := eng.pulls()[0].digest; got != amd64.Digest.String() {
 		t.Errorf("pull anchored to %s, want the signed child %s", got, amd64.Digest)
+	}
+}
+
+// A digest `as` name carries the index the job is pinned to, and a narrowed
+// cache never holds that index. So the route keeps the index the authority
+// served at admission and hands it to the engine as the anchor, while the pull
+// itself reads the child the cache does hold. The node ends up named after the
+// index — exactly as if it had pulled the index for its own platform — and the
+// fill still carried one platform.
+func TestNarrowedRouteNamesTheNodeAfterTheIndex(t *testing.T) {
+	w, js, eng, cloud, site := narrowedCopier(t, "linux/amd64", nil)
+	eng.indexNames = true
+	src := pushIndex(t, cloud+"/team/app:multi", "linux/amd64", "linux/arm64")
+	index, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	amd64 := childOf(t, src, "linux/amd64")
+	pinned := cloud + "/team/app@" + index.Digest.String()
+
+	run(t, w, js, Request{Ref: pinned, Source: "cloud", Target: "node", As: []string{"cr.example.com/team/app@" + index.Digest.String()}})
+
+	if holds(t, site, "team/app", index.Digest) {
+		t.Error("the cache holds the whole index; a digest name stopped the narrowing")
+	}
+	if !holds(t, site, "team/app", amd64.Digest) {
+		t.Error("the cache should hold the delivered platform's own manifest")
+	}
+	calls := eng.pulls()
+	if len(calls) != 1 {
+		t.Fatalf("engine pulls = %+v, want one", calls)
+	}
+	if calls[0].digest != amd64.Digest.String() {
+		t.Errorf("pull anchored to %s, want the child the cache holds %s", calls[0].digest, amd64.Digest)
+	}
+	a := calls[0].anchor
+	if a == nil {
+		t.Fatal("the pull carried no anchor for its digest name")
+	}
+	if a.Digest != index.Digest.String() || !bytes.Equal(a.Bytes, index.Manifest) {
+		t.Errorf("anchor = %s, want the authority's own index bytes %s", a.Digest, index.Digest)
+	}
+}
+
+// Without an engine that can name the child after the index, the digest name
+// wins and the fill stays wide — the pre-narrowing plan, which still works.
+func TestDigestNameKeepsTheFillWideWithoutAnIndexNamer(t *testing.T) {
+	w, js, eng, cloud, site := narrowedCopier(t, "linux/amd64", nil)
+	src := pushIndex(t, cloud+"/team/app:multi", "linux/amd64", "linux/arm64")
+	index, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dg := index.Digest.String()
+
+	run(t, w, js, Request{Ref: cloud + "/team/app@" + dg, Source: "cloud", Target: "node", As: []string{"cr.example.com/team/app@" + dg}})
+
+	if !holds(t, site, "team/app", index.Digest) {
+		t.Error("the cache should hold the whole index")
+	}
+	call := eng.pulls()[0]
+	if call.digest != dg || call.anchor == nil || call.anchor.Digest != dg {
+		t.Errorf("pull anchored to %s with anchor %v, want both on the index %s", call.digest, call.anchor, dg)
+	}
+}
+
+// An enforced target normally needs the child signed before a route narrows,
+// because the node would record the child. Under a digest name it records the
+// index, so an index-only signature — what `notation sign <index-tag>` leaves —
+// is the one enforcement reads, and the route narrows anyway.
+func TestNarrowingUnderADigestNameNeedsNoPlatformSignature(t *testing.T) {
+	w, js, eng, cloud, site := narrowedCopier(t, "linux/amd64", nil)
+	eng.indexNames = true
+	w.SetEnforcedStores([]string{"node"})
+	src := pushIndex(t, cloud+"/team/app:multi", "linux/amd64", "linux/arm64")
+	index, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachSignature(t, src.Context(), index.Digest, string(index.MediaType), index.Size)
+	dg := index.Digest.String()
+
+	run(t, w, js, Request{Ref: cloud + "/team/app@" + dg, Source: "cloud", Target: "node", As: []string{"cr.example.com/team/app@" + dg}})
+
+	if holds(t, site, "team/app", index.Digest) {
+		t.Error("the fill was not narrowed although the node is named after the signed index")
+	}
+	if a := eng.pulls()[0].anchor; a == nil || a.Digest != dg {
+		t.Errorf("anchor = %v, want the index %s", a, dg)
+	}
+}
+
+// When the read of the narrowed cache fails, the delivery falls through to the
+// source, which holds the index itself: that attempt pulls the index and fetches
+// its anchor from where it pulls, like any unrouted digest-named job.
+func TestNarrowedRouteFallsThroughToAnIndexAnchoredPull(t *testing.T) {
+	w, js, eng, cloud, site := narrowedCopier(t, "linux/amd64", nil)
+	eng.indexNames = true
+	eng.failFor = failHost(site, errors.New("connection refused"))
+	src := pushIndex(t, cloud+"/team/app:multi", "linux/amd64", "linux/arm64")
+	index, err := remote.Get(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dg := index.Digest.String()
+
+	run(t, w, js, Request{Ref: cloud + "/team/app@" + dg, Source: "cloud", Target: "node", As: []string{"cr.example.com/team/app@" + dg}})
+
+	calls := eng.pulls()
+	if len(calls) != 2 {
+		t.Fatalf("engine pulls = %+v, want the cache then the source", calls)
+	}
+	last := calls[1]
+	if !strings.HasPrefix(last.ref, cloud+"/") || last.digest != dg {
+		t.Errorf("fallback pulled %s@%s, want the source's index %s", last.ref, last.digest, dg)
+	}
+	if last.anchor == nil || last.anchor.Digest != dg || !bytes.Equal(last.anchor.Bytes, index.Manifest) {
+		t.Errorf("fallback anchor = %v, want the index bytes", last.anchor)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/otx/log"
 	"github.com/lesomnus/z"
 	"go.opentelemetry.io/otel/attribute"
@@ -167,6 +168,11 @@ type execPlan struct {
 	// alongside rather than read back off the delivery step, so the tag the fill
 	// publishes and the platform it carries cannot drift apart.
 	narrowPlatform string
+	// narrowAnchor is the authority's index, kept from admission for a narrowed
+	// route whose job names the node's image by digest. The names carry the
+	// index digest and must be backed by its bytes, and the cache — the one place
+	// the delivery reads — holds only the child. nil otherwise.
+	narrowAnchor *down.AnchorBlob
 	// cache is the store this job would be routed through: the first route the
 	// source declares whose scope covers this job's target and repository, or ""
 	// when none does. Resolved once, at admission, because two things need it —
@@ -996,12 +1002,12 @@ func (w *Copier) narrowRoute(ctx context.Context, p *execPlan, deliver *execStep
 		// here knows better than it does.
 		return nil
 	}
-	if p.asDigest {
-		// A digest `as` name is registered over the pulled content, and is validated
-		// against the digest the JOB is pinned to — the index. A narrowed read
-		// delivers the child manifest, so the name would resolve to bytes it does
-		// not describe. The caller asked for that name; the narrowing is gantry's
-		// own idea, so the narrowing is what gives way.
+	if p.asDigest && !deliver.dst.(puller).namesOverIndex() {
+		// A digest `as` name carries the digest the JOB is pinned to — the index —
+		// and a narrowed read delivers only the child manifest. Naming the child
+		// after the index needs an engine that can register the index over it
+		// (down.IndexNamer). The caller asked for that name; the narrowing is
+		// gantry's own idea, so without that engine the narrowing is what gives way.
 		return nil
 	}
 	platform := deliver.platform()
@@ -1011,12 +1017,25 @@ func (w *Copier) narrowRoute(ctx context.Context, p *execPlan, deliver *execStep
 		// later job could tell apart from a tag over the index.
 		return nil
 	}
-	child, err := childManifest(ctx, p.source, p.authorityRef, platform)
+	child, index, err := childManifest(ctx, p.source, p.authorityRef, platform)
 	if err != nil {
 		return err
 	}
 	if child == "" {
 		return nil // not an index, or no single child for this platform
+	}
+	var anchor *down.AnchorBlob
+	if p.asDigest {
+		// Kept now because it cannot be fetched later: the delivery reads the cache,
+		// and a narrowed cache never holds the index. These are the bytes the
+		// authority itself serves under the digest the job is pinned to.
+		dg, ok := p.authorityRef.(name.Digest)
+		if !ok {
+			return fmt.Errorf("a narrowed route needs a digest-anchored reference at %q", p.source.Name)
+		}
+		if anchor, err = anchorOf(dg, index); err != nil {
+			return err
+		}
 	}
 	// Enforcement re-derives its verdict later, offline, from the digest the node
 	// recorded — and narrowing makes that digest the child manifest. A source that
@@ -1024,7 +1043,12 @@ func (w *Copier) narrowRoute(ctx context.Context, p *execPlan, deliver *execStep
 	// so the node would be quarantined for running exactly what gantry told it to.
 	// Carry the whole image instead: the route still works and the index signature
 	// still travels; only the narrowing is given up.
-	if w.enforces(p.target.Name()) {
+	//
+	// Not under a digest `as` name. The engine then names everything it keeps for
+	// the job after the index and drops the record the child pull made, so the
+	// digest the node records is the index's, and the index signature is the one
+	// enforcement reads — the same one a wide fill would have left it reading.
+	if w.enforces(p.target.Name()) && !p.asDigest {
 		subject := p.authorityRef.Context().Digest(child)
 		signed, err := countReferrers(ctx, p.source, subject, notarySignature)
 		if err != nil {
@@ -1041,7 +1065,7 @@ func (w *Copier) narrowRoute(ctx context.Context, p *execPlan, deliver *execStep
 			return nil
 		}
 	}
-	p.narrowDigest, p.narrowPlatform = child, platform
+	p.narrowDigest, p.narrowPlatform, p.narrowAnchor = child, platform, anchor
 	l.Debug("narrowing the route to the platform being delivered",
 		slog.String("platform", platform), slog.String("child", child))
 	return nil
