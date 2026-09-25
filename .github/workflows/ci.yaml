@@ -73,6 +73,26 @@ jobs:
           GANTRY_E2E_REGISTRY: ${{ matrix.registry }}
         run: go test -tags e2e -race -run TestL2 ./internal/e2e/...
 
+  # The real-daemon tests that need docker's containerd image store — digest
+  # `as` names, which the classic graph store cannot hold and which e2e-docker
+  # therefore skips. Switches the runner's daemon over and runs only those.
+  e2e-docker-containerd-store:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Use the containerd image store
+        run: |
+          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info --format '{{json .DriverStatus}}' | grep -q io.containerd.snapshotter.v1
+      - name: Pre-pull the registry image
+        run: docker pull registry:2
+      - name: E2E (real daemon, containerd image store)
+        run: go test -tags e2e -race -run TestL2NarrowedDigestName ./internal/e2e/...
+
   # containerd image-store features (digest `as`, anchored pull) that otherwise
   # only run in the devcontainer: provision containerd on the runner and let the
   # existing internal/down containerd integration tests stop self-skipping.
@@ -131,7 +151,7 @@ jobs:
   # too, so promotion waits until unit/L1/L2/containerd are green; the in-Dockerfile
   # `test` stage (no -race) is therefore not rebaked here.
   verify:
-    needs: [dist, test, e2e-docker, e2e-containerd]
+    needs: [dist, test, e2e-docker, e2e-docker-containerd-store, e2e-containerd]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
