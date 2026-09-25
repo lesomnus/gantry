@@ -90,8 +90,16 @@ jobs:
           docker info --format '{{json .DriverStatus}}' | grep -q io.containerd.snapshotter.v1
       - name: Pre-pull the registry image
         run: docker pull registry:2
+      # -v, and the result is read rather than inferred: this test SKIPS on a
+      # daemon that cannot hold a digest name, and `go test` reports a skipped
+      # package as `ok`. A job whose whole purpose is that this test runs must
+      # not be able to pass without it having run.
       - name: E2E (real daemon, containerd image store)
-        run: go test -tags e2e -race -run TestL2NarrowedDigestName ./internal/e2e/...
+        run: |
+          set -o pipefail
+          go test -tags e2e -race -v -run TestL2NarrowedDigestName ./internal/e2e/... | tee /tmp/e2e.log
+          grep -q -- '--- PASS: TestL2NarrowedDigestNameRunsUnderEnforcement' /tmp/e2e.log \
+            || { echo "::error::the digest-name test did not run here"; exit 1; }
 
   # containerd image-store features (digest `as`, anchored pull) that otherwise
   # only run in the devcontainer: provision containerd on the runner and let the
