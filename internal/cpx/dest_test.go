@@ -326,6 +326,36 @@ func TestJobToEngineDaemonProgressRefinesEstimate(t *testing.T) {
 	}
 }
 
+// A daemon on the containerd image store reports every layer with
+// `progressDetail:{"hidecounts":true}` — names, no sizes. That is not a
+// transfer of nothing, and the size the registry already told us is the whole
+// of what anyone watching has. It survives the report.
+func TestJobToEngineKeepsTheEstimateWhenTheDaemonCountsNothing(t *testing.T) {
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64", reported: []down.LayerUpdate{
+		{Digest: "l1", State: "done"},
+		{Digest: "l2", State: "done"},
+	}}
+	w, js, up := engineCopier(t, eng)
+	pushImage(t, up+"/team/app:1", 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	tr := done.Transfers[0]
+	if tr.BytesTotal <= 0 {
+		t.Errorf("total = %d, want the upstream estimate to stand", tr.BytesTotal)
+	}
+	if got := tr.BytesDone; got != tr.BytesTotal {
+		t.Errorf("done = %d, want the finished transfer to read full at %d", got, tr.BytesTotal)
+	}
+}
+
 // Identical engine moves coalesce; a different engine is a different job.
 func TestJobToEngineDedup(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}
