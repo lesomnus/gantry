@@ -721,10 +721,19 @@ there the source the caller named *is* the authority.
   digest there is nothing to check the cache against, so a job propagating
   referrers — or any engine-target job — is simply not routed when the authority
   cannot confirm the reference, rather than reading the cache on faith.
-- **A pull-through cache is not routed through by a job that needs referrers.**
-  Reading a proxy is what fills it with the *image*; whether it also proxies the
-  referrers API is the upstream product's business, and there is no fill hop to
-  carry them instead.
+- **A pull-through cache is asked the same question, and the answer decides.**
+  Reading a proxy is what fills it with the *image*; whether it also answers for
+  the referrers is a property of the product behind it, so gantry lists them on
+  both sides and compares, exactly as it does for a copy cache. A proxy that
+  passes the referrers API upstream reports what the authority reports and is
+  routed through; one that answers only from what it holds is declined
+  (`referrers_incomplete`), and the job reads the authority.
+
+  It used to be refused outright, on the argument that gantry could not
+  establish what a given proxy does. That assumption covered every engine
+  delivery — a node is verified after the fact against the store its digest
+  names — so a pull-through cache could not serve a node at all, however it
+  behaved.
 - **Admission does two registry requests** (settle the tag at the authority, probe
   the cache), bounded together by `worker.admission_timeout` (default `10s`), plus
   the referrer listings above when the job needs them.
