@@ -351,6 +351,35 @@ func TestJobToEngineKeepsTheEstimateWhenTheDaemonCountsNothing(t *testing.T) {
 	}
 }
 
+// The case that reached a fleet node: the daemon sizes SOME of what it pulled.
+// On the containerd image store the image's own layers come back sizeless and
+// something small alongside them — an attestation — comes back with a size, so
+// the sum of what was sized is a number about a different thing. Reported 2026
+// bytes for a 2.2 MB delivery, which reads like an answer and is not one.
+func TestJobToEngineKeepsTheEstimateWhenTheDaemonSizesOnlySome(t *testing.T) {
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64", reported: []down.LayerUpdate{
+		{Digest: "the-image-layer", State: "done"},
+		{Digest: "something-alongside", Total: 2026, Done: 2026, State: "done"},
+	}}
+	w, js, up := engineCopier(t, eng)
+	pushImage(t, up+"/team/app:1", 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	if got := done.Transfers[0].BytesTotal; got == 2026 {
+		t.Errorf("total = %d, which is the one layer the daemon happened to size, not the image", got)
+	} else if got <= 0 {
+		t.Errorf("total = %d, want the upstream estimate to stand", got)
+	}
+}
+
 // Identical engine moves coalesce; a different engine is a different job.
 func TestJobToEngineDedup(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}

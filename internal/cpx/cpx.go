@@ -600,17 +600,27 @@ func (s *engineSink) Layer(u down.LayerUpdate) {
 			lp.Done.Store(u.Done)
 		}
 		var tot, done int64
+		sized := len(s.t.Layers) > 0
 		for _, l := range s.t.Layers {
+			if l.Total <= 0 {
+				sized = false
+			}
 			tot += l.Total
 			done += l.Done.Load()
 		}
-		// A daemon on the containerd image store names its layers and sizes
-		// none of them ("progressDetail":{"hidecounts":true}). Taking that as
-		// the total would replace the size we read from the registry with
-		// zero, on the first report — a bar that reads 0/0 for the whole pull
-		// and is not even wrong about how far it got. The estimate stands
-		// until the engine offers something better than nothing.
-		if tot > 0 {
+		// Only a report that sized EVERY layer it named supersedes the
+		// estimate. A daemon on the containerd image store names the image's
+		// layers and sizes none of them ("progressDetail":{"hidecounts":true}),
+		// while sizing something small it pulled alongside — an attestation —
+		// so the sum of what it sized is a number about a different thing.
+		// Measured on a fleet node: 2026 bytes reported for a 2.2 MB delivery,
+		// which is worse than the 0/0 this used to report, because it looks
+		// like an answer.
+		//
+		// It holds mid-pull too: a layer is named before it is sized, so the
+		// estimate stands until the daemon has sized all of them and then gives
+		// way to a total that is about the same layers.
+		if sized {
 			s.t.BytesTotal = tot
 		}
 		s.t.BytesDone.Store(done)
