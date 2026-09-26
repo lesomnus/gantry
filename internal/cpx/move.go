@@ -201,8 +201,11 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 			}
 			tot += lp.Total
 		}
-		if len(t.Layers) > 0 {
-			// The daemon's own layer totals supersede the upstream estimate.
+		if tot > 0 {
+			// The daemon's own layer totals supersede the upstream estimate —
+			// when it reported any. A sizeless report (the containerd image
+			// store names its layers and counts none) leaves the estimate,
+			// which is then the only number anyone has for what moved.
 			t.BytesTotal = tot
 		}
 		t.BytesDone.Store(t.BytesTotal)

@@ -619,7 +619,15 @@ func (s *engineSink) Layer(u down.LayerUpdate) {
 			tot += l.Total
 			done += l.Done.Load()
 		}
-		s.t.BytesTotal = tot
+		// A daemon on the containerd image store names its layers and sizes
+		// none of them ("progressDetail":{"hidecounts":true}). Taking that as
+		// the total would replace the size we read from the registry with
+		// zero, on the first report — a bar that reads 0/0 for the whole pull
+		// and is not even wrong about how far it got. The estimate stands
+		// until the engine offers something better than nothing.
+		if tot > 0 {
+			s.t.BytesTotal = tot
+		}
 		s.t.BytesDone.Store(done)
 	})
 }
