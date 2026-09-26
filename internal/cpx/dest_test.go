@@ -380,6 +380,38 @@ func TestJobToEngineKeepsTheEstimateWhenTheDaemonSizesOnlySome(t *testing.T) {
 	}
 }
 
+// Order matters, and this is the order a node actually sees. The image's own
+// layer is streamed through a pull-through cache that is still filling, so it
+// arrives with no Content-Length and the daemon cannot size it; something small
+// the cache already had — an attestation — arrives with one, and arrives FIRST.
+//
+// At that instant every layer the daemon has named is sized, so the report is
+// complete and 2026 bytes is the honest total of it. One message later it is
+// not, and the estimate has to come back.
+func TestJobToEngineTakesTheEstimateBackWhenTheReportTurnsPartial(t *testing.T) {
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64", reported: []down.LayerUpdate{
+		{Digest: "something-alongside", Total: 2026, Done: 2026, State: "done"},
+		{Digest: "the-image-layer", State: "done"},
+	}}
+	w, js, up := engineCopier(t, eng)
+	pushImage(t, up+"/team/app:1", 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	if got := done.Transfers[0].BytesTotal; got == 2026 {
+		t.Errorf("total = %d: the first report won and never gave the estimate back", got)
+	} else if got <= 0 {
+		t.Errorf("total = %d, want the upstream estimate", got)
+	}
+}
+
 // Identical engine moves coalesce; a different engine is a different job.
 func TestJobToEngineDedup(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64"}

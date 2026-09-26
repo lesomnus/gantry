@@ -177,7 +177,7 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 		anchor = a
 	}
 
-	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}
+	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}, est: t.BytesTotal}
 	recorded, err := m.d.pull(ctx, at.pullRef, digest, st.platform(), p.as, anchor, sink)
 	if err != nil {
 		return err
@@ -201,6 +201,8 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 			// some of them is a number about those, not about the image; see
 			// engineSink.Layer, where the same rule is written out.
 			t.BytesTotal = tot
+		} else {
+			t.BytesTotal = sink.est
 		}
 		t.BytesDone.Store(t.BytesTotal)
 	})
