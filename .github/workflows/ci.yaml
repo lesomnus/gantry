@@ -61,6 +61,7 @@ jobs:
         registry:
           - "registry:2" # OCI referrers tag-fallback path
           - "registry:3" # native referrers API (Distribution v3)
+          - "ghcr.io/lesomnus/cr:edge" # lesomnus/cr, configured by the harness
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5

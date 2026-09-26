@@ -140,16 +140,12 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 	daemonHost, needFwd := remoteDaemon()
 
 	h := &l2harness{t: t, cli: cli}
-	h.remote, h.remoteID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, "")
+	h.remote, h.remoteID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, false)
 	h.originHost = h.remote
 	if lc.throttle > 0 {
 		h.remote = startThrottledProxy(t, h.originHost, lc.throttle)
 	}
-	cacheCfg := ""
-	if lc.readOnlyCache {
-		cacheCfg = readOnlyRegistryConfig
-	}
-	h.cache, h.cacheID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, cacheCfg)
+	h.cache, h.cacheID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, lc.readOnlyCache)
 	if lc.readOnlyCache {
 		requireWritesRefused(t, h.cache)
 	}
@@ -172,7 +168,7 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 		"edge":   edge,
 	}
 	if lc.farStore {
-		h.far, h.farID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, "")
+		h.far, h.farID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, false)
 		stores["far"] = config.StoreConfig{Kind: "oci", Host: h.far, Insecure: true, Mode: "copy"}
 	}
 	cfg := &config.Config{Stores: stores, Worker: lc.worker}
@@ -220,8 +216,78 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 // the separate-netns case) forwards the same port from the test process. Returns
 // 127.0.0.1:<port>.
 func startRegistryContainer(t *testing.T, cli *client.Client, daemonHost string, needFwd bool) string {
-	addr, _ := startRegistryContainerCfg(t, cli, daemonHost, needFwd, "")
+	addr, _ := startRegistryContainerCfg(t, cli, daemonHost, needFwd, false)
 	return addr
+}
+
+// registryImage is the registry image the real-daemon tiers run.
+func registryImage() string {
+	if img := os.Getenv("GANTRY_E2E_REGISTRY"); img != "" {
+		return img
+	}
+	return "registry:2"
+}
+
+// isCR reports whether regImage is lesomnus/cr rather than distribution, by its
+// repository with any tag or digest cut off.
+func isCR(regImage string) bool {
+	repo, _, _ := strings.Cut(regImage, "@")
+	if i := strings.LastIndex(repo, ":"); i > strings.LastIndex(repo, "/") {
+		repo = repo[:i]
+	}
+	return repo == "lesomnus/cr" || strings.HasSuffix(repo, "/lesomnus/cr")
+}
+
+// crConfigPath is where the harness puts cr's config. Its image carries none,
+// and `cr serve` without one refuses to start rather than pick defaults.
+const crConfigPath = "etc/cr/cr.yaml"
+
+// crConfig is one cr process on its own disk under /tmp, the one directory the
+// distroless image's non-root user may write. With no `auth:` it is open to
+// every request, which is what a stock distribution container is.
+const crConfig = `db:
+  driver: sqlite3
+  dsn: "file:/tmp/cr.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)"
+  migrate: true
+server:
+  addr: ":50051"
+  http:
+    addr: ":5000"
+watch:
+  broker: memory
+registry:
+  storage:
+    driver: os
+    os:
+      root: /tmp/data
+`
+
+// crReadOnlyConfig refuses writes the way a cr deployment does, since cr has no
+// read-only mode (its garbage collection never needs one): the guard is on and
+// grants everyone pull and nothing else.
+const crReadOnlyConfig = crConfig + `auth:
+  enabled: true
+  bindings:
+    - subject: anonymous
+      repo: "*"
+      actions: [pull, catalog]
+`
+
+// registryContainer is the command and files a registry container of regImage
+// needs, writable or refusing writes. A nil cmd keeps the image's own.
+func registryContainer(t *testing.T, cli *client.Client, regImage string, readOnly bool) (cmd []string, files map[string]string) {
+	t.Helper()
+	if isCR(regImage) {
+		cfg := crConfig
+		if readOnly {
+			cfg = crReadOnlyConfig
+		}
+		return []string{"--config", "/" + crConfigPath, "serve"}, map[string]string{crConfigPath: cfg}
+	}
+	if readOnly {
+		return nil, map[string]string{registryConfigPath(t, cli, regImage): readOnlyRegistryConfig}
+	}
+	return nil, nil
 }
 
 // registryConfigPath reports where this registry image expects its config, as a
@@ -306,23 +372,20 @@ func injectFile(t *testing.T, cli *client.Client, id, path, content string) {
 	}
 }
 
-// startRegistryContainerCfg is startRegistryContainer with a replacement
-// registry config and the container id, which a test that stages an outage
-// needs. An empty cfgYAML keeps the image's own config.
+// startRegistryContainerCfg is startRegistryContainer, optionally refusing
+// writes, with the container id, which a test that stages an outage needs.
 //
 // The config file rather than REGISTRY_* environment: distribution env
 // overrides REPLACE the `storage` map instead of merging into it, so setting
 // only the maintenance key leaves the registry with no storage driver and it
 // exits at startup — a registry that is gone, not one that refuses writes.
-func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost string, needFwd bool, cfgYAML string) (addr, id string) {
+func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost string, needFwd bool, readOnly bool) (addr, id string) {
 	t.Helper()
 	ctx := context.Background()
-	regImage := os.Getenv("GANTRY_E2E_REGISTRY")
-	if regImage == "" {
-		regImage = "registry:2"
-	}
+	regImage := registryImage()
+	cmd, files := registryContainer(t, cli, regImage, readOnly)
 	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{Image: regImage, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
+		&container.Config{Image: regImage, Cmd: cmd, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
 		&container.HostConfig{
 			AutoRemove:   true,
 			PortBindings: nat.PortMap{"5000/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "0"}}},
@@ -330,8 +393,8 @@ func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost stri
 	if err != nil {
 		t.Skipf("create registry %q (is the image present?): %v", regImage, err)
 	}
-	if cfgYAML != "" {
-		injectFile(t, cli, resp.ID, registryConfigPath(t, cli, regImage), cfgYAML)
+	for path, content := range files {
+		injectFile(t, cli, resp.ID, path, content)
 	}
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		t.Fatalf("start registry: %v", err)

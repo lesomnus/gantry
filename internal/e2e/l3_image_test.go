@@ -99,12 +99,10 @@ stores:
 func imgRegistry(t *testing.T, cli *client.Client, netName, alias, daemonHost string, needFwd bool) string {
 	t.Helper()
 	ctx := context.Background()
-	regImage := os.Getenv("GANTRY_E2E_REGISTRY")
-	if regImage == "" {
-		regImage = "registry:2"
-	}
+	regImage := registryImage()
+	cmd, files := registryContainer(t, cli, regImage, false)
 	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{Image: regImage, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
+		&container.Config{Image: regImage, Cmd: cmd, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
 		&container.HostConfig{
 			AutoRemove:   true,
 			PortBindings: nat.PortMap{"5000/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "0"}}},
@@ -114,6 +112,9 @@ func imgRegistry(t *testing.T, cli *client.Client, netName, alias, daemonHost st
 		}}, nil, "")
 	if err != nil {
 		t.Skipf("create registry %q (is the image present?): %v", regImage, err)
+	}
+	for path, content := range files {
+		injectFile(t, cli, resp.ID, path, content)
 	}
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		t.Fatalf("start registry: %v", err)
