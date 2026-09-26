@@ -184,18 +184,22 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 	}
 	w.store.Update(job.ID, func(*Job) {
 		var tot int64
+		sized := len(t.Layers) > 0
 		for _, lp := range t.Layers {
 			if lp.State != "exists" {
 				lp.State = "done"
 				lp.Done.Store(lp.Total)
 			}
+			if lp.Total <= 0 {
+				sized = false
+			}
 			tot += lp.Total
 		}
-		if tot > 0 {
+		if sized {
 			// The daemon's own layer totals supersede the upstream estimate —
-			// when it reported any. A sizeless report (the containerd image
-			// store names its layers and counts none) leaves the estimate,
-			// which is then the only number anyone has for what moved.
+			// when it sized every layer it named. A report that sizes only
+			// some of them is a number about those, not about the image; see
+			// engineSink.Layer, where the same rule is written out.
 			t.BytesTotal = tot
 		}
 		t.BytesDone.Store(t.BytesTotal)
