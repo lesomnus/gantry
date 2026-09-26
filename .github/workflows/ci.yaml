@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       # Runs unit tests plus the hermetic L1 E2E suite (internal/e2e, no build
@@ -64,7 +64,7 @@ jobs:
           - "ghcr.io/lesomnus/cr:edge" # lesomnus/cr, configured by the harness
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Pre-pull the registry image
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Use the containerd image store
@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Start containerd
@@ -145,7 +145,7 @@ jobs:
             *.cache-from=type=gha,scope=build
             *.cache-to=type=gha,mode=max,scope=build
       - name: Upload dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist
@@ -174,14 +174,14 @@ jobs:
             platform: linux/arm64
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - uses: docker/setup-buildx-action@v4
       - name: Pre-pull the registry image
         run: docker pull registry:2
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
@@ -225,7 +225,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v4
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
