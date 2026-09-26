@@ -865,15 +865,37 @@ func (w *Copier) routeDecision(ctx context.Context, p *execPlan, req Request) (d
 	// guard — a fill step targeting a proxy would read the whole image into
 	// io.Discard and commit nothing.
 	if rd, isRegistry := cacheDest.(*registryDest); isRegistry && rd.isProxy() {
+		// What a pull-through cache fills on a read is the image; whether it also
+		// answers for the referrers is a property of the product behind it. gantry
+		// used to assume it does not and decline every job that needed them, which
+		// is every engine delivery — so a pull-through cache could never serve a
+		// node at all, however it behaved.
+		//
+		// It asks instead. The question is the one the warm branch below already
+		// asks of a copy cache: does this store answer with everything the
+		// authority has over this digest? A proxy that passes the referrers API
+		// upstream answers the same count and is routed through; one that answers
+		// from what it happens to hold says so, and the job reads the authority,
+		// which certainly has them. An image with no referrers at all is not asked
+		// to prove anything.
 		if p.needReferrers {
-			// What a pull-through cache fills on a read is the image. Whether it
-			// also proxies the referrers API is the upstream product's business, not
-			// something gantry can establish, and there is no fill step here to carry
-			// them instead — so a job whose signatures must travel reads the
-			// authority, which certainly has them.
-			l.Info("not routing: a pull-through cache cannot be relied on for referrers",
-				slog.String("cache", cacheName))
-			return routeDeclined, "referrers_unverifiable", nil
+			ref, err := w.planAttemptRefAt(p, cacheCfg, p.cacheDigest())
+			if err != nil {
+				return routeRejected, "plan", err
+			}
+			dg, ok := ref.(name.Digest)
+			if !ok {
+				// Unanchored: there is no digest to ask either side about, and a
+				// pull-through has nothing else to be asked. Same answer as before.
+				l.Info("not routing: a pull-through cache cannot be asked about referrers without a digest",
+					slog.String("cache", cacheName))
+				return routeDeclined, "referrers_unverifiable", nil
+			}
+			if !w.cacheServesReferrers(ctx, p, cacheCfg, dg) {
+				l.Info("not routing: this pull-through cache does not answer with the authority's referrers",
+					slog.String("cache", cacheName), slog.String("digest", dg.DigestStr()))
+				return routeDeclined, "referrers_incomplete", nil
+			}
 		}
 		l.Debug("routing through a pull-through cache: reading it is what fills it",
 			slog.String("cache", cacheName))
