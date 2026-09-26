@@ -5,9 +5,41 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 	"github.com/lesomnus/gantry/cmd/config"
 )
+
+// attachSignature attaches an artifact typed as a Notary Project signature.
+//
+// The type is carried on the CONFIG media type, the pre-1.1 shape. The
+// in-memory registry derives a referrer descriptor's artifactType from the
+// config alone, and a registry implementing the referrers API reads the
+// manifest's own artifactType first and falls back to the config exactly like
+// this — so both report the type these tests turn on, which is what makes the
+// fixture worth anything.
+func attachSignature(t *testing.T, repo name.Repository, subject v1.Hash, mediaType string, size int64) {
+	t.Helper()
+	sig, err := random.Image(64, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig = mutate.MediaType(sig, types.OCIManifestSchema1)
+	sig = mutate.ConfigMediaType(sig, "application/vnd.cncf.notary.signature")
+	sig = mutate.Subject(sig, v1.Descriptor{
+		MediaType: types.MediaType(mediaType), Digest: subject, Size: size,
+	}).(v1.Image)
+	dg, err := sig.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(repo.Digest(dg.String()), sig); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // proxyCopier is a cloud registry whose cache is a PULL-THROUGH, delivering to
 // an engine — the shape that could not be routed at all until this asked the

@@ -164,27 +164,17 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 	// digest fails the attempt before any bytes move; the engine registers the names
 	// only after its pull succeeded (a name registered over absent content would
 	// send `docker run` back to the registry in the name).
-	//
-	// The one exception is a narrowed route's read of the cache, which holds only
-	// the platform's own manifest while the names carry the index over it. Its
-	// anchor is the index the authority served at admission, and the engine
-	// registers the names over that (down.IndexNamer). Every other attempt reads a
-	// store holding the index itself, so it fetches as above.
 	var anchor *down.AnchorBlob
 	if p.asDigest {
 		dg, ok := at.ref.(name.Digest)
 		if !ok {
 			return fmt.Errorf("digest `as` names require an anchored pull")
 		}
-		if p.narrowAnchor != nil && dg.DigestStr() == p.narrowDigest {
-			anchor = p.narrowAnchor
-		} else {
-			a, err := fetchAnchor(ctx, at.src, dg)
-			if err != nil {
-				return err
-			}
-			anchor = a
+		a, err := fetchAnchor(ctx, at.src, dg)
+		if err != nil {
+			return err
 		}
+		anchor = a
 	}
 
 	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}}

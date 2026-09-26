@@ -166,11 +166,6 @@ func ociPlatform(osType, arch string) (string, error) {
 
 func (e *dockerEngine) Close() error { return e.cli.Close() }
 
-// NamesOverIndex: a thin archive loaded over a platform pull registers the index
-// the archive carries (see loadDigestNames), on the containerd image store the
-// digest names already require.
-func (e *dockerEngine) NamesOverIndex() bool { return true }
-
 func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, platform string, as []string, anchor *AnchorBlob, sink Sink) ([]string, error) {
 	// A digest-named `as` reference is registered by forging a RepoDigest over
 	// the pulled content, which only the containerd image store can do. Probe
@@ -186,13 +181,6 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		}
 		if !ok {
 			return nil, fmt.Errorf("%w: engine %q uses the classic (graph-driver) image store, which cannot register digest-named references %v; the containerd image store (driver-type io.containerd.snapshotter.v1) is required for digest `as` names", ErrEngine, e.name, digests)
-		}
-		// Settled before the pull for the same reason: an anchor that does not
-		// describe what is about to be pulled fails identically after it.
-		if anchor != nil {
-			if err := anchor.covers(digest); err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrEngine, err)
-			}
 		}
 	}
 	pull_ref := ref
@@ -256,38 +244,12 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 			_, _ = e.cli.ImageRemove(dctx, pull_ref, image.RemoveOptions{})
 		}
 	}
-	// Digest names cannot be tagged — a RepoDigest is forged by importing a
-	// thin OCI archive (the anchor manifest under the requested names) over the
-	// content the pull just placed, no registry contact. The classic graph
-	// store, which cannot represent this, was already rejected before the pull,
-	// so the daemon here runs the containerd image store.
-	loadDigests := func() error {
-		if err := e.loadDigestNames(ctx, digests, digest, anchor); err != nil {
-			cleanup()
-			return fmt.Errorf("%w: %w", ErrEngine, err)
-		}
-		recorded = append(recorded, digests...)
-		return nil
-	}
-	// Over an index the digest names are a DIFFERENT image from the one the pull
-	// created: that one is the platform's own manifest, and the names are the
-	// index over it. So they are loaded first and every tag is taken from them —
-	// a tag taken from the pull would name the platform manifest, whose digest no
-	// index signature covers — and the pull's own record is dropped below.
-	overIndex := len(digests) > 0 && anchor.overIndex(digest)
-	tagFrom := pull_ref
-	if overIndex {
-		if err := loadDigests(); err != nil {
-			return nil, err
-		}
-		tagFrom = digests[0]
-	}
 	for _, n := range tags {
 		if !anchored && n == ref {
 			recorded = append(recorded, n) // the pull itself created this tag
 			continue
 		}
-		if err := e.cli.ImageTag(ctx, tagFrom, n); err != nil {
+		if err := e.cli.ImageTag(ctx, pull_ref, n); err != nil {
 			cleanup()
 			// Past this point the content is already on the daemon: what failed
 			// is naming it, which no other source can fix.
@@ -295,21 +257,17 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		}
 		recorded = append(recorded, n)
 	}
-	if len(digests) > 0 && !overIndex {
-		if err := loadDigests(); err != nil {
-			return nil, err
+	if len(digests) > 0 {
+		// Digest names cannot be tagged — a RepoDigest is forged by importing a
+		// thin OCI archive (the anchor manifest under the requested names) over
+		// the content the pull just placed, no registry contact. The classic
+		// graph store, which cannot represent this, was already rejected before
+		// the pull, so the daemon here runs the containerd image store.
+		if err := e.loadDigestNames(ctx, digests, digest, anchor); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("%w: %w", ErrEngine, err)
 		}
-	}
-	if overIndex && anchored && !slices.Contains(names, pull_ref) && e.pullCount(pull_ref) == 1 {
-		// The pull left a record named after the platform manifest. Nothing asked
-		// for it, the retention index never hears of it, and enforcement would
-		// judge a container started from it by a digest no index signature covers.
-		// The content stays: the index record just loaded references it. Skip when
-		// another pull of the same reference is in flight and about to name it. (An
-		// unanchored pull's record is ref itself, which the rename below drops.)
-		if _, err := e.cli.ImageRemove(ctx, pull_ref, image.RemoveOptions{}); err != nil && !client.IsErrNotFound(err) {
-			return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "drop the platform record %q", pull_ref))
-		}
+		recorded = append(recorded, digests...)
 	}
 	if !anchored && len(recorded) > 0 && !slices.Contains(names, ref) {
 		// The caller renamed the image away from the pull-created name; drop it.
@@ -342,8 +300,8 @@ func (e *dockerEngine) loadDigestNames(ctx context.Context, names []string, dige
 	if anchor == nil || len(anchor.Bytes) == 0 {
 		return fmt.Errorf("digest-named references need the anchor manifest bytes")
 	}
-	if err := anchor.covers(digest); err != nil {
-		return err
+	if anchor.Digest != digest {
+		return fmt.Errorf("anchor manifest is %s, pull anchored to %s", anchor.Digest, digest)
 	}
 	for _, n := range names {
 		r, err := name.ParseReference(n)

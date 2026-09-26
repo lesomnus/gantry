@@ -268,28 +268,6 @@ func digestByRef(t *testing.T, host, repo, digest string) (v1.Hash, error) {
 }
 
 // digestOf returns the manifest digest of host/repo:tag.
-// platformChild is the digest the index at host/repo:tag names for one platform
-// — what a narrowed fill publishes, since it is the manifest the ORIGIN holds
-// for that platform rather than anything gantry built.
-func platformChild(t *testing.T, host, repo, tag, platform string) v1.Hash {
-	t.Helper()
-	idx, err := remote.Index(insecureTag(t, host, repo, tag))
-	if err != nil {
-		t.Fatalf("read index: %v", err)
-	}
-	im, err := idx.IndexManifest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, m := range im.Manifests {
-		if m.Platform != nil && m.Platform.String() == platform {
-			return m.Digest
-		}
-	}
-	t.Fatalf("index %s/%s:%s has no %s child", host, repo, tag, platform)
-	return v1.Hash{}
-}
-
 func digestOf(t *testing.T, host, repo, tag string) (v1.Hash, error) {
 	t.Helper()
 	d, err := remote.Head(insecureTag(t, host, repo, tag))

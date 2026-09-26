@@ -42,12 +42,7 @@ type fakePullEngine struct {
 	// another serves the same image. Consulted after pullErr.
 	failFor  func(ref string) error
 	reported []down.LayerUpdate
-	// indexNames makes the fake a down.IndexNamer, the capability a narrowed
-	// route needs to keep a digest `as` name.
-	indexNames bool
 }
-
-func (f *fakePullEngine) NamesOverIndex() bool { return f.indexNames }
 
 // pulls returns the attempts made so far.
 func (f *fakePullEngine) pulls() []pullCall {
