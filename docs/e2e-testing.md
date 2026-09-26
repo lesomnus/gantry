@@ -28,7 +28,7 @@ the stores and the engine:
 | Tier | Backing | Runs | Command |
 |---|---|---|---|
 | **L1 hermetic** | in-memory registries + a fake engine + an injected clock | **every** `go test -race ./...` (CI + local), seconds, no infra | `make e2e` |
-| **L2 real daemon** | real `registry:2`/`registry:3` containers + the real docker daemon | opt-in; self-skips without docker | `make e2e-daemon` |
+| **L2 real daemon** | real `registry:2`/`registry:3`/`lesomnus/cr` containers + the real docker daemon | opt-in; self-skips without docker | `make e2e-daemon` |
 | **L3 black-box** | the shipped `gantry serve` binary + a real registry | opt-in | `make e2e-blackbox` |
 | **L3 image** | the shipped **container image** (`FROM scratch`, non-root) on a user network + real registries | CI `build` job; opt-in local via `GANTRY_E2E_IMAGE` | `make e2e-image` |
 | **L3-infra** | an Ansible-provisioned matrix (plain + TLS + zot + proxy) on a self-hosted host | manual / on-demand | `make e2e-infra` |
@@ -124,7 +124,8 @@ both are green, and only then tags anything:
 
 - **`test`** — `go test -race ./...`: unit tests **and the L1 suite** (no infra).
 - **`e2e-docker`** — the **L2** tests against the runner's docker daemon, matrixed
-  over `registry:2` (referrer tag-fallback) and `registry:3` (native referrers).
+  over `registry:2` (referrer tag-fallback), `registry:3` (native referrers) and
+  `ghcr.io/lesomnus/cr:edge`.
 - **`e2e-containerd`** — provisions containerd and runs the `internal/down`
   integration tests (digest `as`, anchored pull).
 - **`dist`** (needs nothing — runs immediately, in parallel with the tests) — bakes
@@ -177,6 +178,7 @@ covers both branches:
 |---|---|---|---|
 | `registry:2` (Distribution v2) | tag-fallback (404s native) | per-PR CI | copy, proxy, the **fallback** referrer path |
 | `registry:3` (Distribution v3) | native | per-PR CI | native referrers in the codebase users deploy |
+| `ghcr.io/lesomnus/cr:edge` | native | per-PR CI | a registry that is not distribution; token auth on the read-only cache |
 | `zot` | native (OCI 1.1.1) | infra (compose) | the **native** path + signature travel, a 2nd impl |
 | Harbor, ECR/ACR/GCR | native (edges vary) | future / opt-in | robot-auth / cloud auth, production-grade |
 
