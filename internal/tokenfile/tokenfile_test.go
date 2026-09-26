@@ -67,6 +67,79 @@ func TestReReadWhenChanged(t *testing.T) {
 	}
 }
 
+// The rotation a timestamp cannot show, and the one the writer performs: the
+// new token is the same length as the old and the two writes land inside one
+// tick of the filesystem's clock.
+//
+// The helper above spreads its timestamps by the length of the token, which is
+// what kept this out of the tests until bosun's copy of this idea flaked on it
+// (Holiday-Robot/bosun#19). Here the clock is pinned instead, which is what a
+// coarse filesystem does on its own, and a rename is still a different file.
+func TestARotationWithinOneTimestampIsSeen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	write(t, path, "first")
+
+	s := New(path)
+	if got := token(t, s); got != "first" {
+		t.Fatalf("token = %q, want first", got)
+	}
+	was := stat(t, path)
+
+	write(t, path, "secnd") // same length, and then the same instant
+	if err := os.Chtimes(path, was.ModTime(), was.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := token(t, s); got != "secnd" {
+		t.Errorf("token = %q, want secnd: a rename puts a different file at the path, whatever its timestamp says", got)
+	}
+}
+
+// And what is not seen, on purpose: the file rewritten IN PLACE, same length,
+// inside one tick. Nothing about it moved. That is the contract saying
+// `rename` -- how a credential is published -- rather than a reason to read
+// the file on every request.
+func TestAnInPlaceRewriteIsNotSeen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	write(t, path, "first")
+
+	s := New(path)
+	if got := token(t, s); got != "first" {
+		t.Fatalf("token = %q, want first", got)
+	}
+	was := stat(t, path)
+
+	f, err := os.OpenFile(path, os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("secnd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, was.ModTime(), was.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := token(t, s); got != "first" {
+		t.Errorf("token = %q, want the held first: an in-place rewrite of the same length is outside the contract", got)
+	}
+}
+
+// stat is the file as it is now.
+func stat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+
+	return fi
+}
+
 // RegistryToken and not Password, because ggcr sends that field as
 // `Authorization: Bearer` whichever scheme the registry challenged with — which
 // is what a registry with no bearer-token endpoint of its own still wants.

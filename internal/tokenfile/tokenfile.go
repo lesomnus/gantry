@@ -13,7 +13,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 )
@@ -45,19 +44,33 @@ import (
 //
 // # What is compared
 //
-// Size and modification time. A writer that replaces the file atomically
-// (write-and-rename, which is how a token should be published) changes both.
-// One that rewrites in place with the same length inside a filesystem
-// timestamp tick would not be seen, which is a reason to say `rename` in the
-// documentation rather than a reason to hash the contents on every request.
+// The FILE, and then its size and modification time. Identity first because it
+// is the one that cannot be fooled: write-and-rename is how a token should be
+// published -- it is what makes the replacement atomic for a reader -- and a
+// rename always puts a different file at the path. Size and time are a second
+// look, for a writer that appends to the one already there.
+//
+// Time alone is not enough, and the gap is not hypothetical. Every bearer a
+// given issuer mints is the same length, filesystems record modification times
+// coarsely, and two writes inside one tick then carry the same one: the
+// rotation is invisible, not for a moment but until something else about the
+// file moves. bosun holds a second implementation of this idea and its test for
+// exactly that case failed about one run in three
+// (Holiday-Robot/bosun#19); the two now compare the same things.
+//
+// A writer that rewrites IN PLACE with the same length inside one tick is still
+// not seen. That is the contract saying `rename` rather than a reason to hash
+// the contents on every request, and TestAnInPlaceRewriteIsNotSeen holds it
+// there so it stays a decision.
 type Source struct {
 	path string
 
 	mu    sync.Mutex
 	token string
-	size  int64
-	mod   time.Time
-	read  bool
+	// seen is the file the held token was read from, kept whole so os.SameFile
+	// can be asked whether the path still names it.
+	seen os.FileInfo
+	read bool
 }
 
 var _ authn.Authenticator = (*Source)(nil)
@@ -115,7 +128,13 @@ func (t *Source) stale() (bool, error) {
 		return false, fmt.Errorf("token file %s: %w", t.path, err)
 	}
 
-	return !t.read || fi.Size() != t.size || !fi.ModTime().Equal(t.mod), nil
+	if !t.read {
+		return true, nil
+	}
+
+	return !os.SameFile(t.seen, fi) ||
+		fi.Size() != t.seen.Size() ||
+		!fi.ModTime().Equal(t.seen.ModTime()), nil
 }
 
 // reload reads the file and records what it was when read.
@@ -149,7 +168,7 @@ func (t *Source) reload() error {
 		return fmt.Errorf("token file %s: empty", t.path)
 	}
 
-	t.token, t.size, t.mod, t.read = token, fi.Size(), fi.ModTime(), true
+	t.token, t.seen, t.read = token, fi, true
 
 	return nil
 }
