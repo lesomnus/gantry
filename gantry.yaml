@@ -75,24 +75,9 @@ stores:
   #         for_targets: ["node1a", "node1b"]   # store names this job may deliver to
   #       - store: "site"
   #         for_repos: ["team/**"]              # repository PATH patterns; no host
-  #         all_platforms: true                 # see below; default false
   #       # A route with neither scope is the default and must come last: anything
   #       # after it is unreachable, which the loader rejects.
   # A job no route covers reads its source directly.
-  #
-  # A fill that feeds an ENGINE carries only the platform that engine pulls, and
-  # publishes the source's own manifest for it under a platform-suffixed tag
-  # (app:1-linux-amd64) — the other architectures would cross the billed link for
-  # nobody. `all_platforms: true` fills the cache with the whole image instead:
-  # set it when other architectures will be delivered from this cache later, or
-  # when the origin's own index digest has to resolve there.
-  #
-  # Narrowing also gives way on its own, to the same whole-image fill, when it
-  # cannot be done safely — notably for a target listed in serve.enforce.stores
-  # whose platform manifest carries no signature, since enforcement would then
-  # quarantine the node. A job with a digest `as` name is exempt: the node is
-  # named after the index, so the index signature is the one that counts. See
-  # docs/stores.md#what-the-fill-copies.
 
   # A `meta` store is one name in front of several registries, picked by the
   # repository. It is NOT a cache: the stores behind it hold DIFFERENT content
@@ -214,9 +199,8 @@ worker:
   # does not is usually the point of having one.
   require_authority: false
   # Bounds the registry requests admission makes before a job is created: settling
-  # a tag at its authority, reading the index to find the platform a narrowed
-  # route delivers, and probing a cache for the digest. An unresponsive registry
-  # then delays one submit rather than holding it open indefinitely.
+  # a tag at its authority and probing a cache for the digest. An unresponsive
+  # registry then delays one submit rather than holding it open indefinitely.
   admission_timeout: "10s"
 
 # Server configuration (used by the `serve` subcommand).

@@ -254,10 +254,6 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 			Now:           nowFn,
 		})
 		closers = append(closers, func() error { enf.Stop(); return nil })
-		// Admission has to know which stores these are: a hop that changes WHICH
-		// digest a node ends up recording is only safe where nothing will re-derive
-		// a verdict from it afterwards.
-		wmr.SetEnforcedStores(c.Serve.Enforce.Stores)
 		log.From(ctx).Info("runtime enforcement enabled",
 			slog.Any("stores", c.Serve.Enforce.Stores), slog.String("on_unavailable", c.Serve.Enforce.OnUnavailable))
 	}

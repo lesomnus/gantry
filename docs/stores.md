@@ -409,10 +409,7 @@ The anchor manifest's raw bytes back the digest name. gantry fetches them from
 the store the attempt pulls from — normally the job's **source** (the cache), so
 the origin registry is **never contacted**; the one exception is a
 `fallback_to_origin` attempt, which fetches the anchor from the origin along with
-the content (see [Falling back to the origin](#falling-back-to-the-origin)). A
-routed delivery that [narrowed](#what-the-fill-copies) reads a cache holding only
-the platform's own manifest, so its anchor is the index the authority served at
-admission instead, and the node pulls the child under the index's name.
+the content (see [Falling back to the origin](#falling-back-to-the-origin)).
 Either way the bytes are hashed against the reference's digest (sha256 only)
 rather than trusting the transport, because they are about to be registered on a
 node under that digest's name. The fetch happens **before** the pull, so a source
@@ -557,70 +554,27 @@ not work is not a failure** — it costs one abandoned attempt and the direct co
 runs. That is why there is no switch for "may gantry write to the cache": the
 answer is whether it works.
 
-### What the fill copies
+### The fill copies everything, verbatim
 
-Whatever it copies, the fill publishes a manifest the **source itself published**.
-It may never rebuild an index: a platform-filtered index is a digest that exists
-nowhere upstream, so no probe could ask for it and no signature could cover it.
-That leaves exactly two shapes.
+The fill hop commits the authority's manifest **byte for byte** and copies **every
+platform**, whatever the job asked for. Both are required rather than chosen:
 
-**Delivering to an engine: only that platform.** An engine pulls exactly one
-platform, so the others would cross the billed link for nobody. The fill commits
-the source's own **child manifest** for the delivered platform, and everything
-touching the cache moves to that digest — the probe, the delivery hop, and the
-digest the node records. It lands under a **platform-suffixed tag**
-(`app:1-linux-amd64`), because what it publishes is not the image the plain tag
-names and two engines of different architectures must not overwrite each other's
-copy.
+- A rebuilt (platform-filtered) index is a *different digest for the same tag*, so
+  the cache would never satisfy the probe and would never be read.
+- A verbatim commit references every child manifest, and a registry rejects an
+  index whose children are missing.
 
-**Otherwise: the whole image, verbatim.** The manifest is committed byte for byte
-and every platform travels, whatever the job asked for, so the authority's own
-index digest resolves from the cache. A registry rejects an index whose children
-are missing, so verbatim and all-platforms are one decision, not two.
+So a narrowed routed copy still fills the cache completely. The caller's own hop
+keeps the narrowing; only the shared cache is filled whole, which for a shared
+cache is the desirable trade.
 
-Narrowing is the default for an engine delivery. It gives way — to the wide,
-verbatim fill, which is a route that still works — when:
+A cache that should carry only what engines actually pull is a **`mode: proxy`**
+cache instead: gantry does not fill it, the engine reads through it, and a
+pull-through registry fetches the index and then only the platform manifest and
+layers the engine asks for — under the upstream's own tag and digests.
 
-- the route sets **`all_platforms: true`** (below);
-- the **target is a registry**, whose caller may have asked for every platform;
-- there is **nothing to narrow to**: the source is not an index, or names no
-  single manifest for the platform;
-- the job uses **digest `as` names** and the target engine cannot register them
-  over an index (a `containerd` engine; `docker` can);
-- the target is **policed by `serve.enforce`**, the job names no digest `as`, and
-  the platform manifest carries no Notary Project signature. Enforcement
-  re-derives its verdict later, offline, from the digest the node recorded — and
-  narrowing makes that the child manifest, so a source that signs only the index
-  would have the node quarantined for running exactly what gantry told it to. See
-  [enforcement.md](enforcement.md#multi-arch-images-and-platform-narrowing).
-
-**A digest `as` name survives the narrowing.** The name carries the index the job
-is pinned to, and the cache holds only a child of it, so gantry keeps the index it
-read from the authority at admission — it had to read it to find the child — and
-hands it to the engine as the anchor. The daemon pulls the child from the cache,
-registers every `as` name over the index (tags included), and drops the record the
-pull made under the child's digest. The node ends up in the shape a daemon leaves
-when it pulls a multi-arch image by its index for one platform: the index, one
-child, and only the names the caller asked for. `docker image inspect
-repo@sha256:INDEX` resolves locally, and the digest the node records — and
-enforcement reads — is the index's, so an index signature is enough.
-
-`gantry.job.route` carries a `narrowed` dimension, so a route that quietly stopped
-narrowing — the image stopped being multi-arch, a signature went missing — is
-visible rather than merely expensive.
-
-```yaml
-stores:
-  cloud:
-    kind: "oci"
-    caches:
-      - store: "site"
-        all_platforms: true   # default false
-```
-
-Set `all_platforms` when the cache is meant to hold the whole image: other
-architectures will be delivered from it later, or the origin's own index digest
-has to resolve there. It only ever forces narrowing off; it cannot force it on.
+The fill lands under the **tag**, so both the tag and the authority's digest resolve
+from the cache afterwards — the digest is what the next job probes for.
 
 ### When it does not route
 

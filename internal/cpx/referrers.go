@@ -102,9 +102,7 @@ func orasRepo(c config.StoreConfig, repo name.Repository) (*remote.Repository, e
 // countReferrers reports how many referrer artifacts a store holds for a subject.
 // Used to tell "this store has the image" from "this store has the image AND the
 // signatures over it", which are different answers when a job propagates them.
-// countReferrers counts the artifacts attached to subject, optionally of one
-// artifactType only ("" counts every kind).
-func countReferrers(ctx context.Context, store config.StoreConfig, subject name.Digest, artifactType string) (int, error) {
+func countReferrers(ctx context.Context, store config.StoreConfig, subject name.Digest) (int, error) {
 	repo, err := orasRepo(store, subject.Context())
 	if err != nil {
 		return 0, z.Err(err, "repo")
@@ -114,7 +112,7 @@ func countReferrers(ctx context.Context, store config.StoreConfig, subject name.
 		return 0, z.Err(err, "resolve subject %s", subject.DigestStr())
 	}
 	n := 0
-	if err := repo.Referrers(ctx, desc, artifactType, func(ds []ocispec.Descriptor) error {
+	if err := repo.Referrers(ctx, desc, "", func(ds []ocispec.Descriptor) error {
 		n += len(ds)
 		return nil
 	}); err != nil {

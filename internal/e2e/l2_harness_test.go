@@ -71,7 +71,6 @@ type l2cfg struct {
 	worker        config.WorkerConfig
 	throttle      int                    // bytes/sec ceiling in front of the origin; 0 disables
 	retention     []config.RetentionRule // retention rules for `edge`
-	enforceTrust  string                 // trust store dir; non-empty turns on enforcement for `edge`
 }
 
 // l2WithRemoteCache declares a store as the origin's cache, so copies that read
@@ -109,15 +108,6 @@ func l2WithThrottledOrigin(bytesPerSec int) l2opt {
 func l2WithRetention(rules ...config.RetentionRule) l2opt {
 	return func(c *l2cfg) { c.retention = rules }
 }
-
-// l2WithEnforce turns on runtime enforcement (quarantine) for `edge` against
-// the real daemon, verifying with notation over the Root CAs in trust. Admission
-// verification stays off, so nothing seeds the verdict cache: a container is
-// judged by a live verification of the digest the daemon recorded, which is the
-// decision under test. on_unavailable is grace, so containers the harness does
-// not own — a registry, whose RepoDigest names no configured store — are left
-// alone; only a definite "unsigned" or "untrusted" quarantines.
-func l2WithEnforce(trust string) l2opt { return func(c *l2cfg) { c.enforceTrust = trust } }
 
 type l2harness struct {
 	t             *testing.T
@@ -172,16 +162,6 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 		stores["far"] = config.StoreConfig{Kind: "oci", Host: h.far, Insecure: true, Mode: "copy"}
 	}
 	cfg := &config.Config{Stores: stores, Worker: lc.worker}
-	if lc.enforceTrust != "" {
-		cfg.Serve.Verify = config.VerifyConfig{
-			Mode: config.VerifyOff, Provider: "notation", TrustStore: lc.enforceTrust,
-			Level: "permissive", Timeout: config.Duration(20 * time.Second),
-			Cache: config.VerifyCacheConfig{Path: filepath.Join(t.TempDir(), "verify.db")},
-		}
-		cfg.Serve.Enforce = config.EnforceConfig{
-			Mode: "quarantine", Stores: []string{"edge"}, OnUnavailable: "grace",
-		}
-	}
 	if err := cfg.Evaluate(); err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}

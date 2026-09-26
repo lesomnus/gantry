@@ -588,9 +588,8 @@ type WorkerConfig struct {
 	// unrouted job the source the caller named IS the authority.
 	RequireAuthority bool `yaml:"require_authority"`
 	// AdmissionTimeout bounds the registry requests admission makes before a job is
-	// created — settling a tag at its authority, reading the index to find the
-	// platform a narrowed route delivers, and probing a cache for the digest. It
-	// exists so an unresponsive registry delays one submit rather than holding it
+	// created — settling a tag at its authority and probing a cache for the digest.
+	// It exists so an unresponsive registry delays one submit rather than holding it
 	// open indefinitely; on expiry the job is planned as if the store had not
 	// answered. Default 10s.
 	AdmissionTimeout Duration `yaml:"admission_timeout"`
@@ -624,17 +623,6 @@ type CacheRoute struct {
 	// matched against the repository PATH alone ("team/app") — the host is the
 	// declaring store's own, so including it could never match.
 	ForRepos []string `yaml:"for_repos"`
-	// AllPlatforms fills the cache with every platform of a multi-arch image
-	// rather than only the one the job delivers. Off by default: an engine pulls
-	// exactly one platform, so carrying the rest across the billed link is work
-	// nobody asked for.
-	//
-	// Turn it on when the cache is meant to hold the whole image — other
-	// architectures will be delivered from it later, or the origin's own index
-	// digest must resolve from it. Narrowing is also declined on its own when it
-	// cannot be done safely (an enforced engine target whose platform manifest
-	// carries no signature); this only ever forces it off.
-	AllPlatforms bool `yaml:"all_platforms"`
 }
 
 // matches reports whether this route applies to a job delivering repo to target.
@@ -706,19 +694,12 @@ func (c StoreConfig) RouteFor(repo string) string {
 // everything after it — which the loader rejects rather than let it look like a
 // working config.
 func (c StoreConfig) CacheFor(target, repo string) string {
-	r, _ := c.CacheRouteFor(target, repo)
-	return r.Store
-}
-
-// CacheRouteFor is CacheFor with the route itself, for the settings that live on
-// it rather than on the store it names.
-func (c StoreConfig) CacheRouteFor(target, repo string) (CacheRoute, bool) {
 	for _, r := range c.Caches {
 		if r.matches(target, repo) {
-			return r, true
+			return r.Store
 		}
 	}
-	return CacheRoute{}, false
+	return ""
 }
 
 // RouteAliases expands a retention/enforcement repository pattern across the
