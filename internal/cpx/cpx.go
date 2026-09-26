@@ -573,6 +573,13 @@ type engineSink struct {
 	jobID string
 	t     *Transfer
 	idx   map[string]*LayerProgress
+
+	// est is what the registry said this transfer would be, before the engine
+	// said anything. It is the FLOOR: a report is allowed to replace it and,
+	// when the next message shows the report was partial after all, it has to
+	// be possible to go back. Without somewhere to go back to, one sized layer
+	// arriving before an unsized one wins permanently.
+	est int64
 }
 
 func (s *engineSink) Layer(u down.LayerUpdate) {
@@ -622,6 +629,8 @@ func (s *engineSink) Layer(u down.LayerUpdate) {
 		// way to a total that is about the same layers.
 		if sized {
 			s.t.BytesTotal = tot
+		} else {
+			s.t.BytesTotal = s.est
 		}
 		s.t.BytesDone.Store(done)
 	})
