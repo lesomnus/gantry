@@ -184,15 +184,35 @@ jobs:
   # binaries are byte-for-byte the ones `verify` black-boxed. Runs only after both
   # verify legs pass, so nothing is published until the real artifact is green.
   # `edge` tracks the latest promoted build.
+  #
+  # EVERY run publishes an image; only main moves the release names.
+  #
+  # A pull request here needs something a robot can run, because the question
+  # "does the fleet still work with this?" is not answerable from this
+  # repository. robot-platform's harness takes GANTRY_IMAGE and stands the
+  # fleet's OTA path up against a candidate before anything pins it. Without an
+  # image for a branch that loop was merge, pin, then find out -- which is how
+  # #21, #24 and #25 each went red after they had already landed, and #26 is
+  # the third try at one defect for exactly that reason.
+  #
+  # A branch image is a dead end on purpose: one name, under a prefix no
+  # release uses. `:r<run-id>` alone would not do -- docker-bake.hcl gives
+  # every main build that same form, so a pinned `:r…` would stop telling you
+  # whether the build behind it went through main. `:pr7-r123` cannot be
+  # mistaken for one, and it is also what makes the tags droppable when the
+  # pull request closes (ci-sweep.yaml).
   promote:
     needs: verify
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # A fork's token is read-only, so there is nothing to push with. Its pull
+    # request is still built and verified by every job above this one.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       REPO: ghcr.io/lesomnus/gantry
       TAG: edge
       BUILD_HASH: ${{ github.sha }}
       BUILD_ID: r${{ github.run_id }}
+      RELEASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v4
@@ -209,7 +229,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The release names, straight off docker-bake.hcl: `edge`, the run and
+      # the date.
       - name: Build and push the multi-arch image
+        if: env.RELEASE == 'true'
         uses: docker/bake-action@v7
         with:
           source: .
@@ -217,5 +241,46 @@ jobs:
           set: |
             app.platform=linux/amd64,linux/arm64
             app.output=type=registry
+
+      # `pr<N>` for a pull request, the branch otherwise -- a dispatch on a
+      # topic branch is the same kind of build and wants the same kind of name.
+      # A tag takes no slashes, so a branch's go.
+      - name: Whose build this is
+        id: whose
+        if: env.RELEASE != 'true'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -eu
+          if [ -n "${PR:-}" ]; then
+            whose="pr${PR}"
+          else
+            whose=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9_.-' '-')
+          fi
+          echo "tag=${whose}-${BUILD_ID}" >> "$GITHUB_OUTPUT"
+
+      # One name, replacing the target's list. `--set app.tags=` overwrites it
+      # rather than adding to it, so `edge` and the dated names cannot move
+      # from here -- checked with `bake --print`, not assumed.
+      - name: Build and push an image to ask about
+        if: env.RELEASE != 'true'
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          targets: app
+          set: |
+            app.platform=linux/amd64,linux/arm64
+            app.output=type=registry
+            app.tags=ghcr.io/lesomnus/gantry:${{ steps.whose.outputs.tag }}
+
       - name: Inspect the pushed manifest
-        run: docker buildx imagetools inspect "${REPO}:${TAG}"
+        env:
+          WHOSE: ${{ steps.whose.outputs.tag }}
+        run: |
+          if [ "${RELEASE}" = "true" ]; then
+            docker buildx imagetools inspect "${REPO}:${TAG}"
+          else
+            docker buildx imagetools inspect "${REPO}:${WHOSE}"
+            echo "::notice::ask the fleet about this one: GANTRY_IMAGE=${REPO}:${WHOSE}"
+          fi

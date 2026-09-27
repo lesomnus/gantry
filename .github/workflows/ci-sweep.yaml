@@ -1,0 +1,34 @@
+name: ci-sweep
+
+# The images a pull request published, dropped when it closes.
+#
+# `ci.yaml` pushes one multi-arch image per run of a branch, so that
+# robot-platform's harness has something to run before anything is pinned (see
+# `promote` there). Every push to the branch publishes another, and nothing
+# else ever deletes them.
+#
+# Only `pr<N>-*` is swept, which is exactly why branch images carry a prefix no
+# release uses: this cannot reach `edge`, a dated name, or a `r<run-id>` that
+# came off main. A dispatch on a topic branch publishes `<branch>-r<run-id>`
+# and is not swept -- there is no event that says it is finished.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  packages: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: gantry
+          package-type: container
+          # `delete-only-pre-release-versions` is about semver and would not
+          # understand these names; the pattern is what scopes this.
+          delete-only-untagged-versions: false
+          ignore-versions: ^(?!pr${{ github.event.pull_request.number }}-).*$
+          num-old-versions-to-delete: 100
