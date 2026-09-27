@@ -95,6 +95,16 @@ func (m *copyMove) run(ctx context.Context, job *Job, t *Transfer) (rerr error) 
 			t.Digest = committed.String()
 		}
 	})
+	// A fill gantry added for a route put this into the registry for an engine,
+	// which makes it the registry's retention's to take back out. A copy the
+	// caller asked for is the caller's, and is not recorded.
+	if st.optional && committed != (v1.Hash{}) && w.tracks(m.d.Name()) {
+		tag := ""
+		if tg, ok := st.ref.(name.Tag); ok {
+			tag = tg.TagStr()
+		}
+		w.delivered(m.d.Name(), st.ref, committed.String(), tag)
+	}
 	log.From(ctx).Info("registry filled",
 		slog.String("store", m.d.Name()), slog.String("source", at.src.Name),
 		slog.String("ref", st.ref.Name()), slog.Int64("bytes", t.BytesDone.Load()))
@@ -186,10 +196,32 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 		anchor = a
 	}
 
+	// Reading a registry store for an engine is a delivery through it, recorded
+	// before the pull too: a registry that is collecting what the engines have
+	// dropped must not take this image out from under the pull reading it.
+	tracked := w.tracks(at.src.Name)
+	if tracked {
+		w.delivered(at.src.Name, at.ref, digest, jobTag(p))
+	}
+
 	sink := &engineSink{w: w, jobID: job.ID, t: t, idx: map[string]*LayerProgress{}, est: t.BytesTotal}
 	recorded, err := m.d.pull(ctx, at.pullRef, digest, st.platform(), p.as, anchor, sink)
 	if err != nil {
 		return err
+	}
+	if tracked {
+		dg := digest
+		if dg == "" {
+			// An unanchored pull named a tag; what it resolved to is one HEAD away,
+			// and only asked of a store that is tracked.
+			if resolved, err := resolveDigest(ctx, at.src, at.ref); err == nil {
+				dg = resolved
+			} else {
+				log.From(ctx).Warn("a delivery through a tracked registry went unrecorded",
+					slog.String("store", at.src.Name), slog.String("ref", at.ref.Name()), slog.String("error", err.Error()))
+			}
+		}
+		w.delivered(at.src.Name, at.ref, dg, jobTag(p))
 	}
 	w.store.Update(job.ID, func(*Job) {
 		var tot int64

@@ -168,6 +168,7 @@ type envCfg struct {
 	typedNils bool
 	auth      *config.AuthConfig
 	stores    map[string]config.StoreConfig
+	regs      []retention.Registry
 }
 
 func withoutGC() envOpt     { return func(c *envCfg) { c.gcOff = true } }
@@ -178,6 +179,12 @@ func withTypedNils() envOpt { return func(c *envCfg) { c.gcOff = true; c.typedNi
 // withStores declares stores beside the default `src` registry, or replaces it.
 func withStores(stores map[string]config.StoreConfig) envOpt {
 	return func(c *envCfg) { c.stores = stores }
+}
+
+// withRegistryRetention gives registry stores (declared with withStores) a
+// retention that follows the engine store `node`.
+func withRegistryRetention(regs ...retention.Registry) envOpt {
+	return func(c *envCfg) { c.regs = regs }
 }
 
 func withAuth(a config.AuthConfig) envOpt {
@@ -217,7 +224,8 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mgr := retention.NewManager([]retention.Store{{Name: "node", Engine: eng, Index: ix}})
+		mgr := retention.NewManager([]retention.Store{{Name: "node", Engine: eng, Index: ix}},
+			retention.WithRegistries(cfg.regs...))
 		t.Cleanup(func() { mgr.Close() })
 		e.ix = ix
 		e.gc = mgr

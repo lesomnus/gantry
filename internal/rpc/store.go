@@ -66,10 +66,29 @@ func (v *storeService) engine(ref *pb.StoreRef) (string, down.Engine, error) {
 	return name, eng, nil
 }
 
-// gcUnit gates the GC RPCs: the store must be an engine store (NotFound
-// otherwise) and retention must be configured (FailedPrecondition otherwise).
-// Order matters and mirrors the HTTP gcReady helper.
+// gcUnit gates the GC RPCs: the store must be an engine store or a registry
+// store (NotFound otherwise) and retention must be configured
+// (FailedPrecondition otherwise). Order matters and mirrors the HTTP gcReady
+// helper.
 func (v *storeService) gcUnit(ref *pb.StoreRef) (string, error) {
+	name, err := storeName(ref)
+	if err != nil {
+		return "", err
+	}
+	if cfg, ok := v.s.stores.Config(name); ok && cfg.IsRegistry() {
+		if v.s.gc == nil || !hasRetention(v.s.gc, name) {
+			return "", status.Errorf(codes.FailedPrecondition, "retention/gc is not enabled (configure stores.%s.retention for this registry store)", name)
+		}
+		return name, nil
+	}
+	return v.engineGCUnit(ref)
+}
+
+// engineGCUnit is gcUnit for the RPCs that read an engine's own retention
+// index — its records, pins, and in-use set — which a registry store has none
+// of: the store must be an engine store (NotFound otherwise) with retention
+// (FailedPrecondition otherwise).
+func (v *storeService) engineGCUnit(ref *pb.StoreRef) (string, error) {
 	name, _, err := v.engine(ref)
 	if err != nil {
 		return "", err
@@ -308,6 +327,12 @@ func (v *storeService) GcStatus(ctx context.Context, ref *pb.StoreRef) (*pb.Stor
 	return b.Build(), nil
 }
 
+// hasRetention reports whether the GC manager runs retention for a store.
+func hasRetention(gc GC, name string) bool {
+	_, ok := gc.Status().Stores[name]
+	return ok
+}
+
 // gcOverride builds the one-shot policy override, mirroring the HTTP
 // handler's validation.
 func gcOverride(o *pb.GcOverride) (*retention.Policy, error) {
@@ -352,6 +377,10 @@ func (v *storeService) gcPlan(ctx context.Context, req *pb.StoreGcRequest) (stri
 	override, err := gcOverride(req.GetOverride())
 	if err != nil {
 		return "", retention.Decision{}, err
+	}
+	if cfg, ok := v.s.stores.Config(name); ok && cfg.IsRegistry() && override != nil {
+		return "", retention.Decision{}, status.Errorf(codes.InvalidArgument,
+			"store %q is a registry store: its retention follows the engines and has no policy to override", name)
 	}
 	dec, err := v.s.gc.Plan(ctx, name, override)
 	if err != nil {

@@ -178,6 +178,8 @@ var gcDeleteReasonToPB = map[string]pb.GcDeleteReason{
 	"age_exceeded":   pb.GcDeleteReason_GC_DELETE_REASON_AGE_EXCEEDED,
 	"max_n_exceeded": pb.GcDeleteReason_GC_DELETE_REASON_MAX_N_EXCEEDED,
 	"untagged":       pb.GcDeleteReason_GC_DELETE_REASON_UNTAGGED,
+
+	"dropped_by_engines": pb.GcDeleteReason_GC_DELETE_REASON_DROPPED_BY_ENGINES,
 }
 
 var gcKeepReasonToPB = map[string]pb.GcKeepReason{
@@ -190,6 +192,10 @@ var gcKeepReasonToPB = map[string]pb.GcKeepReason{
 	"unmanaged":       pb.GcKeepReason_GC_KEEP_REASON_UNMANAGED,
 	"untagged_grace":  pb.GcKeepReason_GC_KEEP_REASON_UNTAGGED_GRACE,
 	"digest_tracked":  pb.GcKeepReason_GC_KEEP_REASON_DIGEST_TRACKED,
+
+	"held_by_engine":     pb.GcKeepReason_GC_KEEP_REASON_HELD_BY_ENGINE,
+	"recently_delivered": pb.GcKeepReason_GC_KEEP_REASON_RECENTLY_DELIVERED,
+	"engine_unmanaged":   pb.GcKeepReason_GC_KEEP_REASON_ENGINE_UNMANAGED,
 }
 
 // --- converters ------------------------------------------------------------

@@ -71,6 +71,7 @@ type l2cfg struct {
 	worker        config.WorkerConfig
 	throttle      int                    // bytes/sec ceiling in front of the origin; 0 disables
 	retention     []config.RetentionRule // retention rules for `edge`
+	cacheRetain   bool                   // the cache follows the engines' retention
 }
 
 // l2WithRemoteCache declares a store as the origin's cache, so copies that read
@@ -100,6 +101,11 @@ func l2WithWorker(w config.WorkerConfig) l2opt { return func(c *l2cfg) { c.worke
 func l2WithThrottledOrigin(bytesPerSec int) l2opt {
 	return func(c *l2cfg) { c.throttle = bytesPerSec }
 }
+
+// l2WithCacheRetention gives the cache registry a retention that follows the
+// engines, with no grace and no debounce, so what the engine drops leaves the
+// cache on the next pass rather than an hour later.
+func l2WithCacheRetention() l2opt { return func(c *l2cfg) { c.cacheRetain = true } }
 
 // l2WithRetention turns on the retention inventory for `edge` with these rules,
 // so what the daemon holds after a job can be asked about by repository. A rule
@@ -152,9 +158,18 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 			Rules: rules,
 		}
 	}
+	cache := config.StoreConfig{Kind: "oci", Host: h.cache, Insecure: true, Mode: "copy"}
+	if lc.cacheRetain {
+		// Nanoseconds, because zero is "use the default".
+		cache.Retention = &config.StoreRetention{
+			Path:        filepath.Join(t.TempDir(), "cache.db"),
+			MinInterval: config.Duration(time.Nanosecond),
+			Grace:       config.Duration(time.Nanosecond),
+		}
+	}
 	stores := map[string]config.StoreConfig{
 		"remote": {Kind: "oci", Host: h.remote, Insecure: true, Cache: lc.remoteCache, Caches: lc.routes},
-		"cache":  {Kind: "oci", Host: h.cache, Insecure: true, Mode: "copy"},
+		"cache":  cache,
 		"edge":   edge,
 	}
 	if lc.farStore {

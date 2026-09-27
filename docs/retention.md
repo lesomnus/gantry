@@ -5,8 +5,10 @@ time and deleting images a policy no longer wants. Retention is configured **per
 engine store** under `stores.<name>.retention` — there is no global policy — and
 runs an adaptive, event-driven scheduler that applies a per-repo rule cascade,
 honors exact and pattern pins, and (on docker) reaps images that have lost every
-tag. This doc covers the data model, the policy evaluation order, the scheduler,
-the full configuration reference, and the RPCs that inspect and drive GC.
+tag. A **registry store** (a cache) can carry retention too, with no policy of its
+own: it [follows the engines](#registry-stores-follow-the-engines). This doc
+covers the data model, the policy evaluation order, the scheduler, the full
+configuration reference, and the RPCs that inspect and drive GC.
 
 ## Overview & data model
 
@@ -256,10 +258,71 @@ reap (a digest-`as` job finishing between plan and apply names content only thro
 a `RepoDigest` plus an index record, invisible to the daemon's tag re-check). A
 `DELETE` of the reap clock between plan and apply also cancels it.
 
+## Registry stores follow the engines
+
+A cache registry that nodes pull through holds every release that was ever
+delivered through it, and nothing on the registry itself knows which of them a
+node could still need. gantry does: its engine stores' retention already decides
+what to keep — the last `keep_n`, what is pinned, what a container runs. So a
+registry store's retention has **no rules**. It keeps what gantry delivered
+through it while **any** engine store's retention still holds it, and deletes it
+once **every** one has dropped it.
+
+```yaml
+stores:
+  local:
+    kind: oci
+    mode: proxy
+    retention:
+      path: /var/lib/gantry/local.db
+      grace: 1h        # also: how long a delivery is kept before an engine must hold it
+```
+
+- **What it can delete** is only what gantry delivered through the registry: an
+  engine pull that read from it, and a fill of it gantry added for a
+  [route](stores.md). The registry cannot be asked what it holds (a digest pin has
+  no tag, so no tag list shows it), so gantry records these deliveries by
+  `repo@digest` in the retention file. A copy the caller asked for into the
+  registry, and anything that reached it without gantry, is never deleted.
+- **"Held" is read off the engines' retention indexes, not off the daemons.** A
+  record leaves an engine's index only when gantry's GC — or an operator's
+  `Remove` / `Erase` — drops it, so an image a node lost some other way (a prune, a
+  re-image) is still held, and the registry keeps the copy that node is about to
+  need. An engine record holds a delivery by **digest** anywhere, and by **tag**
+  only under a name the registry is pulled by (its `host`, its `downstream_host`,
+  or an engine's `pull_host`): the same path and tag on another registry is another
+  image. A tag belongs to one delivery at a time — delivering it again under a new
+  digest takes it off the old one.
+- **Every declared engine store must have retention.** One without keeps no record
+  of what it dropped, so it can never say it no longer holds something; while one
+  is declared, every delivery is kept (`engine_unmanaged`). A registry retention
+  with no engine store declared at all is rejected at config load.
+- **`grace`** holds off deletion after startup, as on an engine store, and also
+  keeps each delivery for that long after gantry last delivered it
+  (`recently_delivered`): a route fill lands before the node's pull does, and an
+  engine pull is recorded as it starts, so what is being delivered is never taken
+  out from under the delivery.
+- **When** an engine's GC — or a manual `Remove` — drops something, every registry
+  store's scheduler is woken (debounced by `min_interval`), since that may have
+  been the last hold. Otherwise it runs every `interval`, earlier when a delivery
+  leaves its grace.
+- **What a delete frees** is the registry's business. gantry deletes the manifest
+  (for a multi-platform image, the index); the child manifests and blobs it
+  referenced are the registry's own garbage collection's to reclaim.
+- A registry that **refuses** deletes — distribution without
+  `storage.delete.enabled` — is reported in the pass's `errors`, and the delivery
+  stays recorded for the next pass. The credential gantry uses needs the
+  registry's `delete` permission.
+
+The plan's reasons: `dropped_by_engines` (delete), and `held_by_engine`,
+`recently_delivered`, `grace`, `engine_unmanaged` (keep).
+
 ## Per-store configuration reference
 
-Configured under `stores.<name>.retention` (engine stores only — a `retention`
-block on an `oci` store is rejected). See [`../gantry.yaml`](../gantry.yaml) for the
+Configured under `stores.<name>.retention`. On a registry store only `path`,
+`interval`, `min_interval` and `grace` are accepted — `rules`, `heartbeat` and
+`untagged_after` are an engine store's and are rejected
+([above](#registry-stores-follow-the-engines)). See [`../gantry.yaml`](../gantry.yaml) for the
 full annotated example.
 
 | Key | Type | Default | Meaning |
@@ -330,8 +393,10 @@ Retention state is inspected and driven over the gRPC API; see
   every other override field. An override's `untagged_after` cannot **enable** a
   reaper the config turned off with `"0s"` (that "0s" means this store must never
   reap), and cannot request reaping on a store without the capability. The GC RPCs
-  require an engine store with `retention` configured — otherwise `NotFound`
-  (non-engine/unknown) or `FailedPrecondition` (retention off). `StoreService.Pull`
+  require an engine or registry store with `retention` configured — otherwise
+  `NotFound` (unknown, or a `meta` store) or `FailedPrecondition` (retention off).
+  On a registry store an override is `InvalidArgument`: its retention follows the
+  engines and has no policy to override. `StoreService.Pull`
   and `Remove` drive one daemon and keep the index in sync (a pull stamps the
   distribute signal; a remove drops the record).
 - **`ImageService`** — the retention inventory. `Get` / `List` / `Erase` read the

@@ -15,6 +15,9 @@ enum GcDeleteReason {
   GC_DELETE_REASON_AGE_EXCEEDED = 1;
   GC_DELETE_REASON_MAX_N_EXCEEDED = 2;
   GC_DELETE_REASON_UNTAGGED = 3;
+  // A registry store's delivery that every engine store's retention has
+  // dropped.
+  GC_DELETE_REASON_DROPPED_BY_ENGINES = 4;
 }
 
 enum GcKeepReason {
@@ -28,6 +31,14 @@ enum GcKeepReason {
   GC_KEEP_REASON_UNMANAGED = 7;
   GC_KEEP_REASON_UNTAGGED_GRACE = 8;
   GC_KEEP_REASON_DIGEST_TRACKED = 9;
+  // A registry store's delivery an engine store's retention still holds.
+  GC_KEEP_REASON_HELD_BY_ENGINE = 10;
+  // A registry store's delivery made within the grace, which an engine may not
+  // have recorded yet.
+  GC_KEEP_REASON_RECENTLY_DELIVERED = 11;
+  // A registry store's delivery kept because a declared engine store has no
+  // retention, and so cannot say what it dropped.
+  GC_KEEP_REASON_ENGINE_UNMANAGED = 12;
 }
 
 // Settings of a store's adaptive GC scheduler.

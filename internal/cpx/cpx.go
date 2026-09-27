@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -134,6 +135,7 @@ type Copier struct {
 	srcOpts  []name.Option // parse options for the source ref (tests inject name.Insecure)
 	metrics  *metrics
 	pullHook func(engine, ref string)        // notified after a successful engine-destination pull (retention)
+	dlvHook  DeliveryHook                    // notified of deliveries through a registry store (registry retention)
 	backoff  func(attempt int) time.Duration // wait before re-attempting a blob (nil = the default below)
 	verifier verify.Verifier                 // source-signature verification (nil = disabled)
 	rec      Recorder                        // audit log (nil = disabled)
@@ -174,6 +176,45 @@ func NewCopier(stores *store.Set, jobStore Store, wc config.WorkerConfig) *Copie
 // SetPullHook registers a callback invoked (engine name, ref) after a job's
 // engine destination completes its pull — used to stamp the retention index.
 func (w *Copier) SetPullHook(fn func(engine, ref string)) { w.pullHook = fn }
+
+// DeliveryHook is told what gantry delivers through a registry store: what an
+// engine pulled out of it, and what a route fill put into it. It is how a
+// registry store's retention knows what it may later take back out, since a
+// registry cannot be asked what it holds.
+type DeliveryHook interface {
+	// Tracks reports whether deliveries through this store are recorded at all,
+	// so a store nobody tracks costs no extra request.
+	Tracks(store string) bool
+	// Delivered records repo@digest (under tag, when there is one) as delivered
+	// through store. repo is the repository path, without the host.
+	Delivered(store, repo, digest, tag string)
+}
+
+// SetDeliveryHook registers the registry-retention hook. Set before Start.
+func (w *Copier) SetDeliveryHook(h DeliveryHook) { w.dlvHook = h }
+
+// delivered reports a delivery through a registry store. ref is the reference
+// in that store; tag is the job's tag when it named one, which an anchored ref
+// no longer carries.
+func (w *Copier) delivered(store string, ref name.Reference, digest, tag string) {
+	if w.dlvHook == nil || digest == "" {
+		return
+	}
+	w.dlvHook.Delivered(store, ref.Context().RepositoryStr(), digest, tag)
+}
+
+// tracks reports whether deliveries through a store are recorded.
+func (w *Copier) tracks(store string) bool {
+	return w.dlvHook != nil && w.dlvHook.Tracks(store)
+}
+
+// jobTag is the tag a plan's identifier names, or "" for a digest.
+func jobTag(p *execPlan) string {
+	if tag, ok := strings.CutPrefix(p.id, ":"); ok {
+		return tag
+	}
+	return ""
+}
 
 // SetVerifier enables source-signature verification at job admission. Must be
 // set before Start/Submit.

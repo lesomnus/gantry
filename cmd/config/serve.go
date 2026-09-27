@@ -200,11 +200,14 @@ type HealthConfig struct {
 	ReadyStores []string `yaml:"ready_stores"`
 }
 
-// StoreRetention configures image GC for one engine store. It is set per-store
-// (stores.<name>.retention); there is no global retention policy. Each store has
-// its own usage index, scheduler cadence, grace window, and per-repo rules.
+// StoreRetention configures image GC for one store. It is set per-store
+// (stores.<name>.retention); there is no global retention policy. Each engine
+// store has its own usage index, scheduler cadence, grace window, and per-repo
+// rules. A registry store takes only the index path and the scheduler settings:
+// it follows the engine stores rather than keeping a policy of its own.
 type StoreRetention struct {
-	// Path is the bbolt file for this store's last-used / pin index. Required.
+	// Path is the bbolt file for this store's last-used / pin index — on a
+	// registry store, the record of what gantry delivered through it. Required.
 	Path string `yaml:"path"`
 	// Interval is the scheduler's safety/idle cadence — the longest it waits
 	// between GC checks. It wakes earlier when a record is about to age out or a
@@ -213,7 +216,9 @@ type StoreRetention struct {
 	// MinInterval rate-limits GC runs (debounce for event bursts). Default 1m.
 	MinInterval Duration `yaml:"min_interval"`
 	// Grace holds off deletion this long after startup, since the usage index has
-	// no history for the downtime. Default 1h.
+	// no history for the downtime. Default 1h. On a registry store it is also how
+	// long a record is kept after gantry last delivered it, so what was just
+	// filled is not dropped before an engine has recorded it.
 	Grace Duration `yaml:"grace"`
 	// Heartbeat periodically stamps LastUsed=now for images a live container
 	// references, covering containers whose start event the usage watcher missed
@@ -281,14 +286,19 @@ func (c *StoreRetention) HeartbeatInterval() time.Duration {
 }
 
 // evaluateRetention applies defaults and validates the store's retention config.
-// Retention is only supported on engine stores.
+//
+// On an engine store it is a policy: rules over the repositories the engine
+// holds. On a registry store it is not — a registry's retention FOLLOWS the
+// engines: it drops what gantry delivered through it once every engine store's
+// retention has dropped it too. So it takes the index path and the scheduler
+// settings and refuses everything that would be a policy of its own.
 func (s *StoreConfig) evaluateRetention() error {
 	r := s.Retention
 	if r == nil {
 		return nil
 	}
-	if !s.IsEngine() {
-		return z.Err(nil, "retention is only supported on engine stores (docker/containerd), not kind %q", s.Kind)
+	if !s.IsEngine() && !s.IsRegistry() {
+		return z.Err(nil, "retention is only supported on engine and registry stores, not kind %q", s.Kind)
 	}
 	if r.Path == "" {
 		return z.Err(nil, "retention.path is required")
@@ -296,6 +306,17 @@ func (s *StoreConfig) evaluateRetention() error {
 	z.FallbackP((*time.Duration)(&r.Interval), time.Hour)
 	z.FallbackP((*time.Duration)(&r.MinInterval), time.Minute)
 	z.FallbackP((*time.Duration)(&r.Grace), time.Hour)
+	if s.IsRegistry() {
+		switch {
+		case len(r.Rules) > 0:
+			return z.Err(nil, "retention.rules: a registry store has no rules of its own; it drops what every engine store's retention has dropped")
+		case r.Heartbeat != nil:
+			return z.Err(nil, "retention.heartbeat is an engine store's; a registry store has no containers to watch")
+		case r.UntaggedAfter != nil:
+			return z.Err(nil, "retention.untagged_after is only supported on docker stores")
+		}
+		return nil
+	}
 	if r.Heartbeat == nil {
 		d := Duration(5 * time.Minute)
 		r.Heartbeat = &d
