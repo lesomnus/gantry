@@ -72,6 +72,7 @@ type l2cfg struct {
 	throttle      int                    // bytes/sec ceiling in front of the origin; 0 disables
 	retention     []config.RetentionRule // retention rules for `edge`
 	cacheRetain   bool                   // the cache follows the engines' retention
+	proxyCache    bool                   // the cache is a pull-through of the origin, as the fleet's is
 }
 
 // l2WithRemoteCache declares a store as the origin's cache, so copies that read
@@ -107,6 +108,11 @@ func l2WithThrottledOrigin(bytesPerSec int) l2opt {
 // cache on the next pass rather than an hour later.
 func l2WithCacheRetention() l2opt { return func(c *l2cfg) { c.cacheRetain = true } }
 
+// l2WithProxyCache makes the cache registry a pull-through of the origin --
+// the fleet's shape, and the one a delete takes a different path through. cr
+// only; see crProxyConfig.
+func l2WithProxyCache() l2opt { return func(c *l2cfg) { c.proxyCache = true } }
+
 // l2WithRetention turns on the retention inventory for `edge` with these rules,
 // so what the daemon holds after a job can be asked about by repository. A rule
 // pattern may use the placeholders `{remote}` and `{cache}` for the registry
@@ -136,14 +142,23 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 	daemonHost, needFwd := remoteDaemon()
 
 	h := &l2harness{t: t, cli: cli}
-	h.remote, h.remoteID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, false)
+	h.remote, h.remoteID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, false, "")
 	h.originHost = h.remote
 	if lc.throttle > 0 {
 		h.remote = startThrottledProxy(t, h.originHost, lc.throttle)
 	}
-	h.cache, h.cacheID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, lc.readOnlyCache)
+	proxyOf := ""
+	if lc.proxyCache {
+		// The origin itself, never a throttling forwarder in front of it: that
+		// one lives in the test process and the cache container cannot see it.
+		proxyOf = containerAddr(t, cli, h.remoteID)
+	}
+	h.cache, h.cacheID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, lc.readOnlyCache, proxyOf)
 	if lc.readOnlyCache {
 		requireReadOnly(t, h.cache)
+	}
+	if lc.proxyCache {
+		requireProxy(t, h.cache, "lib/probe")
 	}
 
 	edge := config.StoreConfig{Kind: "docker", Address: dockerAddr()}
@@ -159,6 +174,10 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 		}
 	}
 	cache := config.StoreConfig{Kind: "oci", Host: h.cache, Insecure: true, Mode: "copy"}
+	if lc.proxyCache {
+		// Nothing is pushed into a pull-through: reading it is what fills it.
+		cache.Mode = "proxy"
+	}
 	if lc.cacheRetain {
 		// Nanoseconds, because zero is "use the default".
 		cache.Retention = &config.StoreRetention{
@@ -173,7 +192,7 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 		"edge":   edge,
 	}
 	if lc.farStore {
-		h.far, h.farID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, false)
+		h.far, h.farID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, false, "")
 		stores["far"] = config.StoreConfig{Kind: "oci", Host: h.far, Insecure: true, Mode: "copy"}
 	}
 	cfg := &config.Config{Stores: stores, Worker: lc.worker}
@@ -211,7 +230,7 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 // the separate-netns case) forwards the same port from the test process. Returns
 // 127.0.0.1:<port>.
 func startRegistryContainer(t *testing.T, cli *client.Client, daemonHost string, needFwd bool) string {
-	addr, _ := startRegistryContainerCfg(t, cli, daemonHost, needFwd, false)
+	addr, _ := startRegistryContainerCfg(t, cli, daemonHost, needFwd, false, "")
 	return addr
 }
 
@@ -288,12 +307,34 @@ matches:
     grant: [read-anything]
 `
 
+// crProxyConfig is the shape the FLEET's cache has and the other two here do
+// not: `lib/**` is a pull-through of an upstream rather than a repository this
+// registry owns. cr treats a proxy prefix specially -- it refuses writes to it
+// (405 on the upload routes and on a manifest PUT) -- so a delete against one
+// is a different path from a delete against an ordinary repository, and it is
+// the only path a robot's cache ever takes.
+//
+// The upstream is reached by `host.docker.internal`, not `127.0.0.1`: the
+// remote's port is published on the HOST, and inside this container loopback
+// is this container. startRegistryContainerCfg adds the host-gateway mapping
+// when a proxy is asked for.
+const crProxyConfig = crConfig + `  proxies:
+    - prefix: lib
+      remote: lib
+      upstream: http://{upstream}
+      tag_ttl: 5m
+`
+
 // registryContainer is the command and files a registry container of regImage
 // needs, writable or refusing writes. A nil cmd keeps the image's own.
-func registryContainer(t *testing.T, cli *client.Client, regImage string, readOnly bool) (cmd []string, files map[string]string) {
+func registryContainer(t *testing.T, cli *client.Client, regImage string, readOnly bool, proxyOf string) (cmd []string, files map[string]string) {
 	t.Helper()
 	if isCR(regImage) {
 		cmd := []string{"--config", "/" + crConfigPath, "serve"}
+		if proxyOf != "" {
+			cfg := strings.Replace(crProxyConfig, "{upstream}", proxyOf, 1)
+			return cmd, map[string]string{crConfigPath: cfg}
+		}
 		if !readOnly {
 			return cmd, map[string]string{crConfigPath: crConfig}
 		}
@@ -302,6 +343,13 @@ func registryContainer(t *testing.T, cli *client.Client, regImage string, readOn
 			crConfigPath: crReadOnlyConfig,
 			crPolicyPath: crReadOnlyPolicy,
 		}
+	}
+	if proxyOf != "" {
+		// distribution proxies the WHOLE registry (`proxy.remoteurl`), not a
+		// prefix, so there is no way to ask it for the fleet's shape. Skipping
+		// is the honest answer; serving an ordinary registry here would make
+		// the test pass while testing nothing.
+		t.Skipf("%s cannot proxy one prefix; the proxy-cache tests are cr's", regImage)
 	}
 	if readOnly {
 		return nil, map[string]string{registryConfigPath(t, cli, regImage): readOnlyRegistryConfig}
@@ -370,6 +418,26 @@ func requireReadOnly(t *testing.T, addr string) {
 	}
 }
 
+// requireProxy fails the test unless the repository is a pull-through: it
+// refuses a write and is not simply absent.
+//
+// Same reason requireReadOnly exists, and the same lesson. A `proxies:` block
+// that did not take leaves an ORDINARY repository behind, and every test built
+// on it then passes while exercising the path a robot's cache never takes --
+// which is the whole reason this fixture was added.
+func requireProxy(t *testing.T, addr, repo string) {
+	t.Helper()
+	res, err := http.Post("http://"+addr+"/v2/"+repo+"/blobs/uploads/", "", nil)
+	if err != nil {
+		t.Fatalf("probe %s for a proxy prefix: %v", addr, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("starting an upload to %s/%s answered %d, want 405; the proxy config did not take and this is "+
+			"an ordinary repository, so nothing built on it is about a pull-through", addr, repo, res.StatusCode)
+	}
+}
+
 // readOnlyRegistryConfig is the stock config with writes disabled, so a push is
 // refused by a registry that is otherwise perfectly alive and answers every
 // read. The schema is common to distribution 2.x and 3.x; only the path it must
@@ -420,11 +488,16 @@ func injectFile(t *testing.T, cli *client.Client, id, path, content string) {
 // overrides REPLACE the `storage` map instead of merging into it, so setting
 // only the maintenance key leaves the registry with no storage driver and it
 // exits at startup — a registry that is gone, not one that refuses writes.
-func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost string, needFwd bool, readOnly bool) (addr, id string) {
+func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost string, needFwd bool, readOnly bool, proxyOf string) (addr, id string) {
 	t.Helper()
 	ctx := context.Background()
 	regImage := registryImage()
-	cmd, files := registryContainer(t, cli, regImage, readOnly)
+	// A proxy reads its upstream from inside its container, where the
+	// published `127.0.0.1:<port>` the test process uses is this container's
+	// own loopback. Both registries are on the same daemon's bridge, so the
+	// upstream is its container address -- which also holds when the daemon is
+	// somewhere else, unlike anything routed through the host.
+	cmd, files := registryContainer(t, cli, regImage, readOnly, proxyOf)
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{Image: regImage, Cmd: cmd, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
 		&container.HostConfig{
@@ -432,6 +505,13 @@ func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost stri
 			PortBindings: nat.PortMap{"5000/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "0"}}},
 		}, nil, nil, "")
 	if err != nil {
+		if proxyOf != "" {
+			// Not a skip. The skip below is for a missing image; here the
+			// container carries an ExtraHosts mapping and a proxy config, and
+			// a test that quietly does not run is the thing this fixture
+			// exists to prevent.
+			t.Fatalf("create the pull-through registry %q (upstream %s): %v", regImage, proxyOf, err)
+		}
 		t.Skipf("create registry %q (is the image present?): %v", regImage, err)
 	}
 	for path, content := range files {
@@ -454,6 +534,29 @@ func startRegistryContainerCfg(t *testing.T, cli *client.Client, daemonHost stri
 	}
 	waitRegistry(t, addr)
 	return addr, resp.ID
+}
+
+// containerAddr is how one container reaches another on the same daemon: the
+// bridge address and the port inside, not the published one.
+func containerAddr(t *testing.T, cli *client.Client, id string) string {
+	t.Helper()
+	info, err := cli.ContainerInspect(context.Background(), id)
+	if err != nil {
+		t.Fatalf("inspect %s for its container address: %v", id, err)
+	}
+	ip := info.NetworkSettings.IPAddress
+	if ip == "" {
+		for _, n := range info.NetworkSettings.Networks {
+			if n.IPAddress != "" {
+				ip = n.IPAddress
+				break
+			}
+		}
+	}
+	if ip == "" {
+		t.Fatalf("container %s has no address another container could reach it by", id)
+	}
+	return ip + ":5000"
 }
 
 // kill stops a registry container and waits until its published port stops
