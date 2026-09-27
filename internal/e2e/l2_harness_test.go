@@ -242,23 +242,35 @@ registry:
       root: /tmp/data
 `
 
-// crReadOnlyConfig refuses writes the way a cr deployment does, since cr has no
-// read-only mode (its garbage collection never needs one): the guard is on and
-// grants everyone pull and nothing else.
+// crPolicyPath is where cr's POLICY goes, which is not where its config goes.
+// lesomnus/cr#42 moved providers, permissions, matches and tag rules out of
+// `cr.yaml` into a file beside it so they can be reloaded without a restart;
+// `cr.yaml` keeps `auth.policy`, `auth.enabled`, `auth.refresh` and
+// `auth.token`. Named here rather than relying on the default name, so that a
+// default that moves is a startup refusal and not a registry that comes up open.
+const crPolicyPath = "etc/cr/cr.auth.yaml"
+
+// crReadOnlyConfig points cr at the policy below. It refuses writes the way a
+// cr deployment does, since cr has no read-only mode (its garbage collection
+// never needs one).
+const crReadOnlyConfig = crConfig + `auth:
+  policy: cr.auth.yaml
+`
+
+// crReadOnlyPolicy is the guard itself: everyone may read, nobody may write.
 //
 // `**` and not `*`: one glob segment covers `app` and not `lib/app`, and a
 // permission that matches no repository is not a read-only registry, it is one
 // that refuses reads as well -- which the tests built on this would then be
-// about by accident.
-const crReadOnlyConfig = crConfig + `auth:
-  permissions:
-    read-anything:
-      repos: ["**"]
-      actions: [pull, catalog]
-  matches:
-    anyone-may-read:
-      for: anyone
-      grant: [read-anything]
+// about by accident. requireReadOnly is what holds that line.
+const crReadOnlyPolicy = `permissions:
+  read-anything:
+    repos: ["**"]
+    actions: [pull, catalog]
+matches:
+  anyone-may-read:
+    for: anyone
+    grant: [read-anything]
 `
 
 // registryContainer is the command and files a registry container of regImage
@@ -266,11 +278,15 @@ const crReadOnlyConfig = crConfig + `auth:
 func registryContainer(t *testing.T, cli *client.Client, regImage string, readOnly bool) (cmd []string, files map[string]string) {
 	t.Helper()
 	if isCR(regImage) {
-		cfg := crConfig
-		if readOnly {
-			cfg = crReadOnlyConfig
+		cmd := []string{"--config", "/" + crConfigPath, "serve"}
+		if !readOnly {
+			return cmd, map[string]string{crConfigPath: crConfig}
 		}
-		return []string{"--config", "/" + crConfigPath, "serve"}, map[string]string{crConfigPath: cfg}
+		// Two files: the config names the policy, the policy is the guard.
+		return cmd, map[string]string{
+			crConfigPath: crReadOnlyConfig,
+			crPolicyPath: crReadOnlyPolicy,
+		}
 	}
 	if readOnly {
 		return nil, map[string]string{registryConfigPath(t, cli, regImage): readOnlyRegistryConfig}
