@@ -137,7 +137,7 @@ func newL2Harness(t *testing.T, opts ...l2opt) *l2harness {
 	}
 	h.cache, h.cacheID = startRegistryContainerCfg(t, cli, daemonHost, needFwd, lc.readOnlyCache)
 	if lc.readOnlyCache {
-		requireWritesRefused(t, h.cache)
+		requireReadOnly(t, h.cache)
 	}
 
 	edge := config.StoreConfig{Kind: "docker", Address: dockerAddr()}
@@ -245,12 +245,20 @@ registry:
 // crReadOnlyConfig refuses writes the way a cr deployment does, since cr has no
 // read-only mode (its garbage collection never needs one): the guard is on and
 // grants everyone pull and nothing else.
+//
+// `**` and not `*`: one glob segment covers `app` and not `lib/app`, and a
+// permission that matches no repository is not a read-only registry, it is one
+// that refuses reads as well -- which the tests built on this would then be
+// about by accident.
 const crReadOnlyConfig = crConfig + `auth:
-  enabled: true
-  bindings:
-    - subject: anonymous
-      repo: "*"
+  permissions:
+    read-anything:
+      repos: ["**"]
       actions: [pull, catalog]
+  matches:
+    anyone-may-read:
+      for: anyone
+      grant: [read-anything]
 `
 
 // registryContainer is the command and files a registry container of regImage
@@ -292,11 +300,20 @@ func registryConfigPath(t *testing.T, cli *client.Client, regImage string) strin
 	return ""
 }
 
-// requireWritesRefused fails the test unless the registry refuses an upload.
-// Staging a refusal is only worth anything if it took: without this a config
-// that lands in the wrong place, or a schema that moved, turns every test built
-// on it into one that quietly proves nothing.
-func requireWritesRefused(t *testing.T, addr string) {
+// requireReadOnly fails the test unless the registry refuses an upload AND
+// still serves a read. Staging a refusal is only worth anything if it took, and
+// only if it took NARROWLY: a config that lands in the wrong place, or a schema
+// that moved, turns every test built on it into one that quietly proves
+// nothing.
+//
+// The read half is not symmetry. cr's `auth:` was replaced (lesomnus/cr#40) and
+// the config here kept the old `bindings:` shape, which cr accepted and read as
+// "guarded, nothing granted" -- so the cache refused reads too, gantry declined
+// a route it could not read, and
+// TestL2RoutedCopyStillDeliversWhenTheCacheRefusesWrites saw one transfer where
+// it wanted the failed fill and the delivery. Measured against `cr:edge`: the
+// old config answers a manifest GET with 401, the new one with 404.
+func requireReadOnly(t *testing.T, addr string) {
 	t.Helper()
 	res, err := http.Post("http://"+addr+"/v2/probe/readonly/blobs/uploads/", "", nil)
 	if err != nil {
@@ -306,6 +323,19 @@ func requireWritesRefused(t *testing.T, addr string) {
 	if res.StatusCode < 400 {
 		t.Fatalf("the cache registry accepted an upload (HTTP %d); it was meant to be read-only, "+
 			"so nothing built on that refusal would be proving anything", res.StatusCode)
+	}
+
+	// 404 is the answer wanted here: the repository is empty, and being told so
+	// is being allowed to look. 401 or 403 is the registry refusing to answer.
+	get, err := http.Get("http://" + addr + "/v2/probe/readonly/manifests/latest")
+	if err != nil {
+		t.Fatalf("probe %s for readability: %v", addr, err)
+	}
+	defer get.Body.Close()
+	if get.StatusCode == http.StatusUnauthorized || get.StatusCode == http.StatusForbidden {
+		t.Fatalf("the cache registry refused a read too (HTTP %d); it was meant to be read-only "+
+			"and is simply shut, so a test about a failed FILL would be about a cache nobody can read",
+			get.StatusCode)
 	}
 }
 
