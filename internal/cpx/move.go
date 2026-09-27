@@ -184,22 +184,17 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 	}
 	w.store.Update(job.ID, func(*Job) {
 		var tot int64
-		sized := len(t.Layers) > 0
 		for _, lp := range t.Layers {
 			if lp.State != "exists" {
 				lp.State = "done"
 				lp.Done.Store(lp.Total)
 			}
-			if lp.Total <= 0 {
-				sized = false
-			}
 			tot += lp.Total
 		}
-		if sized {
-			// The daemon's own layer totals supersede the upstream estimate —
-			// when it sized every layer it named. A report that sizes only
-			// some of them is a number about those, not about the image; see
-			// engineSink.Layer, where the same rule is written out.
+		// The estimate is the floor here too, and for the same reason: what
+		// the layers add up to is what the poll happened to catch, not what
+		// the pull moved. engineSink.Layer writes the rule out at length.
+		if tot > sink.est {
 			t.BytesTotal = tot
 		} else {
 			t.BytesTotal = sink.est
