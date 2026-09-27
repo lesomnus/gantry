@@ -607,27 +607,32 @@ func (s *engineSink) Layer(u down.LayerUpdate) {
 			lp.Done.Store(u.Done)
 		}
 		var tot, done int64
-		sized := len(s.t.Layers) > 0
 		for _, l := range s.t.Layers {
-			if l.Total <= 0 {
-				sized = false
-			}
 			tot += l.Total
 			done += l.Done.Load()
 		}
-		// Only a report that sized EVERY layer it named supersedes the
-		// estimate. A daemon on the containerd image store names the image's
-		// layers and sizes none of them ("progressDetail":{"hidecounts":true}),
-		// while sizing something small it pulled alongside — an attestation —
-		// so the sum of what it sized is a number about a different thing.
-		// Measured on a fleet node: 2026 bytes reported for a 2.2 MB delivery,
-		// which is worse than the 0/0 this used to report, because it looks
-		// like an answer.
+		// The estimate is a FLOOR. A report may raise it and may never lower
+		// it.
 		//
-		// It holds mid-pull too: a layer is named before it is sized, so the
-		// estimate stands until the daemon has sized all of them and then gives
-		// way to a total that is about the same layers.
-		if sized {
+		// This used to ask whether the report had sized every layer it NAMED,
+		// and take that for a complete report. It is not one: the layers here
+		// are A SAMPLE. down's containerd poll lists the content store's active
+		// ingests every 200ms, so a blob that begins and finishes between two
+		// ticks is never named at all — and a sample of one layer is trivially
+		// "every layer it named", sized, and about a different thing.
+		//
+		// That is how a 2.2 MB delivery read 2026 bytes: the image's layers
+		// came from a cache on the same host and were gone inside one tick,
+		// while the attestation happened to be caught. Being timing, it comes
+		// and goes with how fast the pull is — robot-platform's act 5 read
+		// 2213540 on one run and 2026 on the next, same image, same pins.
+		//
+		// A floor also answers what the two fixes before it were reaching for:
+		// a daemon that sizes nothing sums to zero, one that sizes part of the
+		// image sums to less than it, and one that sizes all of it sums to
+		// slightly more — it counts manifests the registry's figure does not.
+		// Only the last supersedes the estimate.
+		if tot > s.est {
 			s.t.BytesTotal = tot
 		} else {
 			s.t.BytesTotal = s.est

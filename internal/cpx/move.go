@@ -147,12 +147,21 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 	}
 	w.store.Update(job.ID, func(*Job) { t.Digest = digest })
 
-	// Size estimate from the source manifest; the daemon's layer reports replace it
-	// with actual figures as they arrive.
+	// Size estimate from the source manifest, for the platform this attempt
+	// pulls and no other — a multi-arch index must not inflate a floor that is
+	// about one image. The daemon's layer reports raise it from here.
+	//
+	// Without it there is no floor, and a report cannot be checked against
+	// anything: a poll that caught one blob of a fast pull looks exactly like a
+	// complete report of a small image (engineSink.Layer). The number still
+	// goes out, because it is the only one there is and a progress bar that
+	// ends at the wrong total still moves — but the condition that makes it
+	// untrustworthy is said out loud rather than left at Debug, since the
+	// symptom of it is a delivery that reports a plausible wrong size.
 	if plan, err := upstreamPlan(ctx, at.src, at.ref, []string{st.platform()}); err == nil {
 		w.store.Update(job.ID, func(*Job) { t.BytesTotal = plan.Total })
 	} else {
-		log.From(ctx).Debug("pull size estimate unavailable",
+		log.From(ctx).Warn("no size estimate for this pull; the daemon's own report stands unchecked",
 			slog.String("ref", at.ref.Name()), slog.String("error", err.Error()))
 	}
 
@@ -184,22 +193,17 @@ func (m *pullMove) run(ctx context.Context, job *Job, t *Transfer) error {
 	}
 	w.store.Update(job.ID, func(*Job) {
 		var tot int64
-		sized := len(t.Layers) > 0
 		for _, lp := range t.Layers {
 			if lp.State != "exists" {
 				lp.State = "done"
 				lp.Done.Store(lp.Total)
 			}
-			if lp.Total <= 0 {
-				sized = false
-			}
 			tot += lp.Total
 		}
-		if sized {
-			// The daemon's own layer totals supersede the upstream estimate —
-			// when it sized every layer it named. A report that sizes only
-			// some of them is a number about those, not about the image; see
-			// engineSink.Layer, where the same rule is written out.
+		// The estimate is the floor here too, and for the same reason: what
+		// the layers add up to is what the poll happened to catch, not what
+		// the pull moved. engineSink.Layer writes the rule out at length.
+		if tot > sink.est {
 			t.BytesTotal = tot
 		} else {
 			t.BytesTotal = sink.est

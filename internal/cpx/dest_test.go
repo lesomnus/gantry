@@ -291,11 +291,17 @@ func TestJobToEngineVerifiedDigestAnchor(t *testing.T) {
 	}
 }
 
-// Daemon layer reports refine the upstream estimate (hybrid progress).
+// Daemon layer reports refine the upstream estimate (hybrid progress) — UPWARD.
+//
+// That is the only direction a report can be trusted in. A complete one is
+// bigger than the registry's figure, which is a sum of layer sizes and counts
+// no manifests. A report SMALLER than the estimate cannot be told apart from
+// one that is merely incomplete, and down's poll makes incomplete reports out
+// of fast pulls; engineSink.Layer says how.
 func TestJobToEngineDaemonProgressRefinesEstimate(t *testing.T) {
 	eng := &fakePullEngine{name: "node", platform: "linux/amd64", reported: []down.LayerUpdate{
-		{Digest: "l1", Total: 100, Done: 100, State: "done"},
-		{Digest: "l2", Total: 400, Done: 400, State: "done"},
+		{Digest: "l1", Total: 100_000, Done: 100_000, State: "done"},
+		{Digest: "l2", Total: 400_000, Done: 400_000, State: "done"},
 	}}
 	w, js, up := engineCopier(t, eng)
 	pushImage(t, up+"/team/app:1", 1)
@@ -310,14 +316,43 @@ func TestJobToEngineDaemonProgressRefinesEstimate(t *testing.T) {
 	}
 	done := waitTerminal(t, js, snap.ID)
 	tr := done.Transfers[0]
-	if tr.BytesTotal != 500 {
-		t.Errorf("total = %d, want the daemon-reported 500 to supersede the estimate", tr.BytesTotal)
+	if tr.BytesTotal != 500_000 {
+		t.Errorf("total = %d, want the daemon-reported 500000 to supersede the estimate", tr.BytesTotal)
 	}
-	if got := tr.BytesDone; got != 500 {
-		t.Errorf("done = %d, want 500", got)
+	if got := tr.BytesDone; got != 500_000 {
+		t.Errorf("done = %d, want 500000", got)
 	}
 	if len(tr.Layers) != 2 {
 		t.Errorf("layers = %d, want the daemon-reported 2", len(tr.Layers))
+	}
+}
+
+// A report smaller than the estimate does not lower it. This is the shape the
+// fleet hit: the poll caught one blob of a pull that was over in less than a
+// tick, and the sum of what it caught is not a smaller image, it is less of
+// the same one.
+func TestJobToEngineDoesNotLetASmallReportShrinkTheImage(t *testing.T) {
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64", reported: []down.LayerUpdate{
+		{Digest: "the-one-blob-the-poll-caught", Total: 26, Done: 26, State: "done"},
+	}}
+	w, js, up := engineCopier(t, eng)
+	pushImage(t, up+"/team/app:1", 4)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: "team/app:1", Source: "up", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	tr := done.Transfers[0]
+	if tr.BytesTotal <= 26 {
+		t.Errorf("total = %d, which is what the poll happened to catch, not the image", tr.BytesTotal)
+	}
+	if got := tr.BytesDone; got != tr.BytesTotal {
+		t.Errorf("done = %d, want the finished transfer to read full at %d", got, tr.BytesTotal)
 	}
 }
 
@@ -362,7 +397,9 @@ func TestJobToEngineKeepsTheEstimateWhenTheDaemonSizesOnlySome(t *testing.T) {
 		{Digest: "something-alongside", Total: 2026, Done: 2026, State: "done"},
 	}}
 	w, js, up := engineCopier(t, eng)
-	pushImage(t, up+"/team/app:1", 1)
+	// Eight layers: the thing alongside has to be SMALLER than the image,
+	// the way an attestation is. `random.Image` makes 512-byte layers.
+	pushImage(t, up+"/team/app:1", 8)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	w.Start(ctx)
@@ -394,7 +431,9 @@ func TestJobToEngineTakesTheEstimateBackWhenTheReportTurnsPartial(t *testing.T) 
 		{Digest: "the-image-layer", State: "done"},
 	}}
 	w, js, up := engineCopier(t, eng)
-	pushImage(t, up+"/team/app:1", 1)
+	// Eight layers: the thing alongside has to be SMALLER than the image,
+	// the way an attestation is. `random.Image` makes 512-byte layers.
+	pushImage(t, up+"/team/app:1", 8)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	w.Start(ctx)
@@ -433,5 +472,37 @@ func TestJobToEngineDedup(t *testing.T) {
 	}
 	if second.ID == first.ID {
 		t.Errorf("coalesced submit should get its own handle, got %s twice", second.ID)
+	}
+}
+
+// With no estimate there is no floor, and the daemon's report stands
+// unchecked. That is a decision rather than an oversight: when the source
+// manifest cannot be read there is nothing to compare against, a poll that
+// caught one blob is indistinguishable from a complete report of a small
+// image, and the alternative — reporting nothing — is the 0/0 that #21 was
+// about. The number goes out and the missing estimate is logged at Warn, so
+// the one case where it can be a plausible lie is visible.
+func TestJobToEngineHasNoFloorWhenTheSourceCannotBeRead(t *testing.T) {
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64", reported: []down.LayerUpdate{
+		{Digest: "the-one-blob-the-poll-caught", Total: 2026, Done: 2026, State: "done"},
+	}}
+	w, js, _ := engineCopier(t, eng)
+	// Deliberately never pushed: upstreamPlan has no manifest to size.
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: "team/never-pushed:1", Source: "up", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	tr := done.Transfers[0]
+	if tr.BytesTotal != 2026 {
+		t.Errorf("total = %d, want the unchecked report of 2026 to stand", tr.BytesTotal)
+	}
+	if got := tr.BytesDone; got != tr.BytesTotal {
+		t.Errorf("done = %d, want the finished transfer to read full at %d", got, tr.BytesTotal)
 	}
 }
