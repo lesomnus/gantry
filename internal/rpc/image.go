@@ -19,7 +19,7 @@ type imageService struct {
 }
 
 func (v *imageService) gcUnit(ref *pb.StoreRef) (string, error) {
-	return (&storeService{s: v.s}).gcUnit(ref)
+	return (&storeService{s: v.s}).engineGCUnit(ref)
 }
 
 // resolve turns an ImageRef into (store, ref). The surrogate uuid id is

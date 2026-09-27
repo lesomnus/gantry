@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/event"
+	"github.com/lesomnus/gantry/internal/retention"
 	"github.com/lesomnus/gantry/pb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -231,6 +233,72 @@ func TestStoreRemoveFromARegistry(t *testing.T) {
 	wantCode(t, err, codes.FailedPrecondition)
 }
 
+// The GC RPCs take a registry store whose retention follows the engines: its
+// status, a plan over what gantry delivered through it, and an apply that
+// deletes what no engine holds any more.
+func TestStoreGcOnARegistry(t *testing.T) {
+	ix, err := retention.Open(filepath.Join(t.TempDir(), "cache.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var removed []string
+	e := newEnv(t,
+		withStores(map[string]config.StoreConfig{
+			"cache": {Kind: "oci", Host: "cache.local", Mode: "proxy"},
+			"bare":  {Kind: "oci", Host: "bare.local"},
+		}),
+		withRegistryRetention(retention.Registry{
+			Name: "cache", Index: ix, Engines: []string{"node"},
+			Remove: func(_ context.Context, ref string) error { removed = append(removed, ref); return nil },
+		}),
+	)
+	ctx := context.Background()
+	const held = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const dropped = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	e.gc.Delivered("cache", "dist/app", held, "", time.Now())
+	e.gc.Delivered("cache", "dist/app", dropped, "", time.Now())
+	if err := e.ix.Seed("node", "cache.local/dist/app@"+held, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := e.client.Store().GcStatus(ctx, pb.StoreByName("cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.GetRecords() != 2 || len(st.GetRules()) != 0 {
+		t.Errorf("status = %v, want two deliveries and no rules", st)
+	}
+
+	plan, err := e.client.Store().GcPlan(ctx, pb.StoreGcRequest_builder{Store: pb.StoreByName("cache")}.Build())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := plan.GetDelete(); len(d) != 1 || d[0].GetRef() != "dist/app@"+dropped ||
+		d[0].GetReason() != pb.GcDeleteReason_GC_DELETE_REASON_DROPPED_BY_ENGINES {
+		t.Errorf("plan delete = %v", d)
+	}
+	if k := plan.GetKeep(); len(k) != 1 || k[0].GetReason() != pb.GcKeepReason_GC_KEEP_REASON_HELD_BY_ENGINE {
+		t.Errorf("plan keep = %v", k)
+	}
+
+	if _, err := e.client.Store().GcApply(ctx, pb.StoreGcRequest_builder{Store: pb.StoreByName("cache")}.Build()); err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0] != "dist/app@"+dropped {
+		t.Errorf("removed = %v, want only the dropped manifest", removed)
+	}
+
+	_, err = e.client.Store().GcPlan(ctx, pb.StoreGcRequest_builder{
+		Store:    pb.StoreByName("cache"),
+		Override: pb.GcOverride_builder{MaxAge: durationpb.New(time.Hour)}.Build(),
+	}.Build())
+	wantCode(t, err, codes.InvalidArgument)
+
+	// A registry store without retention is not an unknown store.
+	_, err = e.client.Store().GcPlan(ctx, pb.StoreGcRequest_builder{Store: pb.StoreByName("bare")}.Build())
+	wantCode(t, err, codes.FailedPrecondition)
+}
+
 func TestStoreHealth(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
@@ -354,7 +422,12 @@ func TestStoreGcDisabled(t *testing.T) {
 	_, err := e.client.Store().GcStatus(ctx, pb.StoreByName("node"))
 	wantCode(t, err, codes.FailedPrecondition)
 
-	// Unknown/non-engine stores are NotFound even when GC is disabled.
+	// A registry store can carry retention too, so one without it is the same
+	// FailedPrecondition as an engine store without it.
 	_, err = e.client.Store().GcStatus(ctx, pb.StoreByName("src"))
+	wantCode(t, err, codes.FailedPrecondition)
+
+	// Unknown stores are NotFound even when GC is disabled.
+	_, err = e.client.Store().GcStatus(ctx, pb.StoreByName("nowhere"))
 	wantCode(t, err, codes.NotFound)
 }

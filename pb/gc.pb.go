@@ -33,6 +33,9 @@ const (
 	GcDeleteReason_GC_DELETE_REASON_AGE_EXCEEDED   GcDeleteReason = 1
 	GcDeleteReason_GC_DELETE_REASON_MAX_N_EXCEEDED GcDeleteReason = 2
 	GcDeleteReason_GC_DELETE_REASON_UNTAGGED       GcDeleteReason = 3
+	// A registry store's delivery that every engine store's retention has
+	// dropped.
+	GcDeleteReason_GC_DELETE_REASON_DROPPED_BY_ENGINES GcDeleteReason = 4
 )
 
 // Enum value maps for GcDeleteReason.
@@ -42,12 +45,14 @@ var (
 		1: "GC_DELETE_REASON_AGE_EXCEEDED",
 		2: "GC_DELETE_REASON_MAX_N_EXCEEDED",
 		3: "GC_DELETE_REASON_UNTAGGED",
+		4: "GC_DELETE_REASON_DROPPED_BY_ENGINES",
 	}
 	GcDeleteReason_value = map[string]int32{
-		"GC_DELETE_REASON_UNSPECIFIED":    0,
-		"GC_DELETE_REASON_AGE_EXCEEDED":   1,
-		"GC_DELETE_REASON_MAX_N_EXCEEDED": 2,
-		"GC_DELETE_REASON_UNTAGGED":       3,
+		"GC_DELETE_REASON_UNSPECIFIED":        0,
+		"GC_DELETE_REASON_AGE_EXCEEDED":       1,
+		"GC_DELETE_REASON_MAX_N_EXCEEDED":     2,
+		"GC_DELETE_REASON_UNTAGGED":           3,
+		"GC_DELETE_REASON_DROPPED_BY_ENGINES": 4,
 	}
 )
 
@@ -86,33 +91,47 @@ const (
 	GcKeepReason_GC_KEEP_REASON_UNMANAGED       GcKeepReason = 7
 	GcKeepReason_GC_KEEP_REASON_UNTAGGED_GRACE  GcKeepReason = 8
 	GcKeepReason_GC_KEEP_REASON_DIGEST_TRACKED  GcKeepReason = 9
+	// A registry store's delivery an engine store's retention still holds.
+	GcKeepReason_GC_KEEP_REASON_HELD_BY_ENGINE GcKeepReason = 10
+	// A registry store's delivery made within the grace, which an engine may not
+	// have recorded yet.
+	GcKeepReason_GC_KEEP_REASON_RECENTLY_DELIVERED GcKeepReason = 11
+	// A registry store's delivery kept because a declared engine store has no
+	// retention, and so cannot say what it dropped.
+	GcKeepReason_GC_KEEP_REASON_ENGINE_UNMANAGED GcKeepReason = 12
 )
 
 // Enum value maps for GcKeepReason.
 var (
 	GcKeepReason_name = map[int32]string{
-		0: "GC_KEEP_REASON_UNSPECIFIED",
-		1: "GC_KEEP_REASON_IN_USE",
-		2: "GC_KEEP_REASON_PINNED",
-		3: "GC_KEEP_REASON_KEEP_N_RECENT",
-		4: "GC_KEEP_REASON_WITHIN_MAX_AGE",
-		5: "GC_KEEP_REASON_GRACE",
-		6: "GC_KEEP_REASON_AGE_GC_DISABLED",
-		7: "GC_KEEP_REASON_UNMANAGED",
-		8: "GC_KEEP_REASON_UNTAGGED_GRACE",
-		9: "GC_KEEP_REASON_DIGEST_TRACKED",
+		0:  "GC_KEEP_REASON_UNSPECIFIED",
+		1:  "GC_KEEP_REASON_IN_USE",
+		2:  "GC_KEEP_REASON_PINNED",
+		3:  "GC_KEEP_REASON_KEEP_N_RECENT",
+		4:  "GC_KEEP_REASON_WITHIN_MAX_AGE",
+		5:  "GC_KEEP_REASON_GRACE",
+		6:  "GC_KEEP_REASON_AGE_GC_DISABLED",
+		7:  "GC_KEEP_REASON_UNMANAGED",
+		8:  "GC_KEEP_REASON_UNTAGGED_GRACE",
+		9:  "GC_KEEP_REASON_DIGEST_TRACKED",
+		10: "GC_KEEP_REASON_HELD_BY_ENGINE",
+		11: "GC_KEEP_REASON_RECENTLY_DELIVERED",
+		12: "GC_KEEP_REASON_ENGINE_UNMANAGED",
 	}
 	GcKeepReason_value = map[string]int32{
-		"GC_KEEP_REASON_UNSPECIFIED":     0,
-		"GC_KEEP_REASON_IN_USE":          1,
-		"GC_KEEP_REASON_PINNED":          2,
-		"GC_KEEP_REASON_KEEP_N_RECENT":   3,
-		"GC_KEEP_REASON_WITHIN_MAX_AGE":  4,
-		"GC_KEEP_REASON_GRACE":           5,
-		"GC_KEEP_REASON_AGE_GC_DISABLED": 6,
-		"GC_KEEP_REASON_UNMANAGED":       7,
-		"GC_KEEP_REASON_UNTAGGED_GRACE":  8,
-		"GC_KEEP_REASON_DIGEST_TRACKED":  9,
+		"GC_KEEP_REASON_UNSPECIFIED":        0,
+		"GC_KEEP_REASON_IN_USE":             1,
+		"GC_KEEP_REASON_PINNED":             2,
+		"GC_KEEP_REASON_KEEP_N_RECENT":      3,
+		"GC_KEEP_REASON_WITHIN_MAX_AGE":     4,
+		"GC_KEEP_REASON_GRACE":              5,
+		"GC_KEEP_REASON_AGE_GC_DISABLED":    6,
+		"GC_KEEP_REASON_UNMANAGED":          7,
+		"GC_KEEP_REASON_UNTAGGED_GRACE":     8,
+		"GC_KEEP_REASON_DIGEST_TRACKED":     9,
+		"GC_KEEP_REASON_HELD_BY_ENGINE":     10,
+		"GC_KEEP_REASON_RECENTLY_DELIVERED": 11,
+		"GC_KEEP_REASON_ENGINE_UNMANAGED":   12,
 	}
 )
 
@@ -1203,12 +1222,13 @@ const file_gantry_gc_proto_rawDesc = "" +
 	"reconnects\x18\x05 \x01(\x05R\n" +
 	"reconnects\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\x06 \x01(\tR\tlastError*\x99\x01\n" +
+	"last_error\x18\x06 \x01(\tR\tlastError*\xc2\x01\n" +
 	"\x0eGcDeleteReason\x12 \n" +
 	"\x1cGC_DELETE_REASON_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dGC_DELETE_REASON_AGE_EXCEEDED\x10\x01\x12#\n" +
 	"\x1fGC_DELETE_REASON_MAX_N_EXCEEDED\x10\x02\x12\x1d\n" +
-	"\x19GC_DELETE_REASON_UNTAGGED\x10\x03*\xcb\x02\n" +
+	"\x19GC_DELETE_REASON_UNTAGGED\x10\x03\x12'\n" +
+	"#GC_DELETE_REASON_DROPPED_BY_ENGINES\x10\x04*\xba\x03\n" +
 	"\fGcKeepReason\x12\x1e\n" +
 	"\x1aGC_KEEP_REASON_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15GC_KEEP_REASON_IN_USE\x10\x01\x12\x19\n" +
@@ -1219,7 +1239,11 @@ const file_gantry_gc_proto_rawDesc = "" +
 	"\x1eGC_KEEP_REASON_AGE_GC_DISABLED\x10\x06\x12\x1c\n" +
 	"\x18GC_KEEP_REASON_UNMANAGED\x10\a\x12!\n" +
 	"\x1dGC_KEEP_REASON_UNTAGGED_GRACE\x10\b\x12!\n" +
-	"\x1dGC_KEEP_REASON_DIGEST_TRACKED\x10\tB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
+	"\x1dGC_KEEP_REASON_DIGEST_TRACKED\x10\t\x12!\n" +
+	"\x1dGC_KEEP_REASON_HELD_BY_ENGINE\x10\n" +
+	"\x12%\n" +
+	"!GC_KEEP_REASON_RECENTLY_DELIVERED\x10\v\x12#\n" +
+	"\x1fGC_KEEP_REASON_ENGINE_UNMANAGED\x10\fB\x1fZ\x1dgithub.com/lesomnus/gantry/pbb\beditionsp\xe8\a"
 
 var file_gantry_gc_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_gantry_gc_proto_msgTypes = make([]protoimpl.MessageInfo, 6)

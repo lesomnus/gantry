@@ -307,12 +307,23 @@ func (c *Config) Evaluate() error {
 		bboltPaths[path] = owner
 		return nil
 	}
+	engines := 0
+	for _, s := range c.Stores {
+		if s.IsEngine() {
+			engines++
+		}
+	}
 	for name, s := range c.Stores {
 		if !s.Retention.Enabled() {
 			continue
 		}
 		if err := claimBbolt(s.Retention.Path, "stores."+name+".retention.path"); err != nil {
 			return err
+		}
+		// A registry's retention drops what no engine holds any more. With no
+		// engine to ask, that is everything, the moment its grace runs out.
+		if s.IsRegistry() && engines == 0 {
+			return z.Err(nil, "store %q: retention on a registry store follows the engine stores, and none is declared", name)
 		}
 	}
 	if err := claimBbolt(c.Serve.Events.Path, "serve.events.path"); err != nil {

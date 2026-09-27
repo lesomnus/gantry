@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -106,8 +107,41 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 	var gc *retention.Manager
 	{
 		var gcStores []retention.Store
+		var regs []retention.Registry
+		var engineNames, pullHosts []string
+		for name, sc := range c.Stores {
+			if sc.IsEngine() {
+				engineNames = append(engineNames, name)
+				pullHosts = append(pullHosts, sc.PullHost)
+			}
+		}
 		for name, sc := range c.Stores {
 			if !sc.Retention.Enabled() {
+				continue
+			}
+			if sc.IsRegistry() {
+				// A registry store's retention follows the engines: no rules, just
+				// the record of what gantry delivered through it.
+				rc := sc.Retention
+				ix, err := retention.Open(rc.Path)
+				if err != nil {
+					return nil, z.Err(err, "open retention index for %q", name)
+				}
+				closers = append(closers, ix.Close)
+				regs = append(regs, retention.Registry{
+					Name:  name,
+					Index: ix,
+					Schedule: retention.Schedule{
+						Interval:    time.Duration(rc.Interval),
+						MinInterval: time.Duration(rc.MinInterval),
+						Grace:       time.Duration(rc.Grace),
+					},
+					Remove:  registryRemover(sc),
+					Engines: engineNames,
+					Hosts:   append([]string{sc.Host, sc.DownstreamHost}, pullHosts...),
+				})
+				log.From(ctx).Info("retention enabled",
+					slog.String("store", name), slog.String("path", rc.Path), slog.String("follows", "engines"))
 				continue
 			}
 			eng, err := stores.Engine(name)
@@ -159,8 +193,8 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 			log.From(ctx).Info("retention enabled",
 				slog.String("store", name), slog.String("path", rc.Path), slog.Int("rules", len(rc.Rules)))
 		}
-		if len(gcStores) > 0 {
-			gc = retention.NewManager(gcStores, gcOpts...)
+		if len(gcStores) > 0 || len(regs) > 0 {
+			gc = retention.NewManager(gcStores, append(gcOpts, retention.WithRegistries(regs...))...)
 		}
 	}
 
@@ -193,6 +227,7 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 		// Stamp the retention index when a job's engine destination pulls, so the
 		// image is age-collectable like any other tracked pull.
 		wmr.SetPullHook(func(engine, ref string) { gc.Distributed(engine, ref, nowFn()) })
+		wmr.SetDeliveryHook(deliveryHook{gc: gc, now: nowFn})
 	}
 	// The interface type matters: a nil *Swappable in a verify.Service interface
 	// is non-nil and would bypass every disabled-guard.
@@ -306,4 +341,29 @@ func Build(ctx context.Context, c *config.Config, opts ...Option) (_ *Server, er
 	go rsrv.WatchReadiness(ctx, hs, 5*time.Second)
 
 	return &Server{GRPC: gsrv, RPC: rsrv, copier: wmr, closers: closers}, nil
+}
+
+// deliveryHook records deliveries through a registry store for that store's
+// retention.
+type deliveryHook struct {
+	gc  *retention.Manager
+	now func() time.Time
+}
+
+func (h deliveryHook) Tracks(store string) bool { return h.gc.TracksDeliveries(store) }
+
+func (h deliveryHook) Delivered(store, repo, digest, tag string) {
+	h.gc.Delivered(store, repo, digest, tag, h.now())
+}
+
+// registryRemover deletes a manifest from a registry store for its retention.
+// One the registry no longer has is what the retention wanted anyway.
+func registryRemover(sc config.StoreConfig) func(ctx context.Context, ref string) error {
+	return func(ctx context.Context, ref string) error {
+		_, err := cpx.RemoveFromRegistry(ctx, sc, ref)
+		if errors.Is(err, cpx.ErrNoSuchImage) {
+			return nil
+		}
+		return err
+	}
 }

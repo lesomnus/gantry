@@ -78,6 +78,19 @@ stores:
   #       # A route with neither scope is the default and must come last: anything
   #       # after it is unreachable, which the loader rejects.
   # A job no route covers reads its source directly.
+  #
+  # A cache holds every release ever delivered through it. Give it a retention
+  # and it follows the engines instead: what gantry delivered through it stays
+  # while any engine store's retention still holds it, and is deleted once every
+  # one has dropped it. No rules — the engines' keep_n, pins and in-use are the
+  # policy. Every engine store needs retention for anything to be deleted, and
+  # gantry's credential needs the registry's delete permission.
+  # See docs/retention.md#registry-stores-follow-the-engines.
+  #   site:
+  #     kind: "oci"
+  #     retention:
+  #       path: "/var/lib/gantry/site.db"
+  #       grace: "1h"                           # a delivery is kept this long regardless
 
   # A `meta` store is one name in front of several registries, picked by the
   # repository. It is NOT a cache: the stores behind it hold DIFFERENT content
@@ -239,7 +252,8 @@ serve:
 
   # Image retention / garbage collection is configured PER ENGINE STORE, under
   # stores.<name>.retention (see the k3s example above) — there is no global
-  # retention policy. Within a store, rules are matched per repo; for each repo
+  # retention policy. (A registry store's retention has no rules; it follows
+  # these — see the `site` example above.) Within a store, rules are matched per repo; for each repo
   # the eviction order is:
   #   1. in_use         - an image a running container references
   #   2. pinned         - matches a rule `pins` entry or an API pin (exact ref, or

@@ -22,7 +22,7 @@ type pinService struct {
 }
 
 func (v *pinService) gcUnit(ref *pb.StoreRef) (string, error) {
-	return (&storeService{s: v.s}).gcUnit(ref)
+	return (&storeService{s: v.s}).engineGCUnit(ref)
 }
 
 // resolve turns a PinRef into (store, value). Pin identity is (store, value);

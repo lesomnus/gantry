@@ -100,7 +100,7 @@ func imgRegistry(t *testing.T, cli *client.Client, netName, alias, daemonHost st
 	t.Helper()
 	ctx := context.Background()
 	regImage := registryImage()
-	cmd, files := registryContainer(t, cli, regImage, false)
+	cmd, files := registryContainer(t, cli, regImage, false, "")
 	resp, err := cli.ContainerCreate(ctx,
 		&container.Config{Image: regImage, Cmd: cmd, ExposedPorts: nat.PortSet{"5000/tcp": {}}},
 		&container.HostConfig{

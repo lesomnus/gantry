@@ -75,7 +75,7 @@ store is an engine but has no `retention` configured, `FAILED_PRECONDITION`.
 | Service | RPCs | Notes |
 |---|---|---|
 | `JobService` | `Add` · `Get` · `List` · `Erase` · `Watch` · `Plan` · `Cancel` · `Retry` | `Add` submits a move and coalesces onto an identical in-flight one (a `gantry-coalesced` trailer flags **whether** the submit joined one, not which) and honors `idempotency-key` request metadata. `Watch` streams job snapshots until terminal; `Plan` is dry-run admission; `Cancel` detaches this caller's handle; `Erase` evicts (cancels first when running); `Retry` re-submits a terminal job. Jobs carry a free-form `labels` map (filterable on `List`). `Patch` is `UNIMPLEMENTED`. |
-| `StoreService` | `Get` · `List` · `Pull` · `Remove` · `Health` · `GcStatus` · `GcPlan` · `GcApply` | Stores are declared in config; `Add` / `Patch` / `Erase` answer `UNIMPLEMENTED`. `Pull` / `Remove` drive one engine daemon (and keep the retention index in sync). `Remove` also takes a registry store: `repo@sha256:…` deletes that manifest, `repo:tag` that tag, and nothing is resolved in between; the blobs a deleted manifest held are the registry's own GC's to reclaim. A `meta` store is refused — name the registry behind it. The GC RPCs need the store's `retention`; `GcPlan` dry-runs, `GcApply` executes, both take a one-shot policy override. `GcStatus` includes the usage-watcher health. See `retention.md`. |
+| `StoreService` | `Get` · `List` · `Pull` · `Remove` · `Health` · `GcStatus` · `GcPlan` · `GcApply` | Stores are declared in config; `Add` / `Patch` / `Erase` answer `UNIMPLEMENTED`. `Pull` / `Remove` drive one engine daemon (and keep the retention index in sync). `Remove` also takes a registry store: `repo@sha256:…` deletes that manifest, `repo:tag` that tag, and nothing is resolved in between; the blobs a deleted manifest held are the registry's own GC's to reclaim. A `meta` store is refused — name the registry behind it. The GC RPCs need the store's `retention` — an engine store's, or a registry store's, which follows the engines (see `retention.md`); `GcPlan` dry-runs, `GcApply` executes, both take a one-shot policy override (not on a registry store). `GcStatus` includes the usage-watcher health. See `retention.md`. |
 | `ImageService` | `Get` · `List` · `Erase` | The retention inventory. `List` filters by `repo` / `ref` / `pinned` / `in_use` (the live daemon set) and carries the untagged reap clocks on unfiltered lists; `Erase` purges an orphan record without touching the engine. `Add` / `Patch` answer `UNIMPLEMENTED`. |
 | `PinService` | `Add` · `Get` · `List` · `Erase` | GC exemptions: an exact ref or a doublestar `pattern`. `Add` upserts and echoes the pin's blast radius as `gantry-pin-matched-count` / `gantry-pin-matched` trailers; `Erase` is idempotent. `Patch` answers `UNIMPLEMENTED`. |
 | `EventService` | `Get` · `List` | The audit log (requires `serve.events`, else `FAILED_PRECONDITION`); newest-first with `type` / `store` / `ref` / `state` / `since` filters. `Add` / `Patch` / `Erase` answer `UNIMPLEMENTED`. See `observability.md`. |
@@ -88,7 +88,8 @@ The service layer maps domain errors onto gRPC codes consistently:
 
 - `INVALID_ARGUMENT` — missing/blank required field (`ref`, `id`, store name,
   pin value), a bad page token, a negative `page_size`, an invalid doublestar
-  pattern, an unknown enum value, or an otherwise-unclassified submit error.
+  pattern, an unknown enum value, a GC override on a registry store, or an
+  otherwise-unclassified submit error.
 - `FAILED_PRECONDITION` — a verification rejection (unsigned / untrusted
   source), `Retry`/`Cancel` on a job that is already terminal or active,
   retention/GC not enabled for the store, the audit log disabled, a registry

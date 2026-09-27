@@ -12,6 +12,7 @@ var (
 	bktImg = []byte("img") // img/<engine>/<ref> -> json(Record)
 	bktPin = []byte("pin") // pin/<engine>/<ref-or-pattern> -> json(PinEntry)
 	bktUnt = []byte("unt") // unt/<engine>/<image-id> -> json(UntaggedEntry)
+	bktDlv = []byte("dlv") // dlv/<registry>/<repo>@<digest> -> json(Delivery)
 )
 
 // PinEntry is one persisted pin: an exact reference, or — when Pattern — a
@@ -42,7 +43,7 @@ func Open(path string) (*Index, error) {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, b := range [][]byte{bktImg, bktPin, bktUnt} {
+		for _, b := range [][]byte{bktImg, bktPin, bktUnt, bktDlv} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}

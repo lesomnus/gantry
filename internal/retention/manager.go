@@ -53,6 +53,7 @@ type Store struct {
 // others. There is no global retention policy.
 type Manager struct {
 	units map[string]*unit
+	regs  map[string]*registryUnit // registry stores, whose retention follows the engines
 
 	now   func() time.Time
 	rec   Recorder       // audit log (nil = disabled)
@@ -97,7 +98,7 @@ type Option func(*Manager)
 func WithNow(now func() time.Time) Option { return func(m *Manager) { m.now = now } }
 
 func NewManager(stores []Store, opts ...Option) *Manager {
-	m := &Manager{units: make(map[string]*unit, len(stores)), now: time.Now}
+	m := &Manager{units: make(map[string]*unit, len(stores)), regs: map[string]*registryUnit{}, now: time.Now}
 	for _, o := range opts {
 		o(m)
 	}
@@ -127,6 +128,11 @@ func (m *Manager) Close() error {
 	var err error
 	for _, u := range m.units {
 		if e := u.ix.Close(); e != nil && err == nil {
+			err = e
+		}
+	}
+	for _, r := range m.regs {
+		if e := r.ix.Close(); e != nil && err == nil {
 			err = e
 		}
 	}
@@ -207,6 +213,12 @@ func (m *Manager) Status() Status {
 		}
 		st.Stores[name] = ss
 	}
+	for name, r := range m.regs {
+		if r.sched.Interval > 0 {
+			st.Enabled = true
+		}
+		st.Stores[name] = r.status()
+	}
 	return st
 }
 
@@ -286,6 +298,9 @@ func (m *Manager) DeleteRecord(engine, ref string) (bool, error) {
 		return false, fmt.Errorf("store %q has no retention", engine)
 	}
 	existed, err := u.ix.Delete(engine, ref)
+	if existed {
+		m.pokeRegistries()
+	}
 	if err != nil || existed {
 		return existed, err
 	}
@@ -542,6 +557,12 @@ func (u *unit) watch(ctx context.Context) {
 // replaces the configured reap delay — unset (zero) turns the reaper off for
 // the call, consistent with the other override fields.
 func (m *Manager) Plan(ctx context.Context, engine string, override *Policy) (Decision, error) {
+	if r, ok := m.regs[engine]; ok {
+		if override != nil {
+			return Decision{}, fmt.Errorf("store %q is a registry store: its retention follows the engines and has no policy to override", engine)
+		}
+		return r.plan()
+	}
 	u, ok := m.units[engine]
 	if !ok {
 		return Decision{}, fmt.Errorf("store %q has no retention", engine)
@@ -568,6 +589,9 @@ func (m *Manager) Plan(ctx context.Context, engine string, override *Policy) (De
 
 // Apply executes the deletions in a decision and syncs the index.
 func (m *Manager) Apply(ctx context.Context, engine string, dec Decision) (ApplyResult, error) {
+	if r, ok := m.regs[engine]; ok {
+		return r.apply(ctx, dec), nil
+	}
 	u, ok := m.units[engine]
 	if !ok {
 		return ApplyResult{}, fmt.Errorf("store %q has no retention", engine)
@@ -689,6 +713,7 @@ func (u *unit) apply(ctx context.Context, dec Decision) ApplyResult {
 		}
 	}
 	if len(res.Deleted)+len(res.Untagged)+len(res.Reaped) > 0 {
+		u.m.pokeRegistries()
 		log.From(ctx).Info("gc collected", slog.String("store", u.name),
 			slog.Int("deleted", len(res.Deleted)), slog.Int("untagged", len(res.Untagged)),
 			slog.Int("reaped", len(res.Reaped)), slog.Int("evaluated", res.Evaluated))
@@ -790,6 +815,9 @@ func (u *unit) graceUntilLocked() time.Time {
 func (m *Manager) StartScheduler(ctx context.Context) {
 	for _, u := range m.units {
 		go u.runScheduler(ctx)
+	}
+	for _, r := range m.regs {
+		go r.runScheduler(ctx)
 	}
 }
 
