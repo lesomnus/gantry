@@ -139,14 +139,25 @@ both are green, and only then tags anything:
   `./dist/<arch>` binary (`GANTRY_E2E_BIN`) and **L3 image** against the loaded
   image (`GANTRY_E2E_IMAGE`). It is a **pure test job** — it never touches the
   registry; it only gates `promote`.
-- **`promote`** (needs both `verify` legs, `main` push only) — builds the shippable
-  multi-arch image from the same `./dist` and pushes it with every tag in one step.
-  Because `app` is a COPY-only scratch stage, both arches assemble on a single
-  `amd64` runner with **no qemu**, and the pushed binaries are **byte-for-byte the
-  ones `verify` black-boxed** (same `./dist`, deterministic COPY). It is the only
-  job that writes to the registry, and it runs only once both `verify` legs pass, so
-  nothing is published until the real artifact is green. `edge` always tracks the
-  latest promoted build.
+- **`promote`** (needs both `verify` legs; **every run except a fork's**) — builds
+  the shippable multi-arch image from the same `./dist` and pushes it. Because
+  `app` is a COPY-only scratch stage, both arches assemble on a single `amd64`
+  runner with **no qemu**, and the pushed binaries are **byte-for-byte the ones
+  `verify` black-boxed** (same `./dist`, deterministic COPY). It is the only job
+  that writes to the registry, and it runs only once both `verify` legs pass, so
+  nothing is published until the real artifact is green.
+
+  **A `main` push writes the release names** — every tag in `docker-bake.hcl` at
+  once, and `edge` always tracks the latest promoted build. **Anything else writes
+  one name**: `pr<N>-r<run-id>` for a pull request, `<branch>-r<run-id>` otherwise.
+  That is not tidiness. A branch image exists so "does the fleet still work with
+  this?" can be asked before a merge — robot-platform's harness takes it as
+  `GANTRY_IMAGE` and stands the fleet's OTA path up against it — and the prefix is
+  what keeps a pinned `:r…` meaning "this build went through main".
+  `ci-sweep.yaml` drops the `pr<N>-*` images when the pull request closes.
+
+  A fork is skipped: its token is read-only, so there is nothing to push with.
+  Every job above `promote` still runs for it.
 
 Compiling once in `dist` and fanning out to native runners means the Go build is
 not repeated, no qemu is involved, and the arm64 image is still exercised on real
