@@ -474,3 +474,35 @@ func TestJobToEngineDedup(t *testing.T) {
 		t.Errorf("coalesced submit should get its own handle, got %s twice", second.ID)
 	}
 }
+
+// With no estimate there is no floor, and the daemon's report stands
+// unchecked. That is a decision rather than an oversight: when the source
+// manifest cannot be read there is nothing to compare against, a poll that
+// caught one blob is indistinguishable from a complete report of a small
+// image, and the alternative — reporting nothing — is the 0/0 that #21 was
+// about. The number goes out and the missing estimate is logged at Warn, so
+// the one case where it can be a plausible lie is visible.
+func TestJobToEngineHasNoFloorWhenTheSourceCannotBeRead(t *testing.T) {
+	eng := &fakePullEngine{name: "node", platform: "linux/amd64", reported: []down.LayerUpdate{
+		{Digest: "the-one-blob-the-poll-caught", Total: 2026, Done: 2026, State: "done"},
+	}}
+	w, js, _ := engineCopier(t, eng)
+	// Deliberately never pushed: upstreamPlan has no manifest to size.
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+	t.Cleanup(func() { cancel(); w.Stop() })
+
+	snap, _, err := w.Submit(Request{Ref: "team/never-pushed:1", Source: "up", Target: "node"})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	done := waitTerminal(t, js, snap.ID)
+	tr := done.Transfers[0]
+	if tr.BytesTotal != 2026 {
+		t.Errorf("total = %d, want the unchecked report of 2026 to stand", tr.BytesTotal)
+	}
+	if got := tr.BytesDone; got != tr.BytesTotal {
+		t.Errorf("done = %d, want the finished transfer to read full at %d", got, tr.BytesTotal)
+	}
+}
