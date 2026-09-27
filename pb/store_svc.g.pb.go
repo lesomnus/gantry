@@ -1598,9 +1598,11 @@ func (x *StoreRemoveRequest) ClearRef() {
 type StoreRemoveRequest_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
-	// Engine store to remove from.
+	// Engine or registry store to remove from.
 	Store *StoreRef
-	// Image reference to remove.
+	// Image reference to remove. On a registry store it is a repository path in
+	// that store: `repo@sha256:...` removes the manifest, `repo:tag` removes the
+	// tag. A leading store host is accepted.
 	Ref *string
 }
 

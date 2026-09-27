@@ -50,7 +50,7 @@ type StoreServiceClient interface {
 	// Pull tells an engine store to pull an image, job-less and synchronous.
 	Pull(ctx context.Context, in *StorePullRequest, opts ...grpc.CallOption) (*StorePullResponse, error)
 	// Remove deletes an image from an engine store and syncs the retention
-	// index.
+	// index, or deletes the tag or manifest a ref names from a registry store.
 	Remove(ctx context.Context, in *StoreRemoveRequest, opts ...grpc.CallOption) (*StoreRemoveResponse, error)
 	// Health probes the store, served from a short-lived cache.
 	Health(ctx context.Context, in *StoreRef, opts ...grpc.CallOption) (*StoreHealthResponse, error)
@@ -199,7 +199,7 @@ type StoreServiceServer interface {
 	// Pull tells an engine store to pull an image, job-less and synchronous.
 	Pull(context.Context, *StorePullRequest) (*StorePullResponse, error)
 	// Remove deletes an image from an engine store and syncs the retention
-	// index.
+	// index, or deletes the tag or manifest a ref names from a registry store.
 	Remove(context.Context, *StoreRemoveRequest) (*StoreRemoveResponse, error)
 	// Health probes the store, served from a short-lived cache.
 	Health(context.Context, *StoreRef) (*StoreHealthResponse, error)
