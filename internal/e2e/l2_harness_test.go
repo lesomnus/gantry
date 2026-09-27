@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -566,6 +567,7 @@ func (h *l2harness) kill(id, addr string) {
 	if err := h.cli.ContainerRemove(context.Background(), id, container.RemoveOptions{Force: true}); err != nil {
 		h.t.Fatalf("kill registry %s: %v", addr, err)
 	}
+	closeForward(addr)
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		c, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
@@ -660,7 +662,8 @@ func startForward(t *testing.T, port, target string) {
 	if err != nil {
 		t.Fatalf("forward listen %s: %v", port, err)
 	}
-	t.Cleanup(func() { l.Close() })
+	forwards.Store("127.0.0.1:"+port, l)
+	t.Cleanup(func() { closeForward("127.0.0.1:" + port) })
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -679,6 +682,19 @@ func startForward(t *testing.T, port, target string) {
 			}(c)
 		}
 	}()
+}
+
+// forwards is every live forwarder by the address it listens on, so a registry
+// staged as gone can take its forwarder with it. Without that the forwarder
+// keeps accepting on the dead registry's address -- in the devcontainer an
+// outage never looks like one, and the next container docker gives the same
+// port cannot be forwarded to at all.
+var forwards sync.Map // "127.0.0.1:<port>" -> net.Listener
+
+func closeForward(addr string) {
+	if l, ok := forwards.LoadAndDelete(addr); ok {
+		l.(net.Listener).Close()
+	}
 }
 
 // waitRegistry blocks until the registry ANSWERS, not merely until something

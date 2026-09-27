@@ -408,6 +408,12 @@ func (r *registryUnit) apply(ctx context.Context, dec Decision) ApplyResult {
 		}
 		res.Deleted = append(res.Deleted, c.Digest)
 		_, _ = r.ix.DeleteDelivery(r.name, c.Ref)
+		// What the delete frees is the registry's to decide, and for an index
+		// that is not the index: its platform manifests hold the layers. Said
+		// once per manifest, so a disk that does not shrink after a clean pass
+		// is traced to the registry's reclaim and not taken for a gantry bug.
+		log.From(ctx).Info("manifest deleted from the registry; what it held is the registry's to reclaim",
+			slog.String("store", r.name), slog.String("ref", c.Ref), slog.String("reason", c.Reason))
 		if r.m.rec != nil {
 			r.m.rec.ImageRemoved(r.name, c.Ref, c.Digest, c.Reason)
 		}

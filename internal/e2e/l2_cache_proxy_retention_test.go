@@ -110,3 +110,80 @@ func TestL2ProxyCacheDropsWhatTheEngineDropped(t *testing.T) {
 	}
 	t.Fatalf("the pull-through still holds %s after the engine dropped it; its plan says %s", cacheRef, reason())
 }
+
+// The same drop, of a MULTI-PLATFORM image, and what it has to free is the
+// bytes, not the record (#33). A node records the index digest, so the index
+// is what gantry deletes -- and the platform manifest the node actually pulled
+// is what holds the layers. A pull-through that evicts the index alone keeps
+// those for its whole retention while every plan comes back clean.
+//
+// So after the cache has dropped the index, with the origin down, neither a
+// child manifest nor any layer of the image may still be answered by the
+// cache. This needs a cr whose proxy delete evicts an index with what it
+// brought in (lesomnus/cr#49).
+func TestL2ProxyCacheEvictsTheIndexWithWhatItBroughtIn(t *testing.T) {
+	h := newL2Harness(t,
+		l2WithRemoteCache("cache"),
+		l2WithProxyCache(),
+		l2WithRetention(config.RetentionRule{Repo: "{remote}/lib/**"}),
+		l2WithCacheRetention(),
+	)
+	ctx := context.Background()
+	idx := seedPlatformIndex(t, h.remote, "lib/multi", "1", "linux/amd64", "linux/arm64").String()
+	children, layers := indexContents(t, h.remote, "lib/multi", idx)
+	h.removeImage(h.cache + "/lib/multi:1")
+
+	job := h.waitDone(h.add(pullJob(h.remote+"/lib/multi:1", "remote", false)).GetId())
+	if job.GetState() != pb.JobState_JOB_STATE_DONE {
+		t.Fatalf("state=%v error=%q [%s]", job.GetState(), job.GetError(), describe(job))
+	}
+
+	h.kill(h.remoteID, h.remote)
+	pulled := 0
+	for _, c := range children {
+		if manifestAt(t, h.cache, "lib/multi", c) {
+			pulled++
+		}
+	}
+	if pulled == 0 {
+		t.Fatal("with the origin down the cache answers for no platform manifest; the routed pull left nothing to evict")
+	}
+
+	imgs, err := h.client.Image().List(ctx, pb.ImageListRequest_builder{
+		Store: pb.StoreByName("edge"),
+		Repo:  proto.String(h.cache + "/lib/multi"),
+	}.Build())
+	if err != nil {
+		t.Fatalf("edge images: %v", err)
+	}
+	for _, img := range imgs.GetItems() {
+		if _, err := h.client.Store().Remove(ctx, pb.StoreRemoveRequest_builder{
+			Store: pb.StoreByName("edge"),
+			Ref:   proto.String(img.GetRef()),
+		}.Build()); err != nil {
+			t.Fatalf("remove %s from the engine: %v", img.GetRef(), err)
+		}
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if !manifestAt(t, h.cache, "lib/multi", idx) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if manifestAt(t, h.cache, "lib/multi", idx) {
+		t.Fatalf("the pull-through still holds the index %s after the engine dropped it", idx)
+	}
+
+	for _, c := range children {
+		if manifestAt(t, h.cache, "lib/multi", c) {
+			t.Errorf("the index is gone and its platform manifest %s is still answered: it holds the layers", c)
+		}
+	}
+	for _, l := range layers {
+		if blobAt(t, h.cache, "lib/multi", l) {
+			t.Errorf("the index is gone and layer %s is still on the cache's disk", l)
+		}
+	}
+}
