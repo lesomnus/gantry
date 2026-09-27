@@ -23,7 +23,7 @@ service StoreService {
   // Pull tells an engine store to pull an image, job-less and synchronous.
   rpc Pull(StorePullRequest) returns (StorePullResponse);
   // Remove deletes an image from an engine store and syncs the retention
-  // index.
+  // index, or deletes the tag or manifest a ref names from a registry store.
   rpc Remove(StoreRemoveRequest) returns (StoreRemoveResponse);
   // Health probes the store, served from a short-lived cache.
   rpc Health(StoreRef) returns (StoreHealthResponse);
@@ -117,9 +117,11 @@ message StorePullResponse {
 }
 
 message StoreRemoveRequest {
-  // Engine store to remove from.
+  // Engine or registry store to remove from.
   StoreRef store = 1;
-  // Image reference to remove.
+  // Image reference to remove. On a registry store it is a repository path in
+  // that store: `repo@sha256:...` removes the manifest, `repo:tag` removes the
+  // tag. A leading store host is accepted.
   string ref = 2;
 }
 

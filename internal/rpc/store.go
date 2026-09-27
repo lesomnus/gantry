@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/lesomnus/gantry/cmd/config"
+	"github.com/lesomnus/gantry/internal/cpx"
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/health"
 	"github.com/lesomnus/gantry/internal/retention"
@@ -171,6 +173,11 @@ func (v *storeService) Pull(ctx context.Context, req *pb.StorePullRequest) (*pb.
 }
 
 func (v *storeService) Remove(ctx context.Context, req *pb.StoreRemoveRequest) (*pb.StoreRemoveResponse, error) {
+	if name, err := storeName(req.GetStore()); err == nil {
+		if cfg, ok := v.s.stores.Config(name); ok && !cfg.IsEngine() {
+			return v.removeFromRegistry(ctx, cfg, req.GetRef())
+		}
+	}
 	name, eng, err := v.engine(req.GetStore())
 	if err != nil {
 		return nil, err
@@ -188,6 +195,43 @@ func (v *storeService) Remove(ctx context.Context, req *pb.StoreRemoveRequest) (
 		_, _ = v.s.gc.DeleteRecord(name, ref)
 	}
 	v.s.rec.ImageRemoved(name, ref, "", "manual")
+	return pb.StoreRemoveResponse_builder{
+		Untagged: res.Untagged,
+		Deleted:  res.Deleted,
+	}.Build(), nil
+}
+
+// removeFromRegistry is Remove on a registry store: it deletes the tag or the
+// manifest the ref names, and nothing else. There is no retention index to sync
+// — registry stores have none — and the blobs a deleted manifest held are the
+// registry's own garbage collection's to reclaim.
+func (v *storeService) removeFromRegistry(ctx context.Context, cfg config.StoreConfig, ref string) (*pb.StoreRemoveResponse, error) {
+	if cfg.IsMeta() {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"store %q is a meta store and holds nothing itself; remove from the registry behind it", cfg.Name)
+	}
+	if ref == "" {
+		return nil, status.Error(codes.InvalidArgument, "ref is required")
+	}
+	res, err := cpx.RemoveFromRegistry(ctx, cfg, ref)
+	switch {
+	case err == nil:
+	case errors.Is(err, cpx.ErrNoSuchImage):
+		return nil, status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, cpx.ErrDeleteUnsupported):
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	case errors.Is(err, cpx.ErrDeleteDenied):
+		return nil, status.Error(codes.PermissionDenied, err.Error())
+	case errors.Is(err, cpx.ErrInvalidReference):
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	default:
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	digest := ""
+	if len(res.Deleted) == 1 {
+		digest = res.Deleted[0]
+	}
+	v.s.rec.ImageRemoved(cfg.Name, ref, digest, "manual")
 	return pb.StoreRemoveResponse_builder{
 		Untagged: res.Untagged,
 		Deleted:  res.Deleted,

@@ -3,8 +3,16 @@ package rpc_test
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/registry"
+	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/lesomnus/gantry/cmd/config"
 
 	"github.com/lesomnus/gantry/internal/down"
 	"github.com/lesomnus/gantry/internal/event"
@@ -158,6 +166,69 @@ func TestStoreRemove(t *testing.T) {
 		Ref:   proto.String("src.local/lib/app:1"),
 	}.Build())
 	wantCode(t, err, codes.Unavailable)
+}
+
+// Remove on a registry store deletes what the ref names there. There is no
+// daemon and no retention index behind it, and neither is touched.
+func TestStoreRemoveFromARegistry(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	t.Cleanup(srv.Close)
+	u, _ := url.Parse(srv.URL)
+	e := newEnv(t, withStores(map[string]config.StoreConfig{
+		"cache":  {Kind: "oci", Host: u.Host, Insecure: true, Mode: "proxy"},
+		"remote": {Kind: "meta", Routes: []config.Route{{Store: "cache"}}},
+	}))
+	ctx := context.Background()
+
+	img, err := random.Image(512, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, _ := name.ParseReference(u.Host+"/dist/app:1", name.Insecure)
+	if err := remote.Write(tag, img); err != nil {
+		t.Fatal(err)
+	}
+	dg, _ := img.Digest()
+
+	res, err := e.client.Store().Remove(ctx, pb.StoreRemoveRequest_builder{
+		Store: pb.StoreByName("cache"),
+		Ref:   proto.String("dist/app@" + dg.String()),
+	}.Build())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.GetDeleted(); len(got) != 1 || got[0] != dg.String() {
+		t.Errorf("deleted = %v, want [%s]", got, dg)
+	}
+	if len(e.eng.removed) != 0 {
+		t.Errorf("the engine was asked to remove %v; a registry store has no daemon behind it", e.eng.removed)
+	}
+
+	// Gone now, and saying so is not a failure to reach the registry.
+	_, err = e.client.Store().Remove(ctx, pb.StoreRemoveRequest_builder{
+		Store: pb.StoreByName("cache"),
+		Ref:   proto.String("dist/app@" + dg.String()),
+	}.Build())
+	wantCode(t, err, codes.NotFound)
+
+	_, err = e.client.Store().Remove(ctx, pb.StoreRemoveRequest_builder{
+		Store: pb.StoreByName("cache"),
+		Ref:   proto.String("Not/A/Ref:!"),
+	}.Build())
+	wantCode(t, err, codes.InvalidArgument)
+
+	_, err = e.client.Store().Remove(ctx, pb.StoreRemoveRequest_builder{
+		Store: pb.StoreByName("cache"),
+	}.Build())
+	wantCode(t, err, codes.InvalidArgument)
+
+	// A meta store is several registries under one name; which one is meant is
+	// the caller's to say.
+	_, err = e.client.Store().Remove(ctx, pb.StoreRemoveRequest_builder{
+		Store: pb.StoreByName("remote"),
+		Ref:   proto.String("dist/app:1"),
+	}.Build())
+	wantCode(t, err, codes.FailedPrecondition)
 }
 
 func TestStoreHealth(t *testing.T) {

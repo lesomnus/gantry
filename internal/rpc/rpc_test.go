@@ -167,12 +167,19 @@ type envCfg struct {
 	verifyOn  bool
 	typedNils bool
 	auth      *config.AuthConfig
+	stores    map[string]config.StoreConfig
 }
 
 func withoutGC() envOpt     { return func(c *envCfg) { c.gcOff = true } }
 func withoutEvents() envOpt { return func(c *envCfg) { c.eventsOff = true } }
 func withVerify() envOpt    { return func(c *envCfg) { c.verifyOn = true } }
 func withTypedNils() envOpt { return func(c *envCfg) { c.gcOff = true; c.typedNils = true } }
+
+// withStores declares stores beside the default `src` registry, or replaces it.
+func withStores(stores map[string]config.StoreConfig) envOpt {
+	return func(c *envCfg) { c.stores = stores }
+}
+
 func withAuth(a config.AuthConfig) envOpt {
 	return func(c *envCfg) { c.auth = &a }
 }
@@ -184,9 +191,13 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 		o(&cfg)
 	}
 
-	stores, err := store.NewSet(map[string]config.StoreConfig{
+	declared := map[string]config.StoreConfig{
 		"src": {Kind: "oci", Host: "src.local", Mode: "copy"},
-	}, false)
+	}
+	for name, c := range cfg.stores {
+		declared[name] = c
+	}
+	stores, err := store.NewSet(declared, false)
 	if err != nil {
 		t.Fatal(err)
 	}
