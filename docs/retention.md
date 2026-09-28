@@ -306,9 +306,22 @@ stores:
   store's scheduler is woken (debounced by `min_interval`), since that may have
   been the last hold. Otherwise it runs every `interval`, earlier when a delivery
   leaves its grace.
-- **What a delete frees** is the registry's business. gantry deletes the manifest
-  (for a multi-platform image, the index); the child manifests and blobs it
-  referenced are the registry's own garbage collection's to reclaim.
+- **What a delete frees** is the registry's business, and it is not the manifest
+  gantry deletes. For a multi-platform image that is the index — the digest a
+  node records — while the platform manifest the node pulled is what holds the
+  layers. So the disk comes back only when the registry lets the children go:
+  - **cr, pull-through repository**: the index is evicted with the platform
+    manifests it listed that nothing else holds or tags, and their layers, at
+    once ([lesomnus/cr#49](https://github.com/lesomnus/cr/pull/49)). An older cr
+    keeps them for the proxy's `retention`, since a node's pull of a child by
+    digest keeps renewing it — every pass then reads clean while the disk does
+    not shrink (#33).
+  - **cr, hosted repository**: the children go by the untagged collection.
+  - **distribution**: nothing is freed until its offline `garbage-collect` runs.
+
+  Each deleted manifest is logged (`manifest deleted from the registry; what it
+  held is the registry's to reclaim`), so a disk that does not shrink after a
+  clean pass is traced to the registry.
 - A registry that **refuses** deletes — distribution without
   `storage.delete.enabled` — is reported in the pass's `errors`, and the delivery
   stays recorded for the next pass. The credential gantry uses needs the

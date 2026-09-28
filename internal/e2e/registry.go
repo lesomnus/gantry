@@ -276,3 +276,67 @@ func digestOf(t *testing.T, host, repo, tag string) (v1.Hash, error) {
 	}
 	return d.Digest, nil
 }
+
+// indexContents reads an index from host and answers the digests of the
+// manifests it lists and of every layer and config those hold.
+func indexContents(t *testing.T, host, repo, digest string) (children, blobs []string) {
+	t.Helper()
+	ref, err := name.NewDigest(fmt.Sprintf("%s/%s@%s", host, repo, digest), name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := remote.Index(ref)
+	if err != nil {
+		t.Fatalf("read index %s: %v", ref, err)
+	}
+	im, err := idx.IndexManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range im.Manifests {
+		children = append(children, d.Digest.String())
+		img, err := idx.Image(d.Digest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := img.Manifest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		blobs = append(blobs, m.Config.Digest.String())
+		for _, l := range m.Layers {
+			blobs = append(blobs, l.Digest.String())
+		}
+	}
+	return children, blobs
+}
+
+// blobAt reports whether host answers for a blob of repo.
+func blobAt(t *testing.T, host, repo, digest string) bool {
+	t.Helper()
+	return answers(fmt.Sprintf("http://%s/v2/%s/blobs/%s", host, repo, digest))
+}
+
+// manifestAt reports whether host answers for a manifest of repo by digest.
+func manifestAt(t *testing.T, host, repo, digest string) bool {
+	t.Helper()
+	return answers(fmt.Sprintf("http://%s/v2/%s/manifests/%s", host, repo, digest))
+}
+
+// answers is a HEAD with a short deadline. It is for a pull-through whose
+// upstream is down: what the cache kept it answers at once, and what it does
+// not have it would otherwise spend its own upstream timeout failing to fetch.
+func answers(url string) bool {
+	cl := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json")
+	res, err := cl.Do(req)
+	if err != nil {
+		return false
+	}
+	res.Body.Close()
+	return res.StatusCode == http.StatusOK
+}
