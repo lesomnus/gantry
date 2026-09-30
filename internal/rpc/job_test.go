@@ -112,6 +112,49 @@ func TestJobAddIdempotency(t *testing.T) {
 	}
 }
 
+// A DONE job whose result its target no longer holds is not replayed: the
+// move is submitted again and the key follows the new job, so the next retry
+// replays that one.
+func TestJobAddIdempotencyRerunsWhatIsGone(t *testing.T) {
+	e := newEnv(t)
+	e.addJob(t, "job_9", "x:1", cpx.JobDone, time.Now())
+	e.copier.snap = snap("job_9", "x:1", cpx.JobDone, time.Now())
+	e.copier.created = true
+
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "idempotency-key", "k1")
+	req := pb.JobAddRequest_builder{Ref: "x:1"}.Build()
+	if _, err := e.client.Job().Add(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+
+	// Still there: a replay, as before.
+	if _, err := e.client.Job().Add(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.copier.submits) != 1 {
+		t.Fatalf("a held result was resubmitted: %d submits", len(e.copier.submits))
+	}
+
+	// Gone from the target: submitted again, and remembered under the new job.
+	e.copier.gone = true
+	e.addJob(t, "job_10", "x:1", cpx.JobRunning, time.Now())
+	e.copier.snap = snap("job_10", "x:1", cpx.JobRunning, time.Now())
+	var trailer metadata.MD
+	job, err := e.client.Job().Add(ctx, req, grpc.Trailer(&trailer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.copier.submits) != 2 || job.GetId() != "job_10" {
+		t.Fatalf("a gone result was replayed: %d submits, job %s", len(e.copier.submits), job.GetId())
+	}
+	if got := trailer.Get("gantry-coalesced"); len(got) != 1 || got[0] != "false" {
+		t.Errorf("a fresh run must not report coalesced, got %v", got)
+	}
+	if again, err := e.client.Job().Add(ctx, req); err != nil || again.GetId() != "job_10" {
+		t.Errorf("the key does not follow the new job: %v %v", again.GetId(), err)
+	}
+}
+
 func TestJobGetListErase(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()

@@ -392,6 +392,17 @@ func (e *dockerEngine) WatchUsage(ctx context.Context, sink UsageSink) error {
 	}
 }
 
+// Has implements Holder.
+func (e *dockerEngine) Has(ctx context.Context, ref string) (bool, error) {
+	if _, err := e.cli.ImageInspect(ctx, ref); err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (e *dockerEngine) Remove(ctx context.Context, ref string) (RemoveResult, error) {
 	var rr RemoveResult
 	if err := e.remove(ctx, ref, &rr); err != nil {
