@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +24,9 @@ import (
 // (containerd-snapshotter) to the classic graph store.
 type tagDaemon struct {
 	classic bool
+	// inUse answers every image DELETE with the daemon's 409: a container was
+	// created from the name.
+	inUse bool
 
 	mu      sync.Mutex
 	pullTag string
@@ -63,6 +68,10 @@ func (f *tagDaemon) handler() http.HandlerFunc {
 			f.tags = append(f.tags, r.URL.Query().Get("repo")+":"+r.URL.Query().Get("tag"))
 			f.mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/images/") && f.inUse:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"message":"conflict: unable to delete (must be forced) - container 582f3d5f6854 is using its referenced image 9b0ade5e607f"}`))
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/images/"):
 			f.mu.Lock()
 			f.deleted = append(f.deleted, strings.TrimPrefix(r.URL.Path[strings.Index(r.URL.Path, "/images/"):], "/images/"))
@@ -146,6 +155,49 @@ func TestDockerPullUnanchoredAs(t *testing.T) {
 	}
 	if len(d2.tags) != 1 || d2.tags[0] != "docker.io/team/app:1" {
 		t.Errorf("tags = %v", d2.tags)
+	}
+}
+
+// The pull-created name cannot be dropped while a container created from it
+// runs — the daemon answers 409. That is an image already on the node and in
+// use, not a failed pull: the requested names are applied, the pull succeeds,
+// and the kept name is recorded so retention manages it rather than the image
+// going unrecorded.
+func TestDockerPullKeepsTheNameARunningContainerUses(t *testing.T) {
+	d := &tagDaemon{inUse: true}
+	eng := tagEngine(t, d)
+	recorded, err := eng.Pull(context.Background(), "cache.local/team/app:1", "", "", []string{"docker.io/team/app:1"}, nil, nopSink{})
+	if err != nil {
+		t.Fatalf("pull failed on a name a container uses: %v", err)
+	}
+	if !slices.Contains(recorded, "docker.io/team/app:1") {
+		t.Errorf("recorded = %v, want the requested name", recorded)
+	}
+	if !slices.Contains(recorded, "cache.local/team/app:1") {
+		t.Errorf("recorded = %v, want the kept pull name too, so retention manages it", recorded)
+	}
+}
+
+// A refusal that is not a conflict is still an engine failure.
+func TestDockerPullStillFailsWhenTheUntagFailsOtherwise(t *testing.T) {
+	d := &tagDaemon{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/images/") {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"the daemon fell over"}`))
+			return
+		}
+		d.handler()(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	cli, err := client.NewClientWithOpts(client.WithHost("tcp://"+srv.Listener.Addr().String()), client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := &dockerEngine{name: "d", cli: cli, inflight: map[string]int{}}
+	_, err = eng.Pull(context.Background(), "cache.local/team/app:1", "", "", []string{"docker.io/team/app:1"}, nil, nopSink{})
+	if !errors.Is(err, ErrEngine) {
+		t.Errorf("err = %v, want an engine failure", err)
 	}
 }
 
