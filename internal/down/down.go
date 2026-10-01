@@ -120,6 +120,15 @@ type UntaggedImage struct {
 	RepoDigests []string `json:"repo_digests,omitempty"` // repo@digest references still naming the image
 }
 
+// Holder is an engine that can say whether it holds an image under a name. It
+// is how a finished job is checked before an idempotent replay returns it: a
+// delivery that has since been removed is not replayed as done.
+type Holder interface {
+	// Has reports whether ref names an image in the engine. A name the engine
+	// does not know is (false, nil); an error is an engine that could not say.
+	Has(ctx context.Context, ref string) (bool, error)
+}
+
 // Reconciler is the inventory-reconciliation capability (optional): a snapshot
 // of the daemon's image store, so retention can seed references it has never
 // observed and reap images that have lost every tag. containerd does not

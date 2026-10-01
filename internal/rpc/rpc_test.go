@@ -110,6 +110,11 @@ type fakeCopier struct {
 
 	submits []cpx.Request
 	retries []string
+	gone    bool // StillDelivered answers false for a DONE job
+}
+
+func (w *fakeCopier) StillDelivered(_ context.Context, snap cpx.JobSnapshot) bool {
+	return snap.State != cpx.JobDone || !w.gone
 }
 
 func (w *fakeCopier) Submit(req cpx.Request) (cpx.JobSnapshot, bool, error) {

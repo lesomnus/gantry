@@ -270,6 +270,17 @@ func (e *containerdEngine) WatchUsage(ctx context.Context, sink UsageSink) error
 	}
 }
 
+// Has implements Holder.
+func (e *containerdEngine) Has(ctx context.Context, ref string) (bool, error) {
+	if _, err := e.cli.ImageService().Get(e.ns(ctx), ref); err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (e *containerdEngine) Remove(ctx context.Context, ref string) (RemoveResult, error) {
 	ctx = e.ns(ctx)
 	if err := e.cli.ImageService().Delete(ctx, ref, images.SynchronousDelete()); err != nil {

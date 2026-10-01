@@ -27,6 +27,7 @@ type Copier interface {
 	Submit(req cpx.Request) (cpx.JobSnapshot, bool, error)
 	Retry(id string) (cpx.JobSnapshot, bool, error)
 	Plan(ctx context.Context, req cpx.Request) (cpx.PlanResult, error)
+	StillDelivered(ctx context.Context, snap cpx.JobSnapshot) bool
 }
 
 // GC is the subset of *retention.Manager the services call.

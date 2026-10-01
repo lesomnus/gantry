@@ -106,10 +106,13 @@ func (v *jobService) Add(ctx context.Context, req *pb.JobAddRequest) (*pb.Job, e
 	}
 
 	// An idempotency key replays the remembered job instead of re-running the
-	// move; the key alone wins, like the HTTP Idempotency-Key header.
+	// move; the key alone wins, like the HTTP Idempotency-Key header. A replay
+	// answers what the job did, so a DONE job whose result its target no longer
+	// holds is not replayed: the move runs again, and the key follows the new
+	// job (#35).
 	key := idemKey(ctx)
 	if key != "" {
-		if snap, ok := v.s.jobs.Idem(key); ok {
+		if snap, ok := v.s.jobs.Idem(key); ok && v.s.copier.StillDelivered(ctx, snap) {
 			setCoalesced(ctx, true)
 			return jobToPB(snap), nil
 		}

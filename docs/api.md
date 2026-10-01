@@ -130,6 +130,19 @@ together with the finished job record after `worker.job_ttl` (default `30m`),
 after which the same key is a miss and submits a fresh move. Use it to make a
 client retry (network blip, restart) safe without double-moving an image.
 
+A replay answers what the job did, so a job that ended **`DONE`** is checked
+first: its target is asked whether it still holds the delivery — a registry
+target for the committed digest (one `HEAD`), an engine target for the names the
+job left (the `as` names, or the pull's own). When the target answers that it is
+**gone**, the key is a miss: the move runs again, with `gantry-coalesced:
+false`, and the key follows the new job. Only a definite "not there" re-runs; a
+target that cannot be asked within 5s, or an engine kind that cannot say what it
+holds, replays as before. A job that did not end `DONE` replays unchecked.
+
+The key identifies **a retry of one request**, not a desired state. A client
+that re-applies the same release on purpose should send a new key per
+application — reusing one turns the re-apply into a replay of the earlier run.
+
 ## Dedup key and mutable-tag stability
 
 Coalescing (and idempotency's "identical move" notion) keys on the tuple
