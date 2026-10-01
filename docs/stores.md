@@ -382,6 +382,16 @@ instead of the pull reference — so a cache-fed node keeps the upstream name
 `as` is **engine targets only**; supplying it for a registry target is an error
 (``as` names the image on an engine; store %q is a registry``).
 
+Once the requested names are in place, a `docker` engine drops the name the pull
+itself created — the image was renamed away from it. **One exception:** when the
+pull named the image by digest and a requested name is in that same repository,
+the pull's name stays, and is recorded with the others. To a daemon on the
+containerd image store `repo@sha256:…` and its repository's other names are one
+reference: asked to drop the first it drops them all, and the image with them
+(or refuses while a container runs it). That is the shape of a fleet whose nodes
+pull the cache under the registry its releases name (`downstream_host`), where
+the requested name `repo:tag@sha256:…` differs from the pull's only by the tag.
+
 `as` strings are kept **verbatim** — containerd resolves image names by exact
 match, so normalizing (`docker.io` → `index.docker.io`) would break kubelet
 lookups. `as` participates in the coalescing key `(ref, platforms, source,

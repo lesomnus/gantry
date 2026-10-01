@@ -178,6 +178,64 @@ func TestDockerPullKeepsTheNameARunningContainerUses(t *testing.T) {
 	}
 }
 
+// A requested name in the pull's own repository is held by the pull's name. To
+// the daemon a digest reference and its repository's other names are one
+// reference, so dropping `repo@sha256:…` drops the requested name with it — and
+// the image, when those were all of its names (#39). The pull's name stays and
+// is recorded; nothing is deleted.
+func TestDockerPullKeepsThePullNameOfARequestedNamesRepository(t *testing.T) {
+	raw := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}`)
+	sum := sha256.Sum256(raw)
+	dg := "sha256:" + hex.EncodeToString(sum[:])
+	anchor := &AnchorBlob{MediaType: "application/vnd.oci.image.index.v1+json", Digest: dg, Bytes: raw}
+	ref := "cr.example.com/team/app@" + dg
+
+	for what, as := range map[string][]string{
+		"a digest name":                 {"cr.example.com/team/app:1@" + dg},
+		"a tag":                         {"cr.example.com/team/app:1"},
+		"beside a name of another repo": {"docker.io/team/app:1", "cr.example.com/team/app:1@" + dg},
+	} {
+		t.Run(what, func(t *testing.T) {
+			d := &tagDaemon{}
+			eng := tagEngine(t, d)
+			recorded, err := eng.Pull(context.Background(), ref, dg, "", as, anchor, nopSink{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if len(d.deleted) != 0 {
+				t.Errorf("the pull's name shares a repository with a requested one and was dropped: deleted %v", d.deleted)
+			}
+			for _, n := range append([]string{ref}, as...) {
+				if !slices.Contains(recorded, n) {
+					t.Errorf("recorded = %v, want %s: the daemon holds it", recorded, n)
+				}
+			}
+		})
+	}
+}
+
+// It is the DIGEST form the daemon folds into its repository's other names. A
+// tag the pull created is a reference of its own, and renaming it within its
+// repository still drops it.
+func TestDockerPullStillDropsATagRenamedWithinItsRepository(t *testing.T) {
+	d := &tagDaemon{}
+	eng := tagEngine(t, d)
+	recorded, err := eng.Pull(context.Background(), "cr.example.com/team/app:1", "", "", []string{"cr.example.com/team/app:2"}, nil, nopSink{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.deleted) != 1 || !strings.Contains(d.deleted[0], "cr.example.com/team/app:1") {
+		t.Errorf("the pull's tag must be dropped on a retag, deleted %v", d.deleted)
+	}
+	if len(recorded) != 1 || recorded[0] != "cr.example.com/team/app:2" {
+		t.Errorf("recorded = %v, want only the requested tag", recorded)
+	}
+}
+
 // A refusal that is not a conflict is still an engine failure.
 func TestDockerPullStillFailsWhenTheUntagFailsOtherwise(t *testing.T) {
 	d := &tagDaemon{}
