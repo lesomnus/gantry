@@ -275,7 +275,20 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		// the pull record when nothing else names the content, which removing it
 		// would orphan. Skip when another pull of the same reference is in flight
 		// and racing to tag it.
-		if e.pullCount(ref) == 1 {
+		//
+		// UNLESS A REQUESTED NAME LIVES IN THE PULL'S OWN REPOSITORY. To a daemon
+		// on the containerd image store a digest reference and the other names of
+		// its repository are ONE reference: asked to drop `repo@sha256:…` it drops
+		// `repo:tag@sha256:…` and `repo:tag` with it, and the image once those
+		// were all of its names — or refuses the lot while a container runs it.
+		// That is not a corner. It is every delivery on a fleet whose nodes pull
+		// the cache by the registry the release names (`downstream_host`): the
+		// image arrived, was named, and was gone, with the job DONE (#39). There
+		// the pull's name is what holds the requested one, so it stays, and is
+		// recorded like any other name the daemon holds.
+		if sharesRepository(ref, names) {
+			recorded = append(recorded, ref)
+		} else if e.pullCount(ref) == 1 {
 			if _, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{}); err != nil {
 				if !cerrdefs.IsConflict(err) {
 					return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "untag %q", ref))
@@ -297,6 +310,31 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		recorded = []string{pull_ref}
 	}
 	return recorded, nil
+}
+
+// sharesRepository reports whether dropping the pull-created digest reference
+// would take a requested name with it: ref is a digest reference, and one of
+// names is in its repository.
+//
+// A TAG the pull created is not this case and is still dropped: `repo:1` and
+// `repo:2` are two references to the daemon, and renaming one to the other is
+// an ordinary retag. It is the digest form that the daemon folds into its
+// repository's other names, so that is the only form asked about.
+func sharesRepository(ref string, names []string) bool {
+	r, err := name.ParseReference(ref)
+	if err != nil {
+		return false
+	}
+	if _, ok := r.(name.Digest); !ok {
+		return false
+	}
+	repo := r.Context().Name()
+	for _, n := range names {
+		if nr, err := name.ParseReference(n); err == nil && nr.Context().Name() == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // loadDigestNames registers digest-named references for the anchor manifest by

@@ -74,6 +74,49 @@ jobs:
           GANTRY_E2E_REGISTRY: ${{ matrix.registry }}
         run: go test -tags e2e -race -run TestL2 ./internal/e2e/...
 
+  # Digest `as` names on a DOCKER engine -- the names a robot's jobspec uses --
+  # need the daemon to be on the containerd image store. The runner's daemon is
+  # not: it comes as Docker 28 on the classic store (overlay2), which refuses
+  # such a name before pulling. So every test of them against a real docker
+  # daemon self-skipped in e2e-docker above, green, and the first place the
+  # path ran against a daemon was a robot. #39 was found there: a delivery that
+  # reported DONE and left nothing on the node.
+  #
+  # This job flips the runner's own daemon to the containerd image store --
+  # what docker-ce installed fresh gives a robot -- and runs the tests that
+  # need it. It checks that the switch took and that the test PASSED, by name:
+  # a test that skips is a test that is green.
+  e2e-docker-containerd-store:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Switch the daemon to the containerd image store
+        run: |
+          set -eu
+          # Keep what the runner image configured; add the one feature.
+          if [ -s /etc/docker/daemon.json ]; then
+            sudo jq '.features["containerd-snapshotter"] = true' /etc/docker/daemon.json > daemon.json
+          else
+            echo '{"features":{"containerd-snapshotter":true}}' > daemon.json
+          fi
+          sudo install -m 0644 daemon.json /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info --format '{{.ServerVersion}} {{.Driver}} {{.DriverStatus}}'
+          docker info --format '{{range .DriverStatus}}{{if eq (index . 0) "driver-type"}}{{index . 1}}{{end}}{{end}}' \
+            | grep -qx 'io.containerd.snapshotter.v1'
+      - name: Pre-pull the registry image
+        run: docker pull registry:2
+      - name: E2E (real daemon, containerd image store)
+        env:
+          GANTRY_E2E_REGISTRY: registry:2
+        run: |
+          set -euo pipefail
+          go test -tags e2e -race -v -run 'TestL2DigestAs' ./internal/e2e/... | tee l2.txt
+          grep -q -- '--- PASS: TestL2DigestAsInThePullsOwnRepository' l2.txt
+
   # containerd image-store features (digest `as`, anchored pull) that otherwise
   # only run in the devcontainer: provision containerd on the runner and let the
   # existing internal/down containerd integration tests stop self-skipping.
@@ -132,7 +175,7 @@ jobs:
   # too, so promotion waits until unit/L1/L2/containerd are green; the in-Dockerfile
   # `test` stage (no -race) is therefore not rebaked here.
   verify:
-    needs: [dist, test, e2e-docker, e2e-containerd]
+    needs: [dist, test, e2e-docker, e2e-docker-containerd-store, e2e-containerd]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
