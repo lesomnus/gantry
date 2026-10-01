@@ -277,7 +277,16 @@ func (e *dockerEngine) Pull(ctx context.Context, ref string, digest string, plat
 		// and racing to tag it.
 		if e.pullCount(ref) == 1 {
 			if _, err := e.cli.ImageRemove(ctx, ref, image.RemoveOptions{}); err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "untag %q", ref))
+				if !cerrdefs.IsConflict(err) {
+					return nil, fmt.Errorf("%w: %w", ErrEngine, z.Err(err, "untag %q", ref))
+				}
+				// A container was created from this very name — the image was
+				// already here, running, before this pull. The name has to stay
+				// while it does, and the requested names are already applied, so
+				// the pull succeeded. The name is recorded too: retention keeps it
+				// while the container uses it and collects it after, instead of it
+				// sitting on the daemon unmanaged.
+				recorded = append(recorded, ref)
 			}
 		}
 	}
