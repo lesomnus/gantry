@@ -38,6 +38,26 @@ the default `go test ./...` compiles and runs **L1 only**. Every tier is pure Go
 with no new dependencies (`go-containerregistry`, `notation-go`, `oras`,
 `docker/docker`, `bbolt`, `grpc`); CGO stays disabled.
 
+#### The live tests own the daemon they run on
+
+"L1 only" is true of `go test ./...` **when no docker daemon is reachable**. When
+one is, three packages stop skipping and act on it: `internal/down` and
+`internal/retention` pull and remove `alpine` / `busybox` and start containers
+named `gantry-*`, and `internal/enforce` (`TestEnforceDockerE2E`) starts the
+enforcement watcher with a policy that trusts nothing. That watcher reconciles
+**every container already running on the daemon** — quarantine is `docker rm -f`
+and then the image — which is nothing on a CI runner and was a whole
+workstation's devcontainers the one time it ran on one (#41).
+
+The watcher subtest now refuses to start when the daemon runs containers it did
+not start, and says which. Treat that as the backstop it is, and give the live
+tests a daemon of their own:
+
+- the **devcontainer** already does (`DOCKER_HOST` is its own dind);
+- anywhere else, point `DOCKER_HOST` at a throwaway daemon, or at nothing —
+  `DOCKER_HOST=tcp://127.0.0.1:1 go test ./...` makes every live test skip and
+  leaves L1.
+
 ### Running it
 
 | Command | Tier | Needs |
