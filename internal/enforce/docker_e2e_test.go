@@ -137,6 +137,32 @@ func TestEnforceDockerE2E(t *testing.T) {
 	})
 
 	t.Run("untrusted verdict is quarantined by the watcher", func(t *testing.T) {
+		// THE WATCHER DOES NOT WAIT FOR A START EVENT. It reconciles every
+		// container already running on the daemon, and with the verifier stubbed
+		// unavailable and on_unavailable=kill, every one of them is an image
+		// with no trusted verdict: removed, and its image after it. On a CI
+		// runner the daemon is this test's alone and that is nothing. On a
+		// workstation it was eleven devcontainers and the sessions inside them
+		// (#41) — while this subtest FAILED, because the watcher spent its
+		// thirty seconds on them.
+		//
+		// So the daemon has to be this test's before the watcher starts. A
+		// refusal, not a filter: the reconcile is what enforcement is, and a
+		// test that taught it to look away would be testing something else.
+		cs, err := cli.ContainerList(ctx, container.ListOptions{})
+		if err != nil {
+			t.Fatalf("list running containers: %v", err)
+		}
+		var names []string
+		for _, c := range cs {
+			names = append(names, c.Names...)
+		}
+		if others := bystanders(names); len(others) > 0 {
+			t.Skipf("the daemon runs %d container(s) this test did not start (%s); the watcher would quarantine "+
+				"every one of them. Run it on a daemon of its own: the devcontainer's, or one named by DOCKER_HOST",
+				len(others), strings.Join(others, ", "))
+		}
+
 		digest := ensureImage(t)
 		if err := cache.Put(digest, false, config.VerifyRequire, ""); err != nil {
 			t.Fatal(err)
@@ -155,4 +181,40 @@ func TestEnforceDockerE2E(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 	})
+}
+
+// ownPrefix names the containers this test starts (see `run` above).
+const ownPrefix = "/gantry-e2e-"
+
+// bystanders are the running containers this test did not start: on any daemon
+// but one of the test's own, somebody's work.
+func bystanders(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if !strings.HasPrefix(n, ownPrefix) {
+			out = append(out, strings.TrimPrefix(n, "/"))
+		}
+	}
+	return out
+}
+
+// The refusal above rests on telling this test's containers from anybody
+// else's, so that is pinned without a daemon. A container merely NAMED like
+// gantry — the service itself, on a robot or in a harness — is a bystander.
+func TestBystanders(t *testing.T) {
+	got := bystanders([]string{
+		"/gantry-e2e-allow",
+		"/hday-os_devcontainer-dev-1",
+		"/gantry-e2e-watch",
+		"/gantry",
+		"/gantry-mgr-test",
+		"/cld",
+	})
+	want := []string{"hday-os_devcontainer-dev-1", "gantry", "gantry-mgr-test", "cld"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("bystanders = %v, want %v", got, want)
+	}
+	if b := bystanders([]string{"/gantry-e2e-allow", "/gantry-e2e-watch"}); len(b) != 0 {
+		t.Errorf("the test's own containers were taken for bystanders: %v", b)
+	}
 }

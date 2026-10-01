@@ -11,7 +11,9 @@ REG ?= registry:2
 build:
 	CGO_ENABLED=0 $(GO) build ./...
 
-## test: unit tests + the hermetic L1 E2E suite (no infra)
+## test: unit tests + the hermetic L1 E2E suite. With a docker daemon reachable
+## the live tests run against it too; see docs/e2e-testing.md before running this
+## anywhere the daemon is not yours alone.
 test:
 	$(GO) test -race ./...
 
