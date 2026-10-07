@@ -9,12 +9,12 @@
 package tokenfile
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"strings"
-	"sync"
 
 	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/lesomnus/xli/cfg"
 )
 
 // Source is a bearer token read from disk, re-read when the file changes.
@@ -38,157 +38,88 @@ import (
 // staleness window: there is no interval to tune and no period during which a
 // replaced token is known and not used.
 //
-// A watcher or a ticker would be a goroutine, a lifecycle and a set of failure
-// modes -- an inotify watch that a rename breaks, a tick that fires while the
-// writer is halfway through -- bought in exchange for saving a stat.
+// # The rules are cfg's
 //
-// # What is compared
+// The file is read as `${file:path}` is in a configuration xli's cfg reads: a
+// [cfg.SecretOf]. Those rules were this package's before they were cfg's --
+// cr, gantry and bosun each held a copy, and bosun's rotation test failing one
+// run in three (Holiday-Robot/bosun#19) is how they came to agree -- so there
+// is one copy now, and these are its terms:
 //
-// The FILE, and then its size and modification time. Identity first because it
-// is the one that cannot be fooled: write-and-rename is how a token should be
-// published -- it is what makes the replacement atomic for a reader -- and a
-// rename always puts a different file at the path. Size and time are a second
-// look, for a writer that appends to the one already there.
-//
-// Time alone is not enough, and the gap is not hypothetical. Every bearer a
-// given issuer mints is the same length, filesystems record modification times
-// coarsely, and two writes inside one tick then carry the same one: the
-// rotation is invisible, not for a moment but until something else about the
-// file moves. bosun holds a second implementation of this idea and its test for
-// exactly that case failed about one run in three
-// (Holiday-Robot/bosun#19); the two now compare the same things.
+//   - the FILE is compared, and then its size and modification time: a rename,
+//     which is how a token should be published, always puts a different file
+//     at the path, while every bearer one issuer mints is the same length and
+//     two writes inside one tick of a coarse clock carry the same time;
+//   - a read that fails after a good one keeps the token in hand, since a
+//     publisher replacing the file is briefly a file that cannot be read;
+//   - an empty file is a failed read, and so is one over 64 KiB or one that is
+//     not a regular file.
 //
 // A writer that rewrites IN PLACE with the same length inside one tick is still
 // not seen. That is the contract saying `rename` rather than a reason to hash
 // the contents on every request, and TestAnInPlaceRewriteIsNotSeen holds it
 // there so it stays a decision.
 type Source struct {
-	path string
-
-	mu    sync.Mutex
-	token string
-	// seen is the file the held token was read from, kept whole so os.SameFile
-	// can be asked whether the path still names it.
-	seen os.FileInfo
-	read bool
+	token cfg.SecretOf[string, trimmed]
+	// err is why the path could not be named at all.
+	err error
 }
 
 var _ authn.Authenticator = (*Source)(nil)
 
-// New is the token in this file.
-func New(path string) *Source { return &Source{path: path} }
+// New is the token in this file. The file is read now, and a file that cannot
+// be read yet is not an error until the token is asked for.
+func New(path string) *Source {
+	s := &Source{}
+	switch {
+	case path == "":
+		s.err = errors.New("token file: no path")
+	case strings.ContainsRune(path, '}'):
+		// A reference ends at its `}`, so this one would be read as the
+		// token itself rather than as where it is.
+		s.err = fmt.Errorf("token file %s: a path with a } in it cannot be read", path)
+	default:
+		s.err = s.token.UnmarshalText([]byte("${file:" + path + "}"))
+	}
+	return s
+}
 
 // Authorization answers the current token, reading the file when it has changed
-// since the last look.
-//
-// A read that fails **after** one has succeeded keeps the token it has and says
-// nothing: a writer replacing the file is briefly a file that cannot be read,
-// and a pull that failed for that would be a pull failing because a credential
-// was being renewed. A read that fails with nothing to fall back on is an
-// error, since there is no credential to send.
+// since the last look. With nothing read yet to fall back on, it is an error
+// naming the file: there is no credential to send.
 func (t *Source) Authorization() (*authn.AuthConfig, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if changed, err := t.stale(); err != nil {
-		if !t.read {
-			return nil, err
-		}
-	} else if changed {
-		if err := t.reload(); err != nil && !t.read {
-			return nil, err
-		}
-	}
-
-	if !t.read {
-		return nil, fmt.Errorf("token file %s: never read", t.path)
+	token, err := t.Token()
+	if err != nil {
+		return nil, err
 	}
 
 	// RegistryToken and not Password: ggcr sends this as `Authorization: Bearer`
 	// whichever scheme the registry challenged with, which is what a registry
 	// that does not implement the bearer-token endpoint still wants to receive.
-	return &authn.AuthConfig{RegistryToken: t.token}, nil
+	return &authn.AuthConfig{RegistryToken: token}, nil
 }
 
 // Token is the current token, for a caller that wants the string rather than
 // an [authn.AuthConfig] -- oras carries it in a credential of its own shape.
 func (t *Source) Token() (string, error) {
-	cfg, err := t.Authorization()
-	if err != nil {
-		return "", err
+	if t.err != nil {
+		return "", t.err
 	}
 
-	return cfg.RegistryToken, nil
+	return t.token.Value()
 }
 
-// stale reports whether the file differs from what was last read.
-func (t *Source) stale() (bool, error) {
-	fi, err := os.Stat(t.path)
-	if err != nil {
-		return false, fmt.Errorf("token file %s: %w", t.path, err)
+// trimmed is a token without the whitespace around it: a token written by
+// `echo` or a heredoc has a newline, and a header with one in it is a header
+// the server rejects for a reason nobody guesses. Nothing but whitespace is no
+// token, and a failed read.
+type trimmed struct{}
+
+func (trimmed) Decode(b []byte) (string, error) {
+	v := strings.TrimSpace(string(b))
+	if v == "" {
+		return "", errors.New("empty")
 	}
 
-	if !t.read {
-		return true, nil
-	}
-
-	return !os.SameFile(t.seen, fi) ||
-		fi.Size() != t.seen.Size() ||
-		!fi.ModTime().Equal(t.seen.ModTime()), nil
-}
-
-// reload reads the file and records what it was when read.
-//
-// The stat is taken from the same handle the contents came from, so a file
-// replaced between the two is not recorded as the one that was read -- the next
-// request sees a difference and reads again, rather than holding stale content
-// under a fresh stamp.
-func (t *Source) reload() error {
-	f, err := os.Open(t.path)
-	if err != nil {
-		return fmt.Errorf("token file %s: %w", t.path, err)
-	}
-	defer f.Close()
-
-	b, err := readAllLimited(f)
-	if err != nil {
-		return fmt.Errorf("token file %s: %w", t.path, err)
-	}
-
-	fi, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("token file %s: %w", t.path, err)
-	}
-
-	// Trailing whitespace, because a token written by `echo` or a heredoc has a
-	// newline and a header with one in it is a header the server rejects for a
-	// reason nobody guesses.
-	token := strings.TrimSpace(string(b))
-	if token == "" {
-		return fmt.Errorf("token file %s: empty", t.path)
-	}
-
-	t.token, t.seen, t.read = token, fi, true
-
-	return nil
-}
-
-// maxTokenFile is what will be read from a token file.
-//
-// A JWS is a few kilobytes at most. The limit is here because this path reads a
-// file whose contents somebody else writes, on every request, and a file that
-// is not a token should be an error rather than however much memory it is.
-const maxTokenFile = 64 << 10
-
-func readAllLimited(f *os.File) ([]byte, error) {
-	b := make([]byte, maxTokenFile+1)
-	n, err := f.Read(b)
-	if err != nil && n == 0 {
-		return nil, err
-	}
-	if n > maxTokenFile {
-		return nil, fmt.Errorf("larger than %d bytes", maxTokenFile)
-	}
-
-	return b[:n], nil
+	return v, nil
 }
