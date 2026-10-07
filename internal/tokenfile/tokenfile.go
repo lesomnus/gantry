@@ -9,10 +9,6 @@
 package tokenfile
 
 import (
-	"errors"
-	"fmt"
-	"strings"
-
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/lesomnus/xli/cfg"
 )
@@ -55,12 +51,16 @@ import (
 //   - an empty file is a failed read, and so is one over 64 KiB or one that is
 //     not a regular file.
 //
+// The whitespace around the token is not part of it (cfg.TrimSpaceDecoder): a
+// token written by `echo` or a heredoc has a newline, and a header with one in
+// it is a header the server rejects for a reason nobody guesses.
+//
 // A writer that rewrites IN PLACE with the same length inside one tick is still
 // not seen. That is the contract saying `rename` rather than a reason to hash
 // the contents on every request, and TestAnInPlaceRewriteIsNotSeen holds it
 // there so it stays a decision.
 type Source struct {
-	token cfg.SecretOf[string, trimmed]
+	token cfg.SecretOf[string, cfg.TrimSpaceDecoder]
 	// err is why the path could not be named at all.
 	err error
 }
@@ -71,16 +71,7 @@ var _ authn.Authenticator = (*Source)(nil)
 // be read yet is not an error until the token is asked for.
 func New(path string) *Source {
 	s := &Source{}
-	switch {
-	case path == "":
-		s.err = errors.New("token file: no path")
-	case strings.ContainsRune(path, '}'):
-		// A reference ends at its `}`, so this one would be read as the
-		// token itself rather than as where it is.
-		s.err = fmt.Errorf("token file %s: a path with a } in it cannot be read", path)
-	default:
-		s.err = s.token.UnmarshalText([]byte("${file:" + path + "}"))
-	}
+	s.err = s.token.SetFile(path)
 	return s
 }
 
@@ -107,19 +98,4 @@ func (t *Source) Token() (string, error) {
 	}
 
 	return t.token.Value()
-}
-
-// trimmed is a token without the whitespace around it: a token written by
-// `echo` or a heredoc has a newline, and a header with one in it is a header
-// the server rejects for a reason nobody guesses. Nothing but whitespace is no
-// token, and a failed read.
-type trimmed struct{}
-
-func (trimmed) Decode(b []byte) (string, error) {
-	v := strings.TrimSpace(string(b))
-	if v == "" {
-		return "", errors.New("empty")
-	}
-
-	return v, nil
 }
