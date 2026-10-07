@@ -19,7 +19,8 @@ require (
 	github.com/lesomnus/mkot/otlp v0.0.0-20260702145326-2198e788ed64
 	github.com/lesomnus/mkot/pretty v0.0.0-20260702145326-2198e788ed64
 	github.com/lesomnus/otx v0.0.0-20260531101103-be4e3034ac45
-	github.com/lesomnus/xli v0.0.0-20260415201908-e5f4624a24b7
+	github.com/lesomnus/xli v0.0.0-20261006113808-3e5316f8b7c0
+	github.com/lesomnus/xli/cfg v0.1.2
 	github.com/lesomnus/z v0.0.0-20260531102454-3f1853bb4278
 	github.com/notaryproject/notation-core-go v1.3.0
 	github.com/notaryproject/notation-go v1.3.2
